@@ -351,3 +351,225 @@ fn test_invalid_sample_rate_nan() {
 fn test_invalid_sample_rate_inf() {
     assert!(Thunder::new(500.0, f32::INFINITY).is_err());
 }
+
+// ---------------------------------------------------------------------------
+// Modal synthesis
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_modal_bank_impulse_response() {
+    let specs = vec![
+        ModeSpec {
+            frequency: 440.0,
+            amplitude: 1.0,
+            decay: 0.5,
+        },
+        ModeSpec {
+            frequency: 880.0,
+            amplitude: 0.5,
+            decay: 0.3,
+        },
+    ];
+    let mut bank = ModalBank::new(&specs, SR).unwrap();
+    assert_eq!(bank.mode_count(), 2);
+
+    // Feed impulse
+    let first = bank.process_sample(1.0);
+    assert!(first.is_finite());
+    assert!(first.abs() > 0.0);
+
+    // Feed zeros — should decay
+    let mut last = first;
+    for _ in 0..1000 {
+        last = bank.process_sample(0.0);
+        assert!(last.is_finite());
+    }
+    // After many samples, should be decaying
+    assert!(last.abs() < first.abs());
+}
+
+#[test]
+fn test_modal_bank_all_patterns() {
+    let props = Material::Metal.properties();
+    let patterns = [
+        (ModePattern::Harmonic, 6),
+        (ModePattern::Beam, 8),
+        (ModePattern::Plate, 10),
+        (ModePattern::StiffString, 6),
+        (ModePattern::Damped, 4),
+    ];
+    for (pattern, count) in &patterns {
+        let specs = garjan::modal::generate_modes(&props, *pattern, *count, 1.0);
+        assert!(!specs.is_empty(), "no modes for {:?}", pattern);
+        let mut bank = ModalBank::new(&specs, SR).unwrap();
+        let out = bank.process_sample(1.0);
+        assert!(out.is_finite(), "NaN for {:?}", pattern);
+    }
+}
+
+#[test]
+fn test_modal_bank_nyquist_guard() {
+    let specs = vec![
+        ModeSpec {
+            frequency: 100.0,
+            amplitude: 1.0,
+            decay: 0.5,
+        },
+        ModeSpec {
+            frequency: 30000.0, // above Nyquist at 44100
+            amplitude: 1.0,
+            decay: 0.5,
+        },
+    ];
+    let bank = ModalBank::new(&specs, SR).unwrap();
+    assert_eq!(bank.mode_count(), 1); // only the 100 Hz mode
+}
+
+#[test]
+fn test_modal_bank_reset() {
+    let specs = vec![ModeSpec {
+        frequency: 440.0,
+        amplitude: 1.0,
+        decay: 1.0,
+    }];
+    let mut bank = ModalBank::new(&specs, SR).unwrap();
+    bank.process_sample(1.0);
+    assert!(bank.process_sample(0.0).abs() > 0.0);
+    bank.reset();
+    assert_eq!(bank.process_sample(0.0), 0.0);
+}
+
+#[test]
+fn test_exciter_impulse() {
+    let mut exc = Exciter::new(ExcitationType::Impulse, 1.0);
+    exc.trigger();
+    assert!(exc.is_active());
+    let s0 = exc.next_sample();
+    assert_eq!(s0, 1.0);
+    let s1 = exc.next_sample();
+    assert_eq!(s1, 0.0);
+    assert!(!exc.is_active());
+}
+
+#[test]
+fn test_exciter_noise_burst() {
+    let mut exc = Exciter::new(
+        ExcitationType::NoiseBurst {
+            duration_samples: 100,
+        },
+        0.5,
+    );
+    exc.trigger();
+    let mut nonzero = 0;
+    for _ in 0..100 {
+        if exc.next_sample().abs() > 0.0 {
+            nonzero += 1;
+        }
+    }
+    assert!(nonzero > 50); // most samples should be nonzero
+    assert_eq!(exc.next_sample(), 0.0); // spent
+}
+
+#[test]
+fn test_exciter_half_sine() {
+    let mut exc = Exciter::new(
+        ExcitationType::HalfSine {
+            duration_samples: 50,
+        },
+        1.0,
+    );
+    exc.trigger();
+    let mut peak = 0.0f32;
+    for _ in 0..50 {
+        peak = peak.max(exc.next_sample());
+    }
+    assert!(peak > 0.5); // should reach near 1.0 at midpoint
+    assert_eq!(exc.next_sample(), 0.0); // spent
+}
+
+// ---------------------------------------------------------------------------
+// Impact with modal bank
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_impact_interaction() {
+    let mut impact = Impact::new_interaction(Material::Metal, Material::Glass, SR).unwrap();
+    let samples = impact.synthesize(ImpactType::Strike).unwrap();
+    assert!(!samples.is_empty());
+    assert!(samples.iter().all(|s| s.is_finite()));
+}
+
+#[test]
+fn test_impact_velocity() {
+    let mut soft = Impact::new(Material::Metal, SR).unwrap();
+    let mut hard = Impact::new(Material::Metal, SR).unwrap();
+    let soft_samples = soft.synthesize_velocity(ImpactType::Strike, 0.1).unwrap();
+    let hard_samples = hard.synthesize_velocity(ImpactType::Strike, 1.0).unwrap();
+    let soft_energy: f32 = soft_samples.iter().map(|s| s * s).sum();
+    let hard_energy: f32 = hard_samples.iter().map(|s| s * s).sum();
+    assert!(hard_energy > soft_energy);
+}
+
+#[test]
+fn test_impact_shatter_has_debris() {
+    let mut impact = Impact::new(Material::Glass, SR).unwrap();
+    let shatter = impact.synthesize(ImpactType::Shatter).unwrap();
+    let mut impact2 = Impact::new(Material::Glass, SR).unwrap();
+    let tap = impact2.synthesize(ImpactType::Tap).unwrap();
+    let shatter_energy: f32 = shatter.iter().map(|s| s * s).sum();
+    let tap_energy: f32 = tap.iter().map(|s| s * s).sum();
+    assert!(shatter_energy > tap_energy);
+}
+
+#[test]
+fn test_impact_deterministic() {
+    let mut a = Impact::new(Material::Wood, SR).unwrap();
+    let mut b = Impact::new(Material::Wood, SR).unwrap();
+    let sa = a.synthesize(ImpactType::Strike).unwrap();
+    let sb = b.synthesize(ImpactType::Strike).unwrap();
+    assert_eq!(sa.len(), sb.len());
+    assert!(sa.iter().zip(sb.iter()).all(|(a, b)| (a - b).abs() < 1e-10));
+}
+
+#[test]
+fn test_serde_roundtrip_modal_bank() {
+    let specs = vec![ModeSpec {
+        frequency: 440.0,
+        amplitude: 1.0,
+        decay: 0.5,
+    }];
+    let bank = ModalBank::new(&specs, SR).unwrap();
+    let json = serde_json::to_string(&bank).unwrap();
+    let b2: ModalBank = serde_json::from_str(&json).unwrap();
+    let json2 = serde_json::to_string(&b2).unwrap();
+    assert_eq!(json, json2);
+}
+
+#[test]
+fn test_serde_roundtrip_mode_spec() {
+    let spec = ModeSpec {
+        frequency: 440.0,
+        amplitude: 0.8,
+        decay: 0.3,
+    };
+    let json = serde_json::to_string(&spec).unwrap();
+    let s2: ModeSpec = serde_json::from_str(&json).unwrap();
+    assert_eq!(spec.frequency, s2.frequency);
+}
+
+#[test]
+fn test_serde_roundtrip_mode_pattern() {
+    let json = serde_json::to_string(&ModePattern::Plate).unwrap();
+    let p2: ModePattern = serde_json::from_str(&json).unwrap();
+    assert_eq!(p2, ModePattern::Plate);
+}
+
+#[test]
+fn test_serde_roundtrip_excitation_type() {
+    let et = ExcitationType::NoiseBurst {
+        duration_samples: 100,
+    };
+    let json = serde_json::to_string(&et).unwrap();
+    let e2: ExcitationType = serde_json::from_str(&json).unwrap();
+    assert_eq!(et, e2);
+}

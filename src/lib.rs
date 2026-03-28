@@ -59,6 +59,7 @@ pub mod fire;
 pub mod impact;
 pub mod material;
 mod math;
+pub mod modal;
 mod rng;
 pub mod texture;
 pub mod water;
@@ -70,6 +71,7 @@ pub mod prelude {
     pub use crate::fire::Fire;
     pub use crate::impact::{Impact, ImpactType};
     pub use crate::material::Material;
+    pub use crate::modal::{ExcitationType, Exciter, ModalBank, ModePattern, ModeSpec};
     pub use crate::texture::{AmbientTexture, TextureType};
     pub use crate::water::{Water, WaterType};
     pub use crate::weather::{Rain, RainIntensity, Thunder, Wind};
@@ -94,5 +96,10 @@ mod assert_traits {
         _assert_send_sync::<crate::water::Water>();
         _assert_send_sync::<crate::water::WaterType>();
         _assert_send_sync::<crate::texture::AmbientTexture>();
+        _assert_send_sync::<crate::modal::ModalBank>();
+        _assert_send_sync::<crate::modal::ModeSpec>();
+        _assert_send_sync::<crate::modal::ModePattern>();
+        _assert_send_sync::<crate::modal::ExcitationType>();
+        _assert_send_sync::<crate::modal::Exciter>();
     }
 }

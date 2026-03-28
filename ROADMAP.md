@@ -14,37 +14,35 @@
 - [x] `no_std` support, Send + Sync, serde on all types
 - [x] Criterion benchmarks
 
-**Known gaps**: naad dependency declared but unused. Manual noise averaging instead
-of proper filters. No block-based streaming. No parameter interpolation.
+---
+
+## v0.2.0 (current) — naad Integration & Core DSP
+
+- [x] Integrate naad biquad/SVF filters into all synthesis modules
+- [x] Replace noise-averaging with proper filter chains (LP, HP, BP, SVF)
+- [x] Use naad noise generators (white, pink, brown) as noise sources
+- [x] DC blocking filter on all synthesis outputs
+- [x] Block-based streaming API: `process_block(&mut self, output: &mut [f32])`
+- [x] Dual code paths: naad-backend (default) + manual fallback (no_std)
+- [x] Sample rate validation on all constructors
+- [ ] Parameter smoothing (one-pole filter on control parameters) — deferred to v0.9
+- [ ] Use hisab easing functions for envelope shaping — deferred to v0.3
+- [ ] Fade-in/fade-out on all continuous synthesizers — deferred to v0.9
 
 ---
 
-## v0.2.0 — naad Integration & Core DSP
+## v0.3.0 (current) — Modal Synthesis & Enhanced Impact
 
-Foundational upgrade: replace manual DSP with naad primitives, add streaming API.
-
-- [ ] Integrate naad biquad/SVF filters into weather, water, texture modules
-- [ ] Replace noise-averaging low-pass with proper filter chains
-- [ ] Use naad noise generators (white, pink, brown) as noise sources
-- [ ] DC blocking filter on all synthesis outputs
-- [ ] Block-based streaming API: `synthesize_block(&mut self, output: &mut [f32])`
-- [ ] Parameter smoothing (one-pole filter on control parameters)
-- [ ] Use hisab easing functions for envelope shaping
-- [ ] Fade-in/fade-out on all continuous synthesizers (click-free start/stop)
-
----
-
-## v0.3.0 — Modal Synthesis & Enhanced Impact
-
-Physical modeling upgrade for rigid-body sounds.
-
-- [ ] Modal synthesis engine: bank of parallel damped resonators
-- [ ] Upgrade Impact to modal response (frequency, amplitude, decay per mode)
-- [ ] Material interaction: material-A-strikes-material-B cross-coupling
-- [ ] Destruction/fracture: sustained collapse sequences (not just single hit)
-- [ ] Shatter model: cascading modal events with debris scatter
-- [ ] Karplus-Strong for metallic ping and plucked-string transients
-- [ ] Excitation models: impulse, noise burst, friction input
+- [x] Modal synthesis engine: bank of N parallel damped complex resonators
+- [x] 5 mode patterns: Harmonic, Beam, Plate, StiffString, Damped
+- [x] Material-to-mode mapping for all 10 materials with frequency-dependent damping
+- [x] Upgrade Impact to modal response (multi-mode resonance replaces single sin())
+- [x] Material interaction: `new_interaction(striker, surface)` constructor
+- [x] Velocity-sensitive impacts: `synthesize_velocity(type, velocity)`
+- [x] Excitation models: Impulse, NoiseBurst, HalfSine
+- [x] Shatter redesign: primary impact + debris cascade (3-8 events)
+- [ ] Destruction/fracture: sustained collapse sequences — deferred to v0.4+
+- [ ] Karplus-Strong for metallic ping and plucked-string transients — deferred to v0.4+
 
 ---
 

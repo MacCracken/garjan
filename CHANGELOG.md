@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-03-28
+
+### Added
+
+- **Modal synthesis engine** (`src/modal.rs`):
+  - `ModalBank`: bank of N parallel damped complex resonators
+  - `ModeSpec`: user-facing mode specification (frequency, amplitude, decay)
+  - `ModePattern` enum: `Harmonic`, `Beam`, `Plate`, `StiffString`, `Damped`
+  - `generate_modes()`: generates mode specs from material properties with frequency-dependent damping
+  - `Exciter` with `ExcitationType`: `Impulse`, `NoiseBurst`, `HalfSine`
+  - Pre-computed free-free beam ratios for physically accurate wood/marimba modes
+- **Material mode configuration**: `Material::mode_config()` maps each of 10 materials to its modal pattern, mode count, and damping factor
+- **Enhanced Impact synthesis**:
+  - Now uses `ModalBank` for resonance instead of single sinusoid
+  - `Impact::new_interaction(striker, surface, sample_rate)` for material-on-material impacts
+  - `Impact::synthesize_velocity(impact_type, velocity)` for velocity-sensitive impacts
+  - Redesigned Shatter: primary impact + 3-8 debris cascade events within 200ms
+  - Per-ImpactType excitation: Tap=HalfSine, Strike=NoiseBurst(3ms), Crash=NoiseBurst(1ms)
+- Re-added `cos` and `sqrt` to math compatibility layer (needed for mode coefficients)
+- 15 new tests: modal bank, exciter, interaction, velocity, determinism, serde roundtrips
+- 3 new benchmarks: `modal_bank_8_modes_512`, `impact_metal_strike`, `impact_glass_shatter`
+
 ## [0.2.0] - 2026-03-28
 
 ### Changed

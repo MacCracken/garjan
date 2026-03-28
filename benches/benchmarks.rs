@@ -96,6 +96,47 @@ fn bench_process_block_wind_512(c: &mut Criterion) {
     });
 }
 
+fn bench_modal_bank_8_modes_512(c: &mut Criterion) {
+    c.bench_function("modal_bank_8_modes_512", |b| {
+        let specs: Vec<_> = (1..=8)
+            .map(|k| garjan::modal::ModeSpec {
+                frequency: 440.0 * k as f32,
+                amplitude: 1.0 / k as f32,
+                decay: 0.5,
+            })
+            .collect();
+        let mut bank = garjan::modal::ModalBank::new(&specs, SR).unwrap();
+        let excitation = vec![0.0f32; 512];
+        let mut output = vec![0.0f32; 512];
+        // Prime with impulse
+        bank.process_sample(1.0);
+        b.iter(|| {
+            bank.process_block(&excitation, &mut output);
+            black_box(&output);
+        });
+    });
+}
+
+fn bench_impact_metal_strike(c: &mut Criterion) {
+    c.bench_function("impact_metal_strike", |b| {
+        let mut impact = Impact::new(Material::Metal, SR).unwrap();
+        b.iter(|| {
+            let samples = impact.synthesize(ImpactType::Strike).unwrap();
+            black_box(samples);
+        });
+    });
+}
+
+fn bench_impact_glass_shatter(c: &mut Criterion) {
+    c.bench_function("impact_glass_shatter", |b| {
+        let mut impact = Impact::new(Material::Glass, SR).unwrap();
+        b.iter(|| {
+            let samples = impact.synthesize(ImpactType::Shatter).unwrap();
+            black_box(samples);
+        });
+    });
+}
+
 criterion_group!(
     benches,
     bench_thunder_1s,
@@ -107,6 +148,9 @@ criterion_group!(
     bench_water_waves_1s,
     bench_forest_texture_1s,
     bench_process_block_wind_512,
+    bench_modal_bank_8_modes_512,
+    bench_impact_metal_strike,
+    bench_impact_glass_shatter,
 );
 
 criterion_main!(benches);

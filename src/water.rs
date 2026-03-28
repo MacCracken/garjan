@@ -124,28 +124,21 @@ impl Water {
     #[inline]
     fn process_stream(&mut self, output: &mut [f32]) {
         let amp = self.intensity * 0.3;
-        for sample in output.iter_mut() {
-            #[cfg(feature = "naad-backend")]
-            {
-                let noise = self.noise_gen.next_sample();
-                let filtered = self.shape_filter.process_sample(noise);
-                let modulator = 0.7 + 0.3 * self.mod_lfo.next_value();
-                *sample = filtered * amp * modulator;
-            }
-            #[cfg(not(feature = "naad-backend"))]
-            {
-                let t = self.sample_position as f32 / self.sample_rate;
-                let mod_freq = 0.5 + self.intensity * 2.0;
-                let modulator =
-                    0.7 + 0.3 * crate::math::f32::sin(core::f32::consts::TAU * mod_freq * t);
-                let noise = (self.rng.next_f32() + self.rng.next_f32()) * 0.5;
-                *sample = noise * amp * modulator;
-                self.sample_position += 1;
-            }
-        }
         #[cfg(feature = "naad-backend")]
-        {
-            self.sample_position += output.len();
+        for sample in output.iter_mut() {
+            let noise = self.noise_gen.next_sample();
+            let filtered = self.shape_filter.process_sample(noise);
+            let modulator = 0.7 + 0.3 * self.mod_lfo.next_value();
+            *sample = filtered * amp * modulator;
+        }
+        #[cfg(not(feature = "naad-backend"))]
+        for (i, sample) in output.iter_mut().enumerate() {
+            let t = (self.sample_position + i) as f32 / self.sample_rate;
+            let mod_freq = 0.5 + self.intensity * 2.0;
+            let modulator =
+                0.7 + 0.3 * crate::math::f32::sin(core::f32::consts::TAU * mod_freq * t);
+            let noise = (self.rng.next_f32() + self.rng.next_f32()) * 0.5;
+            *sample = noise * amp * modulator;
         }
     }
 

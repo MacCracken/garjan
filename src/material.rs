@@ -47,7 +47,76 @@ pub struct MaterialProperties {
     pub transient: f32,
 }
 
+/// Modal synthesis configuration for a material.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct MaterialModeConfig {
+    /// Frequency pattern for mode generation.
+    pub pattern: crate::modal::ModePattern,
+    /// Number of modes to generate.
+    pub mode_count: usize,
+    /// How quickly higher modes decay relative to the fundamental.
+    pub damping_factor: f32,
+}
+
 impl Material {
+    /// Returns the modal synthesis configuration for this material.
+    #[must_use]
+    pub fn mode_config(self) -> MaterialModeConfig {
+        use crate::modal::ModePattern;
+        match self {
+            Self::Metal => MaterialModeConfig {
+                pattern: ModePattern::Plate,
+                mode_count: 12,
+                damping_factor: 0.05,
+            },
+            Self::Wood => MaterialModeConfig {
+                pattern: ModePattern::Beam,
+                mode_count: 8,
+                damping_factor: 0.8,
+            },
+            Self::Stone => MaterialModeConfig {
+                pattern: ModePattern::Plate,
+                mode_count: 6,
+                damping_factor: 3.0,
+            },
+            Self::Earth => MaterialModeConfig {
+                pattern: ModePattern::Damped,
+                mode_count: 4,
+                damping_factor: 10.0,
+            },
+            Self::Glass => MaterialModeConfig {
+                pattern: ModePattern::Plate,
+                mode_count: 10,
+                damping_factor: 0.1,
+            },
+            Self::Fabric => MaterialModeConfig {
+                pattern: ModePattern::Damped,
+                mode_count: 3,
+                damping_factor: 15.0,
+            },
+            Self::Leaf => MaterialModeConfig {
+                pattern: ModePattern::Beam,
+                mode_count: 5,
+                damping_factor: 5.0,
+            },
+            Self::Water => MaterialModeConfig {
+                pattern: ModePattern::Harmonic,
+                mode_count: 6,
+                damping_factor: 2.0,
+            },
+            Self::Plastic => MaterialModeConfig {
+                pattern: ModePattern::StiffString,
+                mode_count: 6,
+                damping_factor: 1.5,
+            },
+            Self::Ceramic => MaterialModeConfig {
+                pattern: ModePattern::Plate,
+                mode_count: 8,
+                damping_factor: 0.3,
+            },
+        }
+    }
+
     /// Returns the default acoustic properties for this material.
     #[must_use]
     pub fn properties(self) -> MaterialProperties {
