@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2026-03-28
+
+### Added
+
+- **Enhanced Weather & Water** — 3 new synthesizer modules:
+  - **Precipitation** (`src/precipitation.rs`): Hail (modal impacts on terrain surfaces), Snow (muffled filtered noise), SurfaceRain (terrain-dependent splatter character). StoneSize: Small/Medium/Large. Uses Terrain enum for surface interaction.
+  - **Underwater** (`src/underwater.rs`): Submerged ambience at Shallow/Medium/Deep depth. Low-frequency rumble + filtered surface noise + stochastic bubble events. Boundary note: garjan = source generation, goonj = propagation.
+  - **Surf** (`src/surf.rs`): Breaking wave cycle with 3-phase model — approach rumble, crash break, receding wash. SurfIntensity: Calm/Moderate/Heavy/Storm with period/amplitude scaling.
+- 13 new tests: all type/depth/intensity variants, zero-intensity silence, terrain interaction, serde roundtrips
+- New enums: `PrecipitationType`, `StoneSize`, `UnderwaterDepth`, `SurfIntensity`
+
 ## [0.6.0] - 2026-03-28
 
 ### Added

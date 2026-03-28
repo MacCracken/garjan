@@ -79,18 +79,16 @@ Physical creature sounds and fluid dynamics. Vocal synthesis → prani/svara.
 
 ---
 
-## v0.7.0 — Enhanced Weather & Water
+## v0.7.0 (current) — Enhanced Weather & Water
 
-Deeper physical models for existing modules.
-
-- [ ] Rain surface interaction: splatter character varies by surface material
-- [ ] Hail synthesis
-- [ ] Wind: turbulence model with spectral variation by terrain
-- [ ] Waveguide wind for pipes, gaps, building edges (extends v0.5 whistle)
-- [ ] Snow/ice cracking and crunching
-- [ ] Underwater ambience (garjan = source generation, goonj = propagation)
-- [ ] Improved waves: surf zone model with breaking wave phases
-- [ ] Thunder: multi-bolt sequences (terrain echo → goonj integration point)
+- [x] Rain surface interaction: SurfaceRain with Terrain-dependent splatter
+- [x] Hail synthesis: modal impacts on surfaces, 3 stone sizes
+- [x] Snow: muffled filtered noise with terrain interaction
+- [x] Underwater ambience: Shallow/Medium/Deep with rumble + bubbles
+- [x] Improved waves: Surf with 3-phase breaking cycle (approach/crash/wash)
+- [ ] Wind turbulence model with terrain spectral variation — deferred to v0.8+
+- [ ] Waveguide wind (extends v0.5 whistle) — deferred to v0.8+
+- [ ] Thunder multi-bolt sequences — deferred to v0.8+
 
 ---
 

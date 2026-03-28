@@ -1192,3 +1192,163 @@ fn test_bridge_gain_from_distance() {
     assert!((gain_from_distance(1.0, 10.0) - 0.1).abs() < 0.001);
     assert_eq!(gain_from_distance(1.0, 0.5), 1.0);
 }
+
+// ---------------------------------------------------------------------------
+// Precipitation
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_precipitation_all_types() {
+    for pt in &[
+        PrecipitationType::Hail,
+        PrecipitationType::Snow,
+        PrecipitationType::SurfaceRain,
+    ] {
+        let mut p = Precipitation::new(*pt, StoneSize::Medium, Terrain::Gravel, SR).unwrap();
+        p.set_intensity(0.8);
+        let samples = p.synthesize(1.0).unwrap();
+        assert!(samples.iter().all(|s| s.is_finite()), "NaN for {:?}", pt);
+    }
+}
+
+#[test]
+fn test_precipitation_hail_on_metal() {
+    let mut p = Precipitation::new(
+        PrecipitationType::Hail,
+        StoneSize::Large,
+        Terrain::Metal,
+        SR,
+    )
+    .unwrap();
+    p.set_intensity(1.0);
+    let samples = p.synthesize(1.0).unwrap();
+    assert!(samples.iter().all(|s| s.is_finite()));
+}
+
+#[test]
+fn test_precipitation_zero_intensity() {
+    let mut p =
+        Precipitation::new(PrecipitationType::Snow, StoneSize::Small, Terrain::Sand, SR).unwrap();
+    p.set_intensity(0.0);
+    let samples = p.synthesize(0.1).unwrap();
+    assert!(samples.iter().all(|&s| s.abs() < 0.001));
+}
+
+// ---------------------------------------------------------------------------
+// Underwater
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_underwater_all_depths() {
+    for depth in &[
+        UnderwaterDepth::Shallow,
+        UnderwaterDepth::Medium,
+        UnderwaterDepth::Deep,
+    ] {
+        let mut u = Underwater::new(*depth, SR).unwrap();
+        u.set_intensity(0.7);
+        let samples = u.synthesize(1.0).unwrap();
+        assert!(samples.iter().all(|s| s.is_finite()), "NaN for {:?}", depth);
+        assert!(
+            samples.iter().any(|&s| s.abs() > 0.001),
+            "silent for {:?}",
+            depth
+        );
+    }
+}
+
+#[test]
+fn test_underwater_zero_intensity() {
+    let mut u = Underwater::new(UnderwaterDepth::Medium, SR).unwrap();
+    u.set_intensity(0.0);
+    let samples = u.synthesize(0.1).unwrap();
+    assert!(samples.iter().all(|&s| s.abs() < 0.001));
+}
+
+// ---------------------------------------------------------------------------
+// Surf
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_surf_all_intensities() {
+    for si in &[
+        SurfIntensity::Calm,
+        SurfIntensity::Moderate,
+        SurfIntensity::Heavy,
+        SurfIntensity::Storm,
+    ] {
+        let mut s = Surf::new(*si, SR).unwrap();
+        let samples = s.synthesize(2.0).unwrap();
+        assert!(samples.iter().all(|s| s.is_finite()), "NaN for {:?}", si);
+        assert!(
+            samples.iter().any(|&s| s.abs() > 0.001),
+            "silent for {:?}",
+            si
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// v0.7 serde roundtrips
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_serde_roundtrip_precipitation_type() {
+    let json = serde_json::to_string(&PrecipitationType::Hail).unwrap();
+    let p2: PrecipitationType = serde_json::from_str(&json).unwrap();
+    assert_eq!(p2, PrecipitationType::Hail);
+}
+
+#[test]
+fn test_serde_roundtrip_stone_size() {
+    let json = serde_json::to_string(&StoneSize::Large).unwrap();
+    let s2: StoneSize = serde_json::from_str(&json).unwrap();
+    assert_eq!(s2, StoneSize::Large);
+}
+
+#[test]
+fn test_serde_roundtrip_underwater_depth() {
+    let json = serde_json::to_string(&UnderwaterDepth::Deep).unwrap();
+    let u2: UnderwaterDepth = serde_json::from_str(&json).unwrap();
+    assert_eq!(u2, UnderwaterDepth::Deep);
+}
+
+#[test]
+fn test_serde_roundtrip_surf_intensity() {
+    let json = serde_json::to_string(&SurfIntensity::Storm).unwrap();
+    let s2: SurfIntensity = serde_json::from_str(&json).unwrap();
+    assert_eq!(s2, SurfIntensity::Storm);
+}
+
+#[test]
+fn test_serde_roundtrip_precipitation() {
+    let p = Precipitation::new(
+        PrecipitationType::Hail,
+        StoneSize::Medium,
+        Terrain::Tile,
+        SR,
+    )
+    .unwrap();
+    let json = serde_json::to_string(&p).unwrap();
+    let p2: Precipitation = serde_json::from_str(&json).unwrap();
+    let json2 = serde_json::to_string(&p2).unwrap();
+    assert_eq!(json, json2);
+}
+
+#[test]
+fn test_serde_roundtrip_underwater() {
+    let u = Underwater::new(UnderwaterDepth::Shallow, SR).unwrap();
+    let json = serde_json::to_string(&u).unwrap();
+    let u2: Underwater = serde_json::from_str(&json).unwrap();
+    let json2 = serde_json::to_string(&u2).unwrap();
+    assert_eq!(json, json2);
+}
+
+#[test]
+fn test_serde_roundtrip_surf() {
+    let s = Surf::new(SurfIntensity::Heavy, SR).unwrap();
+    let json = serde_json::to_string(&s).unwrap();
+    let s2: Surf = serde_json::from_str(&json).unwrap();
+    let json2 = serde_json::to_string(&s2).unwrap();
+    assert_eq!(json, json2);
+}

@@ -69,9 +69,12 @@ pub mod insect;
 pub mod material;
 mod math;
 pub mod modal;
+pub mod precipitation;
 mod rng;
 pub mod rolling;
+pub mod surf;
 pub mod texture;
+pub mod underwater;
 pub mod water;
 pub mod weather;
 pub mod whistle;
@@ -98,8 +101,11 @@ pub mod prelude {
     pub use crate::insect::Insect;
     pub use crate::material::Material;
     pub use crate::modal::{ExcitationType, Exciter, ModalBank, ModePattern, ModeSpec};
+    pub use crate::precipitation::{Precipitation, PrecipitationType, StoneSize};
     pub use crate::rolling::Rolling;
+    pub use crate::surf::{Surf, SurfIntensity};
     pub use crate::texture::{AmbientTexture, TextureType};
+    pub use crate::underwater::{Underwater, UnderwaterDepth};
     pub use crate::water::{Water, WaterType};
     pub use crate::weather::{Rain, RainIntensity, Thunder, Wind};
     pub use crate::whistle::Whistle;
@@ -154,5 +160,12 @@ mod assert_traits {
         _assert_send_sync::<crate::wingflap::BirdSize>();
         _assert_send_sync::<crate::wingflap::WingFlap>();
         _assert_send_sync::<crate::bubble::Bubble>();
+        _assert_send_sync::<crate::precipitation::Precipitation>();
+        _assert_send_sync::<crate::precipitation::PrecipitationType>();
+        _assert_send_sync::<crate::precipitation::StoneSize>();
+        _assert_send_sync::<crate::underwater::Underwater>();
+        _assert_send_sync::<crate::underwater::UnderwaterDepth>();
+        _assert_send_sync::<crate::surf::Surf>();
+        _assert_send_sync::<crate::surf::SurfIntensity>();
     }
 }
