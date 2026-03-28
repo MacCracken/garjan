@@ -82,6 +82,7 @@ All synthesizers run well above real-time. Typical measurements at 44.1 kHz:
 |------|---------|-------------|
 | `std` | Yes | Standard library. Disable for `no_std` + `alloc` |
 | `naad-backend` | Yes | Use naad for filters, noise generators, and LFOs |
+| `logging` | No | Structured tracing via the `tracing` crate |
 
 ## Design
 

@@ -47,6 +47,7 @@
 //! |---------|---------|-------------|
 //! | `std` | Yes | Standard library support. Disable for `no_std` + `alloc` |
 //! | `naad-backend` | Yes | Use naad crate for oscillators and filters |
+//! | `logging` | No | Structured tracing via the `tracing` crate |
 #![cfg_attr(not(feature = "std"), no_std)]
 
 extern crate alloc;

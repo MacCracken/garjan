@@ -38,9 +38,12 @@ impl DcBlocker {
 #[inline]
 pub(crate) fn validate_duration(duration: f32) -> crate::error::Result<()> {
     if duration <= 0.0 || !duration.is_finite() {
-        return Err(crate::error::GarjanError::InvalidParameter(alloc::format!(
+        let err = crate::error::GarjanError::InvalidParameter(alloc::format!(
             "duration must be positive and finite, got {duration}"
-        )));
+        ));
+        #[cfg(feature = "logging")]
+        tracing::warn!(%duration, "invalid duration");
+        return Err(err);
     }
     Ok(())
 }
@@ -49,9 +52,29 @@ pub(crate) fn validate_duration(duration: f32) -> crate::error::Result<()> {
 #[inline]
 pub(crate) fn validate_sample_rate(sample_rate: f32) -> crate::error::Result<()> {
     if sample_rate <= 0.0 || !sample_rate.is_finite() {
-        return Err(crate::error::GarjanError::InvalidParameter(alloc::format!(
+        let err = crate::error::GarjanError::InvalidParameter(alloc::format!(
             "sample_rate must be positive and finite, got {sample_rate}"
-        )));
+        ));
+        #[cfg(feature = "logging")]
+        tracing::warn!(%sample_rate, "invalid sample rate");
+        return Err(err);
     }
     Ok(())
+}
+
+/// Logs a naad backend initialization error with context.
+///
+/// Use this instead of bare `.map_err()` to get structured error messages
+/// that include the synthesizer name and failed component.
+#[cfg(feature = "naad-backend")]
+#[allow(dead_code)]
+pub(crate) fn map_naad_error(
+    synth_name: &str,
+    component: &str,
+    err: naad::NaadError,
+) -> crate::error::GarjanError {
+    let msg = alloc::format!("{synth_name}: {component} init failed: {err}");
+    #[cfg(feature = "logging")]
+    tracing::error!(synth = synth_name, component, %err, "naad backend error");
+    crate::error::GarjanError::SynthesisFailed(msg)
 }

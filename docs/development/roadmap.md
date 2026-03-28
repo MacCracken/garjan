@@ -8,25 +8,35 @@ See [CHANGELOG.md](../../CHANGELOG.md) for the full release history.
 
 ---
 
-## Future (v2.0+)
+## v1.1.0
 
-### Deferred from v1.0
+### High Priority
 
-- Parameter smoothing (one-pole filter on control parameters)
+- Parameter smoothing (one-pole filter on real-time setters to prevent clicks)
+- Real-time setters for Weather v1 synths (Rain intensity, Wind speed/gustiness, Fire intensity)
+
+### Medium Priority
+
 - Fade-in/fade-out on all continuous synthesizers (click-free start/stop)
-- Destruction/fracture: sustained collapse sequences
-- Karplus-Strong for metallic ping and plucked-string transients
-- Wind turbulence model with terrain spectral variation
-- Waveguide wind (extends whistle module with physical tube model)
 - Thunder multi-bolt sequences
-- Real-time setters for Weather v1 synths (Rain intensity, Wind speed/gustiness)
+- Wind turbulence model with terrain spectral variation
+
+### Lower Priority
+
+- Karplus-Strong for metallic ping and plucked-string transients
+- Waveguide wind (extends whistle module with physical tube model)
+- Destruction/fracture: sustained collapse sequences
+
+---
+
+## v2.0+
 
 ### Performance
 
 - SIMD explicit intrinsics for ModalBank (currently relies on auto-vectorization)
 - Object pool for transient events (drops, crackles, debris)
 
-### Potential new sound categories
+### New Sound Categories
 
 - Explosion synthesis (layered: initial burst, debris, rumble tail)
 - Machinery integration points (garjan provides ambient hum, ghurni provides mechanical detail)
