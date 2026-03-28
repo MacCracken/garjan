@@ -69,49 +69,22 @@ pub enum ModePattern {
 // Mode (internal)
 // ---------------------------------------------------------------------------
 
-/// A single damped complex resonator.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct Mode {
-    state_re: f32,
-    state_im: f32,
-    coeff_re: f32,
-    coeff_im: f32,
-    amplitude: f32,
-}
-
-impl Mode {
-    fn from_spec(spec: &ModeSpec, sample_rate: f32) -> Self {
-        let omega = core::f32::consts::TAU * spec.frequency / sample_rate;
-        let radius = crate::math::f32::exp(-6.908 / (spec.decay.max(0.001) * sample_rate))
-            .clamp(0.0, 0.9999);
-        Self {
-            state_re: 0.0,
-            state_im: 0.0,
-            coeff_re: radius * crate::math::f32::cos(omega),
-            coeff_im: radius * crate::math::f32::sin(omega),
-            amplitude: spec.amplitude,
-        }
-    }
-
-    /// Process one excitation sample through this mode. Returns the mode's output.
-    #[inline]
-    fn tick(&mut self, excitation: f32) -> f32 {
-        let new_re = excitation + self.coeff_re * self.state_re - self.coeff_im * self.state_im;
-        let new_im = self.coeff_im * self.state_re + self.coeff_re * self.state_im;
-        self.state_re = new_re;
-        self.state_im = new_im;
-        self.amplitude * new_re
-    }
-}
-
 // ---------------------------------------------------------------------------
 // ModalBank
 // ---------------------------------------------------------------------------
 
 /// A bank of parallel damped resonators for modal sound synthesis.
+///
+/// Uses Structure-of-Arrays (SoA) layout for SIMD-friendly auto-vectorization.
+/// The compiler can process multiple modes per SIMD lane in the hot path.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModalBank {
-    modes: Vec<Mode>,
+    // SoA layout — each Vec has one element per mode
+    state_re: Vec<f32>,
+    state_im: Vec<f32>,
+    coeff_re: Vec<f32>,
+    coeff_im: Vec<f32>,
+    amplitude: Vec<f32>,
     sample_rate: f32,
 }
 
@@ -123,27 +96,58 @@ impl ModalBank {
     pub fn new(specs: &[ModeSpec], sample_rate: f32) -> Result<Self> {
         validate_sample_rate(sample_rate)?;
         let nyquist = sample_rate * 0.5;
-        let modes = specs
+        let valid: Vec<_> = specs
             .iter()
             .filter(|s| s.frequency >= 20.0 && s.frequency < nyquist && s.decay > 0.0)
-            .map(|s| Mode::from_spec(s, sample_rate))
             .collect();
-        Ok(Self { modes, sample_rate })
+        let n = valid.len();
+        let state_re = alloc::vec![0.0f32; n];
+        let state_im = alloc::vec![0.0f32; n];
+        let mut coeff_re = Vec::with_capacity(n);
+        let mut coeff_im = Vec::with_capacity(n);
+        let mut amplitude = Vec::with_capacity(n);
+
+        for spec in &valid {
+            let omega = core::f32::consts::TAU * spec.frequency / sample_rate;
+            let radius = crate::math::f32::exp(-6.908 / (spec.decay.max(0.001) * sample_rate))
+                .clamp(0.0, 0.9999);
+            coeff_re.push(radius * crate::math::f32::cos(omega));
+            coeff_im.push(radius * crate::math::f32::sin(omega));
+            amplitude.push(spec.amplitude);
+        }
+
+        Ok(Self {
+            state_re,
+            state_im,
+            coeff_re,
+            coeff_im,
+            amplitude,
+            sample_rate,
+        })
     }
 
     /// Returns the number of active modes.
     #[inline]
     #[must_use]
     pub fn mode_count(&self) -> usize {
-        self.modes.len()
+        self.amplitude.len()
     }
 
     /// Process a single excitation sample through all modes.
+    ///
+    /// The SoA layout enables the compiler to auto-vectorize this loop
+    /// across 4+ modes per SIMD lane.
     #[inline]
     pub fn process_sample(&mut self, excitation: f32) -> f32 {
+        let n = self.amplitude.len();
         let mut out = 0.0f32;
-        for mode in &mut self.modes {
-            out += mode.tick(excitation);
+        for i in 0..n {
+            let new_re = excitation + self.coeff_re[i] * self.state_re[i]
+                - self.coeff_im[i] * self.state_im[i];
+            let new_im = self.coeff_im[i] * self.state_re[i] + self.coeff_re[i] * self.state_im[i];
+            self.state_re[i] = new_re;
+            self.state_im[i] = new_im;
+            out += self.amplitude[i] * new_re;
         }
         out
     }
@@ -167,9 +171,11 @@ impl ModalBank {
 
     /// Reset all mode states to zero.
     pub fn reset(&mut self) {
-        for mode in &mut self.modes {
-            mode.state_re = 0.0;
-            mode.state_im = 0.0;
+        for s in &mut self.state_re {
+            *s = 0.0;
+        }
+        for s in &mut self.state_im {
+            *s = 0.0;
         }
     }
 }

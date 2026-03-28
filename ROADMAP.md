@@ -102,9 +102,9 @@ RTPC mapping, event scheduling → dhvani/kiran.
 - [x] Deterministic replay verified: 9 synths tested for bit-identical output
 - [x] Benchmark coverage: all 25 synth types now benchmarked (26 benchmarks)
 - [x] Voice management: VoicePool with Oldest/LowestPriority/None steal policies
-- [ ] LOD: simplified models for distant sources — post v1.0
-- [ ] Builder pattern constructors — post v1.0
-- [ ] SIMD-friendly buffer layouts — post v1.0
+- [x] LOD: Quality enum (Full/Reduced/Minimal) with scale_modes/scale_rate helpers
+- [x] Builder pattern: PrecipitationBuilder, FootstepBuilder, FrictionBuilder
+- [x] SIMD-friendly ModalBank: SoA layout for auto-vectorization
 
 ---
 

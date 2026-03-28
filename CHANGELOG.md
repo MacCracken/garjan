@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] - 2026-03-28
+
+### Added
+
+- **LOD (Level of Detail)** (`src/lod.rs`): `Quality` enum (Full/Reduced/Minimal) with `scale_modes()` and `scale_rate()` helpers for CPU scaling of distant/quiet sources
+- **Builder pattern** (`src/builder.rs`): `PrecipitationBuilder`, `FootstepBuilder`, `FrictionBuilder` for ergonomic construction of complex synthesizers
+- **SIMD-friendly ModalBank**: restructured from AoS (Array of Structs) to SoA (Struct of Arrays) — parallel `state_re`, `state_im`, `coeff_re`, `coeff_im`, `amplitude` arrays enable compiler auto-vectorization across 4+ modes per SIMD lane
+- 6 new tests: LOD scaling, builder pattern for Precipitation/Footstep/Friction, Quality serde roundtrip
+
 ## [0.8.0] - 2026-03-28
 
 ### Fixed

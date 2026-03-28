@@ -1549,3 +1549,72 @@ fn test_serde_roundtrip_steal_policy() {
     let s2: StealPolicy = serde_json::from_str(&json).unwrap();
     assert_eq!(s2, StealPolicy::LowestPriority);
 }
+
+// ---------------------------------------------------------------------------
+// LOD (Quality)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_quality_scale_modes() {
+    assert_eq!(Quality::Full.scale_modes(12), 12);
+    assert_eq!(Quality::Reduced.scale_modes(12), 6);
+    assert_eq!(Quality::Minimal.scale_modes(12), 3);
+    assert_eq!(Quality::Minimal.scale_modes(1), 1); // never below 1
+}
+
+#[test]
+fn test_quality_scale_rate() {
+    assert_eq!(Quality::Full.scale_rate(20.0), 20.0);
+    assert_eq!(Quality::Reduced.scale_rate(20.0), 10.0);
+    assert_eq!(Quality::Minimal.scale_rate(20.0), 5.0);
+}
+
+#[test]
+fn test_serde_roundtrip_quality() {
+    let json = serde_json::to_string(&Quality::Reduced).unwrap();
+    let q2: Quality = serde_json::from_str(&json).unwrap();
+    assert_eq!(q2, Quality::Reduced);
+}
+
+// ---------------------------------------------------------------------------
+// Builders
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_builder_precipitation() {
+    use garjan::builder::PrecipitationBuilder;
+    let mut p = PrecipitationBuilder::new(SR)
+        .precip_type(PrecipitationType::Snow)
+        .stone_size(StoneSize::Small)
+        .surface(Terrain::Sand)
+        .build()
+        .unwrap();
+    p.set_intensity(0.5);
+    let samples = p.synthesize(0.5).unwrap();
+    assert!(samples.iter().all(|s| s.is_finite()));
+}
+
+#[test]
+fn test_builder_footstep() {
+    use garjan::builder::FootstepBuilder;
+    let mut fs = FootstepBuilder::new(SR)
+        .terrain(Terrain::Metal)
+        .movement(MovementType::Run)
+        .build()
+        .unwrap();
+    let samples = fs.synthesize(0.5).unwrap();
+    assert!(samples.iter().all(|s| s.is_finite()));
+}
+
+#[test]
+fn test_builder_friction() {
+    use garjan::builder::FrictionBuilder;
+    let mut f = FrictionBuilder::new(SR)
+        .friction_type(FrictionType::Grind)
+        .surface(Material::Stone)
+        .build()
+        .unwrap();
+    f.set_velocity(0.5);
+    let samples = f.synthesize(0.5).unwrap();
+    assert!(samples.iter().all(|s| s.is_finite()));
+}
