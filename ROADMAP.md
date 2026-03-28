@@ -46,16 +46,15 @@
 
 ---
 
-## v0.4.0 — Contact & Surface
+## v0.4.0 (current) — Contact & Surface
 
-Sounds from objects interacting with surfaces.
-
-- [ ] **Footsteps**: terrain-aware (gravel, sand, mud, snow, wood, metal, tile, wet)
-- [ ] Footstep movement types: walk, run, sneak, jump/land
-- [ ] **Friction**: scraping, sliding, grinding (velocity + pressure driven)
-- [ ] **Rolling**: ball/wheel on surface, boulder, barrel
-- [ ] **Foliage**: leaf rustle (wind-driven + contact), grass swish, branch snap
-- [ ] **Creaking**: doors, hinges, rope under tension, wood stress (stick-slip model)
+- [x] **Footsteps**: 8 terrains (Gravel, Sand, Mud, Snow, Wood, Metal, Tile, Wet)
+- [x] Footstep movement types: Walk, Run, Sneak, JumpLand + `trigger_step()`
+- [x] **Friction**: Scrape, Slide, Grind with velocity + pressure control
+- [x] **Rolling**: Ball, Wheel, Boulder, Barrel with rotation bumps + hollow resonance
+- [x] **Foliage**: LeafRustle, GrassSwish (wind-driven + stochastic), BranchSnap (one-shot)
+- [x] **Creaking**: Door, Hinge, Rope, WoodStress with tension + speed control
+- [x] Shared contact types module with terrain-to-material mapping
 
 ---
 

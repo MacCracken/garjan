@@ -47,31 +47,43 @@
 //! |---------|---------|-------------|
 //! | `std` | Yes | Standard library support. Disable for `no_std` + `alloc` |
 //! | `naad-backend` | Yes | Use naad crate for oscillators and filters |
-//! | `logging` | No | Structured logging via tracing-subscriber |
-
 #![cfg_attr(not(feature = "std"), no_std)]
 
 extern crate alloc;
 
+pub mod contact;
+pub mod creak;
 mod dsp;
 pub mod error;
 pub mod fire;
+pub mod foliage;
+pub mod footstep;
+pub mod friction;
 pub mod impact;
 pub mod material;
 mod math;
 pub mod modal;
 mod rng;
+pub mod rolling;
 pub mod texture;
 pub mod water;
 pub mod weather;
 
 /// Convenience re-exports for common usage.
 pub mod prelude {
+    pub use crate::contact::{
+        CreakSource, FoliageType, FrictionType, MovementType, RollingBody, Terrain,
+    };
+    pub use crate::creak::Creak;
     pub use crate::error::{GarjanError, Result};
     pub use crate::fire::Fire;
+    pub use crate::foliage::Foliage;
+    pub use crate::footstep::Footstep;
+    pub use crate::friction::Friction;
     pub use crate::impact::{Impact, ImpactType};
     pub use crate::material::Material;
     pub use crate::modal::{ExcitationType, Exciter, ModalBank, ModePattern, ModeSpec};
+    pub use crate::rolling::Rolling;
     pub use crate::texture::{AmbientTexture, TextureType};
     pub use crate::water::{Water, WaterType};
     pub use crate::weather::{Rain, RainIntensity, Thunder, Wind};
@@ -101,5 +113,16 @@ mod assert_traits {
         _assert_send_sync::<crate::modal::ModePattern>();
         _assert_send_sync::<crate::modal::ExcitationType>();
         _assert_send_sync::<crate::modal::Exciter>();
+        _assert_send_sync::<crate::contact::Terrain>();
+        _assert_send_sync::<crate::contact::MovementType>();
+        _assert_send_sync::<crate::contact::FrictionType>();
+        _assert_send_sync::<crate::contact::RollingBody>();
+        _assert_send_sync::<crate::contact::FoliageType>();
+        _assert_send_sync::<crate::contact::CreakSource>();
+        _assert_send_sync::<crate::footstep::Footstep>();
+        _assert_send_sync::<crate::friction::Friction>();
+        _assert_send_sync::<crate::creak::Creak>();
+        _assert_send_sync::<crate::rolling::Rolling>();
+        _assert_send_sync::<crate::foliage::Foliage>();
     }
 }

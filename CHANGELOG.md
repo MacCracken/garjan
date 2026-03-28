@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-03-28
+
+### Added
+
+- **Contact & Surface synthesis** — 5 new synthesizer modules:
+  - **Footstep** (`src/footstep.rs`): terrain-aware step sequences on 8 surfaces (Gravel, Sand, Mud, Snow, Wood, Metal, Tile, Wet) with 4 movement types (Walk, Run, Sneak, JumpLand), auto-timed with jitter, `trigger_step()` for game-driven timing
+  - **Friction** (`src/friction.rs`): stick-slip model for Scrape, Slide, Grind with real-time `set_velocity()` and `set_pressure()` control, material modal resonance
+  - **Creak** (`src/creak.rs`): low-frequency stick-slip for Door, Hinge, Rope, WoodStress with `set_tension()` (pitch) and `set_speed()` (amplitude) control
+  - **Rolling** (`src/rolling.rs`): continuous surface contact for Ball, Wheel, Boulder, Barrel with rotation bumps and hollow body resonance (Barrel uses Wood modal bank)
+  - **Foliage** (`src/foliage.rs`): LeafRustle and GrassSwish (continuous filtered noise bed + Poisson micro-events), BranchSnap (one-shot through Wood modal bank), `set_wind_speed()` and `set_contact_intensity()` control
+- **Shared contact types** (`src/contact.rs`): `Terrain`, `MovementType`, `FrictionType`, `RollingBody`, `FoliageType`, `CreakSource` enums with terrain-to-material mapping
+- 19 new tests covering all terrain/movement/type combinations, zero-velocity silence, trigger APIs, serde roundtrips
+- 5 new benchmarks for all contact synthesizers
+
+### Fixed (from v0.3 audit)
+
+- `powf` now in `math.rs` compat layer — `no_std` builds work correctly
+- Removed phantom dependencies `hisab` and `tracing` (10 fewer crate deps)
+- Shatter debris now builds excitation buffer first, processes linearly through modal bank (no state corruption)
+- Exciter Impulse deactivates immediately after emitting
+- `Rng::poisson` rate clamped to 0–30 (prevents near-infinite loop)
+- Added `PartialEq` to `MaterialProperties`, `MaterialModeConfig`, `ModeSpec`
+- Water drip frequency is now deterministic across `process_block` calls
+- DC blocker R coefficient clamped to [0.9, 0.9999] for low sample rates
+- `ModalBank::process_block` has `debug_assert_eq!` on buffer lengths
+- Added serde roundtrip tests for `Exciter` and `MaterialModeConfig`
+
 ## [0.3.0] - 2026-03-28
 
 ### Added

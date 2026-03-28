@@ -137,6 +137,76 @@ fn bench_impact_glass_shatter(c: &mut Criterion) {
     });
 }
 
+fn bench_footstep_gravel_walk_1s(c: &mut Criterion) {
+    c.bench_function("footstep_gravel_walk_1s", |b| {
+        let mut fs = garjan::footstep::Footstep::new(
+            garjan::contact::Terrain::Gravel,
+            garjan::contact::MovementType::Walk,
+            SR,
+        )
+        .unwrap();
+        b.iter(|| {
+            let samples = fs.synthesize(1.0).unwrap();
+            black_box(samples);
+        });
+    });
+}
+
+fn bench_friction_scrape_metal_1s(c: &mut Criterion) {
+    c.bench_function("friction_scrape_metal_1s", |b| {
+        let mut f = garjan::friction::Friction::new(
+            garjan::contact::FrictionType::Scrape,
+            Material::Metal,
+            SR,
+        )
+        .unwrap();
+        f.set_velocity(0.5);
+        f.set_pressure(0.5);
+        b.iter(|| {
+            let samples = f.synthesize(1.0).unwrap();
+            black_box(samples);
+        });
+    });
+}
+
+fn bench_creak_door_1s(c: &mut Criterion) {
+    c.bench_function("creak_door_1s", |b| {
+        let mut c_synth =
+            garjan::creak::Creak::new(garjan::contact::CreakSource::Door, SR).unwrap();
+        c_synth.set_tension(0.5);
+        c_synth.set_speed(0.5);
+        b.iter(|| {
+            let samples = c_synth.synthesize(1.0).unwrap();
+            black_box(samples);
+        });
+    });
+}
+
+fn bench_rolling_wheel_wood_1s(c: &mut Criterion) {
+    c.bench_function("rolling_wheel_wood_1s", |b| {
+        let mut r =
+            garjan::rolling::Rolling::new(garjan::contact::RollingBody::Wheel, Material::Wood, SR)
+                .unwrap();
+        r.set_velocity(0.5);
+        b.iter(|| {
+            let samples = r.synthesize(1.0).unwrap();
+            black_box(samples);
+        });
+    });
+}
+
+fn bench_foliage_rustle_1s(c: &mut Criterion) {
+    c.bench_function("foliage_rustle_1s", |b| {
+        let mut f =
+            garjan::foliage::Foliage::new(garjan::contact::FoliageType::LeafRustle, SR).unwrap();
+        f.set_wind_speed(0.5);
+        b.iter(|| {
+            let samples = f.synthesize(1.0).unwrap();
+            black_box(samples);
+        });
+    });
+}
+
 criterion_group!(
     benches,
     bench_thunder_1s,
@@ -151,6 +221,11 @@ criterion_group!(
     bench_modal_bank_8_modes_512,
     bench_impact_metal_strike,
     bench_impact_glass_shatter,
+    bench_footstep_gravel_walk_1s,
+    bench_friction_scrape_metal_1s,
+    bench_creak_door_1s,
+    bench_rolling_wheel_wood_1s,
+    bench_foliage_rustle_1s,
 );
 
 criterion_main!(benches);

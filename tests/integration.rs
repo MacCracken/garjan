@@ -594,3 +594,212 @@ fn test_serde_roundtrip_excitation_type() {
     let e2: ExcitationType = serde_json::from_str(&json).unwrap();
     assert_eq!(et, e2);
 }
+
+// ---------------------------------------------------------------------------
+// Footstep
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_footstep_all_terrains() {
+    let terrains = [
+        Terrain::Gravel,
+        Terrain::Sand,
+        Terrain::Mud,
+        Terrain::Snow,
+        Terrain::Wood,
+        Terrain::Metal,
+        Terrain::Tile,
+        Terrain::Wet,
+    ];
+    for terrain in &terrains {
+        let mut fs = Footstep::new(*terrain, MovementType::Walk, SR).unwrap();
+        let samples = fs.synthesize(1.0).unwrap();
+        assert!(!samples.is_empty(), "failed for {:?}", terrain);
+        assert!(samples.iter().all(|s| s.is_finite()));
+    }
+}
+
+#[test]
+fn test_footstep_all_movements() {
+    for mov in &[
+        MovementType::Walk,
+        MovementType::Run,
+        MovementType::Sneak,
+        MovementType::JumpLand,
+    ] {
+        let mut fs = Footstep::new(Terrain::Gravel, *mov, SR).unwrap();
+        let samples = fs.synthesize(0.5).unwrap();
+        assert!(samples.iter().all(|s| s.is_finite()));
+    }
+}
+
+#[test]
+fn test_footstep_trigger_step() {
+    let mut fs = Footstep::new(Terrain::Wood, MovementType::Walk, SR).unwrap();
+    fs.trigger_step();
+    let mut buf = vec![0.0f32; 512];
+    fs.process_block(&mut buf);
+    assert!(buf.iter().any(|&s| s.abs() > 0.001));
+}
+
+// ---------------------------------------------------------------------------
+// Friction
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_friction_all_types() {
+    for ft in &[
+        FrictionType::Scrape,
+        FrictionType::Slide,
+        FrictionType::Grind,
+    ] {
+        let mut f = Friction::new(*ft, Material::Metal, SR).unwrap();
+        f.set_velocity(0.5);
+        f.set_pressure(0.5);
+        let samples = f.synthesize(0.5).unwrap();
+        assert!(samples.iter().all(|s| s.is_finite()));
+        assert!(samples.iter().any(|&s| s.abs() > 0.001));
+    }
+}
+
+#[test]
+fn test_friction_zero_velocity_is_silent() {
+    let mut f = Friction::new(FrictionType::Scrape, Material::Wood, SR).unwrap();
+    f.set_velocity(0.0);
+    let samples = f.synthesize(0.1).unwrap();
+    assert!(samples.iter().all(|&s| s.abs() < 0.001));
+}
+
+// ---------------------------------------------------------------------------
+// Creak
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_creak_all_sources() {
+    for src in &[
+        CreakSource::Door,
+        CreakSource::Hinge,
+        CreakSource::Rope,
+        CreakSource::WoodStress,
+    ] {
+        let mut c = Creak::new(*src, SR).unwrap();
+        c.set_tension(0.5);
+        c.set_speed(0.5);
+        let samples = c.synthesize(0.5).unwrap();
+        assert!(samples.iter().all(|s| s.is_finite()));
+        assert!(samples.iter().any(|&s| s.abs() > 0.001));
+    }
+}
+
+#[test]
+fn test_creak_zero_speed_is_silent() {
+    let mut c = Creak::new(CreakSource::Door, SR).unwrap();
+    c.set_speed(0.0);
+    let samples = c.synthesize(0.1).unwrap();
+    assert!(samples.iter().all(|&s| s.abs() < 0.001));
+}
+
+// ---------------------------------------------------------------------------
+// Rolling
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_rolling_all_bodies() {
+    for body in &[
+        RollingBody::Ball,
+        RollingBody::Wheel,
+        RollingBody::Boulder,
+        RollingBody::Barrel,
+    ] {
+        let mut r = Rolling::new(*body, Material::Wood, SR).unwrap();
+        r.set_velocity(0.5);
+        let samples = r.synthesize(0.5).unwrap();
+        assert!(samples.iter().all(|s| s.is_finite()));
+        assert!(samples.iter().any(|&s| s.abs() > 0.001));
+    }
+}
+
+#[test]
+fn test_rolling_zero_velocity_is_silent() {
+    let mut r = Rolling::new(RollingBody::Wheel, Material::Stone, SR).unwrap();
+    r.set_velocity(0.0);
+    let samples = r.synthesize(0.1).unwrap();
+    assert!(samples.iter().all(|&s| s.abs() < 0.001));
+}
+
+// ---------------------------------------------------------------------------
+// Foliage
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_foliage_all_types() {
+    for ft in &[
+        FoliageType::LeafRustle,
+        FoliageType::GrassSwish,
+        FoliageType::BranchSnap,
+    ] {
+        let mut f = Foliage::new(*ft, SR).unwrap();
+        if *ft == FoliageType::BranchSnap {
+            f.trigger_snap();
+        } else {
+            f.set_wind_speed(0.5);
+        }
+        let samples = f.synthesize(0.5).unwrap();
+        assert!(samples.iter().all(|s| s.is_finite()), "NaN for {:?}", ft);
+    }
+}
+
+#[test]
+fn test_foliage_branch_snap_trigger() {
+    let mut f = Foliage::new(FoliageType::BranchSnap, SR).unwrap();
+    f.trigger_snap();
+    let mut buf = vec![0.0f32; 512];
+    f.process_block(&mut buf);
+    assert!(buf.iter().any(|&s| s.abs() > 0.001));
+}
+
+// ---------------------------------------------------------------------------
+// Contact enum serde roundtrips
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_serde_roundtrip_terrain() {
+    let json = serde_json::to_string(&Terrain::Gravel).unwrap();
+    let t2: Terrain = serde_json::from_str(&json).unwrap();
+    assert_eq!(t2, Terrain::Gravel);
+}
+
+#[test]
+fn test_serde_roundtrip_movement_type() {
+    let json = serde_json::to_string(&MovementType::Run).unwrap();
+    let m2: MovementType = serde_json::from_str(&json).unwrap();
+    assert_eq!(m2, MovementType::Run);
+}
+
+#[test]
+fn test_serde_roundtrip_friction_type() {
+    let json = serde_json::to_string(&FrictionType::Scrape).unwrap();
+    let f2: FrictionType = serde_json::from_str(&json).unwrap();
+    assert_eq!(f2, FrictionType::Scrape);
+}
+
+#[test]
+fn test_serde_roundtrip_rolling_body() {
+    let json = serde_json::to_string(&RollingBody::Barrel).unwrap();
+    let r2: RollingBody = serde_json::from_str(&json).unwrap();
+    assert_eq!(r2, RollingBody::Barrel);
+}
+
+#[test]
+fn test_serde_roundtrip_foliage_type() {
+    let json = serde_json::to_string(&FoliageType::GrassSwish).unwrap();
+    let f2: FoliageType = serde_json::from_str(&json).unwrap();
+    assert_eq!(f2, FoliageType::GrassSwish);
+}
+
+#[test]
+fn test_serde_roundtrip_creak_source() {
+    let json = serde_json::to_string(&CreakSource::Hinge).unwrap();
+    let c2: CreakSource = serde_json::from_str(&json).unwrap();
+    assert_eq!(c2, CreakSource::Hinge);
+}
