@@ -848,3 +848,140 @@ fn test_serde_roundtrip_creak_source() {
     let c2: CreakSource = serde_json::from_str(&json).unwrap();
     assert_eq!(c2, CreakSource::Hinge);
 }
+
+// ---------------------------------------------------------------------------
+// Whoosh
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_whoosh_all_types() {
+    for wt in &[
+        WhooshType::Swing,
+        WhooshType::Projectile,
+        WhooshType::Vehicle,
+        WhooshType::Throw,
+    ] {
+        let mut w = Whoosh::new(*wt, SR).unwrap();
+        w.set_speed(0.7);
+        let samples = w.synthesize(0.5).unwrap();
+        assert!(samples.iter().all(|s| s.is_finite()));
+        assert!(samples.iter().any(|&s| s.abs() > 0.001));
+    }
+}
+
+#[test]
+fn test_whoosh_trigger() {
+    let mut w = Whoosh::new(WhooshType::Swing, SR).unwrap();
+    w.set_speed(0.8);
+    w.trigger();
+    let mut buf = vec![0.0f32; 512];
+    w.process_block(&mut buf);
+    assert!(buf.iter().any(|&s| s.abs() > 0.001));
+}
+
+// ---------------------------------------------------------------------------
+// Whistle
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_whistle_all_sources() {
+    for src in &[
+        WhistleSource::Gap,
+        WhistleSource::Pipe,
+        WhistleSource::Bottle,
+        WhistleSource::Wire,
+    ] {
+        let mut w = Whistle::new(*src, SR).unwrap();
+        w.set_wind_speed(0.5);
+        let samples = w.synthesize(0.5).unwrap();
+        assert!(samples.iter().all(|s| s.is_finite()));
+        assert!(samples.iter().any(|&s| s.abs() > 0.001));
+    }
+}
+
+#[test]
+fn test_whistle_zero_wind_is_silent() {
+    let mut w = Whistle::new(WhistleSource::Pipe, SR).unwrap();
+    w.set_wind_speed(0.0);
+    let samples = w.synthesize(0.1).unwrap();
+    assert!(samples.iter().all(|&s| s.abs() < 0.001));
+}
+
+// ---------------------------------------------------------------------------
+// Cloth
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_cloth_all_types() {
+    for ct in &[
+        ClothType::Flag,
+        ClothType::Cape,
+        ClothType::Sail,
+        ClothType::Tarp,
+    ] {
+        let mut c = Cloth::new(*ct, SR).unwrap();
+        c.set_wind_speed(0.6);
+        let samples = c.synthesize(1.0).unwrap();
+        assert!(samples.iter().all(|s| s.is_finite()));
+    }
+}
+
+#[test]
+fn test_cloth_zero_wind_is_silent() {
+    let mut c = Cloth::new(ClothType::Flag, SR).unwrap();
+    c.set_wind_speed(0.0);
+    let samples = c.synthesize(0.1).unwrap();
+    assert!(samples.iter().all(|&s| s.abs() < 0.001));
+}
+
+// ---------------------------------------------------------------------------
+// Aero serde roundtrips
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_serde_roundtrip_whoosh_type() {
+    let json = serde_json::to_string(&WhooshType::Projectile).unwrap();
+    let w2: WhooshType = serde_json::from_str(&json).unwrap();
+    assert_eq!(w2, WhooshType::Projectile);
+}
+
+#[test]
+fn test_serde_roundtrip_whistle_source() {
+    let json = serde_json::to_string(&WhistleSource::Bottle).unwrap();
+    let w2: WhistleSource = serde_json::from_str(&json).unwrap();
+    assert_eq!(w2, WhistleSource::Bottle);
+}
+
+#[test]
+fn test_serde_roundtrip_cloth_type() {
+    let json = serde_json::to_string(&ClothType::Sail).unwrap();
+    let c2: ClothType = serde_json::from_str(&json).unwrap();
+    assert_eq!(c2, ClothType::Sail);
+}
+
+#[test]
+fn test_serde_roundtrip_whoosh() {
+    let w = Whoosh::new(WhooshType::Swing, SR).unwrap();
+    let json = serde_json::to_string(&w).unwrap();
+    let w2: Whoosh = serde_json::from_str(&json).unwrap();
+    let json2 = serde_json::to_string(&w2).unwrap();
+    assert_eq!(json, json2);
+}
+
+#[test]
+fn test_serde_roundtrip_whistle() {
+    let w = Whistle::new(WhistleSource::Gap, SR).unwrap();
+    let json = serde_json::to_string(&w).unwrap();
+    let w2: Whistle = serde_json::from_str(&json).unwrap();
+    let json2 = serde_json::to_string(&w2).unwrap();
+    assert_eq!(json, json2);
+}
+
+#[test]
+fn test_serde_roundtrip_cloth() {
+    let c = Cloth::new(ClothType::Tarp, SR).unwrap();
+    let json = serde_json::to_string(&c).unwrap();
+    let c2: Cloth = serde_json::from_str(&json).unwrap();
+    let json2 = serde_json::to_string(&c2).unwrap();
+    assert_eq!(json, json2);
+}

@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-03-28
+
+### Added
+
+- **Aerodynamic sound synthesis** — 3 new synthesizer modules:
+  - **Whoosh** (`src/whoosh.rs`): object pass-by / swing (Swing, Projectile, Vehicle, Throw), speed-dependent brightness and envelope, `trigger()` + streaming
+  - **Whistle** (`src/whistle.rs`): wind through openings (Gap, Pipe, Bottle, Wire), narrow-band tonal resonance with SVF, pitch wobble LFO, `set_wind_speed()` control
+  - **Cloth** (`src/cloth.rs`): fabric flapping (Flag, Cape, Sail, Tarp), Poisson-scheduled flap events, Sail uses Fabric modal bank for heavy resonance, `set_wind_speed()` control
+- **Shared aero types** (`src/aero.rs`): `WhooshType`, `WhistleSource`, `ClothType` enums
+- 12 new tests: all type variants, trigger APIs, zero-wind silence, serde roundtrips
+- 3 new benchmarks: whoosh_swing, whistle_pipe_1s, cloth_flag_1s
+
+### Changed
+
+- Roadmap: mechanical sounds (engines, gears, motors, steam, electrical) moved to ghurni crate. Doppler math deferred to goonj crate.
+
 ## [0.4.0] - 2026-03-28
 
 ### Added

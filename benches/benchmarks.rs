@@ -226,6 +226,42 @@ criterion_group!(
     bench_creak_door_1s,
     bench_rolling_wheel_wood_1s,
     bench_foliage_rustle_1s,
+    bench_whoosh_swing,
+    bench_whistle_pipe_1s,
+    bench_cloth_flag_1s,
 );
+
+fn bench_whoosh_swing(c: &mut Criterion) {
+    c.bench_function("whoosh_swing", |b| {
+        let mut w = garjan::whoosh::Whoosh::new(garjan::aero::WhooshType::Swing, SR).unwrap();
+        w.set_speed(0.8);
+        b.iter(|| {
+            let samples = w.synthesize(0.5).unwrap();
+            black_box(samples);
+        });
+    });
+}
+
+fn bench_whistle_pipe_1s(c: &mut Criterion) {
+    c.bench_function("whistle_pipe_1s", |b| {
+        let mut w = garjan::whistle::Whistle::new(garjan::aero::WhistleSource::Pipe, SR).unwrap();
+        w.set_wind_speed(0.5);
+        b.iter(|| {
+            let samples = w.synthesize(1.0).unwrap();
+            black_box(samples);
+        });
+    });
+}
+
+fn bench_cloth_flag_1s(c: &mut Criterion) {
+    c.bench_function("cloth_flag_1s", |b| {
+        let mut c_synth = garjan::cloth::Cloth::new(garjan::aero::ClothType::Flag, SR).unwrap();
+        c_synth.set_wind_speed(0.6);
+        b.iter(|| {
+            let samples = c_synth.synthesize(1.0).unwrap();
+            black_box(samples);
+        });
+    });
+}
 
 criterion_main!(benches);

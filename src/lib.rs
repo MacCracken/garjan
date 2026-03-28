@@ -51,6 +51,8 @@
 
 extern crate alloc;
 
+pub mod aero;
+pub mod cloth;
 pub mod contact;
 pub mod creak;
 mod dsp;
@@ -68,9 +70,13 @@ pub mod rolling;
 pub mod texture;
 pub mod water;
 pub mod weather;
+pub mod whistle;
+pub mod whoosh;
 
 /// Convenience re-exports for common usage.
 pub mod prelude {
+    pub use crate::aero::{ClothType, WhistleSource, WhooshType};
+    pub use crate::cloth::Cloth;
     pub use crate::contact::{
         CreakSource, FoliageType, FrictionType, MovementType, RollingBody, Terrain,
     };
@@ -87,6 +93,8 @@ pub mod prelude {
     pub use crate::texture::{AmbientTexture, TextureType};
     pub use crate::water::{Water, WaterType};
     pub use crate::weather::{Rain, RainIntensity, Thunder, Wind};
+    pub use crate::whistle::Whistle;
+    pub use crate::whoosh::Whoosh;
 }
 
 // Compile-time trait assertions: all public types must be Send + Sync.
@@ -124,5 +132,11 @@ mod assert_traits {
         _assert_send_sync::<crate::creak::Creak>();
         _assert_send_sync::<crate::rolling::Rolling>();
         _assert_send_sync::<crate::foliage::Foliage>();
+        _assert_send_sync::<crate::aero::WhooshType>();
+        _assert_send_sync::<crate::aero::WhistleSource>();
+        _assert_send_sync::<crate::aero::ClothType>();
+        _assert_send_sync::<crate::whoosh::Whoosh>();
+        _assert_send_sync::<crate::whistle::Whistle>();
+        _assert_send_sync::<crate::cloth::Cloth>();
     }
 }

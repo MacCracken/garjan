@@ -58,19 +58,13 @@
 
 ---
 
-## v0.5.0 — Aerodynamic & Mechanical
+## v0.5.0 (current) — Aerodynamic
 
-Motion through air, machines.
+Mechanical sounds → ghurni crate. Doppler math → goonj crate.
 
-- [ ] **Whoosh**: object pass-by synthesis (sword swing, projectile, vehicle)
-- [ ] Doppler-aware whoosh (pitch contour from approach/retreat)
-- [ ] Wind whistling through gaps/openings (waveguide model)
-- [ ] Flag/cloth flapping
-- [ ] **Engine**: combustion cycle synthesis, RPM-driven, exhaust resonance
-- [ ] **Motor**: electric hum, servo whine
-- [ ] **Gears**: clicking, meshing, grinding
-- [ ] **Steam**: hissing, venting, pressure release
-- [ ] **Electrical**: arc, transformer hum, buzzing
+- [x] **Whoosh**: Swing, Projectile, Vehicle, Throw — speed-dependent envelope + brightness
+- [x] **Wind whistle**: Gap, Pipe, Bottle, Wire — narrow-band SVF resonance + pitch wobble
+- [x] **Cloth flapping**: Flag, Cape, Sail, Tarp — Poisson flap events + modal resonance
 
 ---
 
