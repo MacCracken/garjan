@@ -17,6 +17,8 @@
 //!     .unwrap();
 //! ```
 
+use serde::{Deserialize, Serialize};
+
 use crate::contact::{FrictionType, MovementType, Terrain};
 use crate::error::Result;
 use crate::friction::Friction;
@@ -24,6 +26,7 @@ use crate::material::Material;
 use crate::precipitation::{Precipitation, PrecipitationType, StoneSize};
 
 /// Builder for `Precipitation`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PrecipitationBuilder {
     sample_rate: f32,
     precip_type: PrecipitationType,
@@ -76,6 +79,7 @@ impl PrecipitationBuilder {
 }
 
 /// Builder for `Footstep`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FootstepBuilder {
     sample_rate: f32,
     terrain: Terrain,
@@ -114,6 +118,7 @@ impl FootstepBuilder {
 }
 
 /// Builder for `Friction`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FrictionBuilder {
     sample_rate: f32,
     friction_type: FrictionType,

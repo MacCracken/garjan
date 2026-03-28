@@ -169,6 +169,9 @@ mod assert_traits {
         _assert_send_sync::<crate::voice::VoiceSlot>();
         _assert_send_sync::<crate::voice::StealPolicy>();
         _assert_send_sync::<crate::lod::Quality>();
+        _assert_send_sync::<crate::builder::PrecipitationBuilder>();
+        _assert_send_sync::<crate::builder::FootstepBuilder>();
+        _assert_send_sync::<crate::builder::FrictionBuilder>();
         _assert_send_sync::<crate::precipitation::Precipitation>();
         _assert_send_sync::<crate::precipitation::PrecipitationType>();
         _assert_send_sync::<crate::precipitation::StoneSize>();
