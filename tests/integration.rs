@@ -985,3 +985,210 @@ fn test_serde_roundtrip_cloth() {
     let json2 = serde_json::to_string(&c2).unwrap();
     assert_eq!(json, json2);
 }
+
+// ---------------------------------------------------------------------------
+// Insect
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_insect_all_types() {
+    for it in &[
+        InsectType::WingBuzz,
+        InsectType::CricketChirp,
+        InsectType::CicadaDrone,
+    ] {
+        let mut ins = Insect::new(*it, SR).unwrap();
+        ins.set_intensity(0.8);
+        let samples = ins.synthesize(0.5).unwrap();
+        assert!(samples.iter().all(|s| s.is_finite()), "NaN for {:?}", it);
+        assert!(
+            samples.iter().any(|&s| s.abs() > 0.001),
+            "silent for {:?}",
+            it
+        );
+    }
+}
+
+#[test]
+fn test_insect_swarm() {
+    let mut swarm = Insect::new_swarm(InsectType::WingBuzz, 5, SR).unwrap();
+    swarm.set_intensity(0.6);
+    let samples = swarm.synthesize(0.5).unwrap();
+    assert!(samples.iter().all(|s| s.is_finite()));
+    assert!(samples.iter().any(|&s| s.abs() > 0.001));
+}
+
+#[test]
+fn test_insect_zero_intensity_is_silent() {
+    let mut ins = Insect::new(InsectType::WingBuzz, SR).unwrap();
+    ins.set_intensity(0.0);
+    let samples = ins.synthesize(0.1).unwrap();
+    assert!(samples.iter().all(|&s| s.abs() < 0.001));
+}
+
+// ---------------------------------------------------------------------------
+// WingFlap
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_wingflap_all_sizes() {
+    for size in &[BirdSize::Small, BirdSize::Medium, BirdSize::Large] {
+        let mut wf = WingFlap::new(*size, SR).unwrap();
+        wf.set_intensity(0.8);
+        let samples = wf.synthesize(0.5).unwrap();
+        assert!(samples.iter().all(|s| s.is_finite()), "NaN for {:?}", size);
+        assert!(
+            samples.iter().any(|&s| s.abs() > 0.001),
+            "silent for {:?}",
+            size
+        );
+    }
+}
+
+#[test]
+fn test_wingflap_zero_intensity_is_silent() {
+    let mut wf = WingFlap::new(BirdSize::Medium, SR).unwrap();
+    wf.set_intensity(0.0);
+    let samples = wf.synthesize(0.1).unwrap();
+    assert!(samples.iter().all(|&s| s.abs() < 0.001));
+}
+
+// ---------------------------------------------------------------------------
+// Bubble
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_bubble_all_types() {
+    for bt in &[
+        BubbleType::Underwater,
+        BubbleType::Boiling,
+        BubbleType::Viscous,
+        BubbleType::Pouring,
+    ] {
+        let mut b = Bubble::new(*bt, SR).unwrap();
+        b.set_intensity(0.8);
+        let samples = b.synthesize(1.0).unwrap();
+        assert!(samples.iter().all(|s| s.is_finite()), "NaN for {:?}", bt);
+    }
+}
+
+#[test]
+fn test_bubble_zero_intensity_is_silent() {
+    let mut b = Bubble::new(BubbleType::Underwater, SR).unwrap();
+    b.set_intensity(0.0);
+    let samples = b.synthesize(0.1).unwrap();
+    assert!(samples.iter().all(|&s| s.abs() < 0.001));
+}
+
+// ---------------------------------------------------------------------------
+// Creature/fluid serde roundtrips
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_serde_roundtrip_insect_type() {
+    let json = serde_json::to_string(&InsectType::CricketChirp).unwrap();
+    let i2: InsectType = serde_json::from_str(&json).unwrap();
+    assert_eq!(i2, InsectType::CricketChirp);
+}
+
+#[test]
+fn test_serde_roundtrip_bubble_type() {
+    let json = serde_json::to_string(&BubbleType::Boiling).unwrap();
+    let b2: BubbleType = serde_json::from_str(&json).unwrap();
+    assert_eq!(b2, BubbleType::Boiling);
+}
+
+#[test]
+fn test_serde_roundtrip_bird_size() {
+    let json = serde_json::to_string(&BirdSize::Large).unwrap();
+    let b2: BirdSize = serde_json::from_str(&json).unwrap();
+    assert_eq!(b2, BirdSize::Large);
+}
+
+#[test]
+fn test_serde_roundtrip_insect() {
+    let ins = Insect::new(InsectType::WingBuzz, SR).unwrap();
+    let json = serde_json::to_string(&ins).unwrap();
+    let i2: Insect = serde_json::from_str(&json).unwrap();
+    let json2 = serde_json::to_string(&i2).unwrap();
+    assert_eq!(json, json2);
+}
+
+#[test]
+fn test_serde_roundtrip_wingflap() {
+    let wf = WingFlap::new(BirdSize::Small, SR).unwrap();
+    let json = serde_json::to_string(&wf).unwrap();
+    let w2: WingFlap = serde_json::from_str(&json).unwrap();
+    let json2 = serde_json::to_string(&w2).unwrap();
+    assert_eq!(json, json2);
+}
+
+#[test]
+fn test_serde_roundtrip_bubble() {
+    let b = Bubble::new(BubbleType::Pouring, SR).unwrap();
+    let json = serde_json::to_string(&b).unwrap();
+    let b2: Bubble = serde_json::from_str(&json).unwrap();
+    let json2 = serde_json::to_string(&b2).unwrap();
+    assert_eq!(json, json2);
+}
+
+// ---------------------------------------------------------------------------
+// Bridge (science crate parameter conversions)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_bridge_rain_intensity_from_rate() {
+    use garjan::bridge::rain_intensity_from_rate;
+    assert!(rain_intensity_from_rate(0.0).is_none());
+    assert_eq!(rain_intensity_from_rate(1.0), Some(RainIntensity::Light));
+    assert_eq!(rain_intensity_from_rate(5.0), Some(RainIntensity::Moderate));
+    assert_eq!(rain_intensity_from_rate(20.0), Some(RainIntensity::Heavy));
+    assert_eq!(
+        rain_intensity_from_rate(100.0),
+        Some(RainIntensity::Torrential)
+    );
+}
+
+#[test]
+fn test_bridge_wind_speed_normalized() {
+    use garjan::bridge::wind_speed_normalized;
+    assert_eq!(wind_speed_normalized(0.0), 0.0);
+    assert_eq!(wind_speed_normalized(10.0), 0.5);
+    assert_eq!(wind_speed_normalized(20.0), 1.0);
+    assert_eq!(wind_speed_normalized(40.0), 1.0);
+}
+
+#[test]
+fn test_bridge_thunder_distance() {
+    use garjan::bridge::thunder_distance_from_flash;
+    let d = thunder_distance_from_flash(3.0, 20.0);
+    assert!(d > 1000.0 && d < 1100.0);
+}
+
+#[test]
+fn test_bridge_fire_intensity() {
+    use garjan::bridge::fire_intensity_from_temperature;
+    assert_eq!(fire_intensity_from_temperature(500.0), 0.0);
+    assert_eq!(fire_intensity_from_temperature(3000.0), 1.0);
+    let campfire = fire_intensity_from_temperature(1200.0);
+    assert!(campfire > 0.2 && campfire < 0.4);
+}
+
+#[test]
+fn test_bridge_weather_from_threat() {
+    use garjan::bridge::weather_from_threat_level;
+    let (_dist, _speed, rain) = weather_from_threat_level(0);
+    assert_eq!(rain, None);
+    let (dist, speed, rain) = weather_from_threat_level(5);
+    assert!(dist < 200.0);
+    assert!(speed > 25.0);
+    assert_eq!(rain, Some(RainIntensity::Torrential));
+}
+
+#[test]
+fn test_bridge_gain_from_distance() {
+    use garjan::bridge::gain_from_distance;
+    assert_eq!(gain_from_distance(1.0, 1.0), 1.0);
+    assert!((gain_from_distance(1.0, 10.0) - 0.1).abs() < 0.001);
+    assert_eq!(gain_from_distance(1.0, 0.5), 1.0);
+}

@@ -52,9 +52,12 @@
 extern crate alloc;
 
 pub mod aero;
+pub mod bridge;
+pub mod bubble;
 pub mod cloth;
 pub mod contact;
 pub mod creak;
+pub mod creature;
 mod dsp;
 pub mod error;
 pub mod fire;
@@ -62,6 +65,7 @@ pub mod foliage;
 pub mod footstep;
 pub mod friction;
 pub mod impact;
+pub mod insect;
 pub mod material;
 mod math;
 pub mod modal;
@@ -72,11 +76,15 @@ pub mod water;
 pub mod weather;
 pub mod whistle;
 pub mod whoosh;
+pub mod wingflap;
 
 /// Convenience re-exports for common usage.
 pub mod prelude {
     pub use crate::aero::{ClothType, WhistleSource, WhooshType};
+    pub use crate::bubble::Bubble;
     pub use crate::cloth::Cloth;
+    pub use crate::creature::{BubbleType, InsectType};
+
     pub use crate::contact::{
         CreakSource, FoliageType, FrictionType, MovementType, RollingBody, Terrain,
     };
@@ -87,6 +95,7 @@ pub mod prelude {
     pub use crate::footstep::Footstep;
     pub use crate::friction::Friction;
     pub use crate::impact::{Impact, ImpactType};
+    pub use crate::insect::Insect;
     pub use crate::material::Material;
     pub use crate::modal::{ExcitationType, Exciter, ModalBank, ModePattern, ModeSpec};
     pub use crate::rolling::Rolling;
@@ -95,6 +104,7 @@ pub mod prelude {
     pub use crate::weather::{Rain, RainIntensity, Thunder, Wind};
     pub use crate::whistle::Whistle;
     pub use crate::whoosh::Whoosh;
+    pub use crate::wingflap::{BirdSize, WingFlap};
 }
 
 // Compile-time trait assertions: all public types must be Send + Sync.
@@ -138,5 +148,11 @@ mod assert_traits {
         _assert_send_sync::<crate::whoosh::Whoosh>();
         _assert_send_sync::<crate::whistle::Whistle>();
         _assert_send_sync::<crate::cloth::Cloth>();
+        _assert_send_sync::<crate::creature::InsectType>();
+        _assert_send_sync::<crate::creature::BubbleType>();
+        _assert_send_sync::<crate::insect::Insect>();
+        _assert_send_sync::<crate::wingflap::BirdSize>();
+        _assert_send_sync::<crate::wingflap::WingFlap>();
+        _assert_send_sync::<crate::bubble::Bubble>();
     }
 }

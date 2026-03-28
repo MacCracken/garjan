@@ -229,7 +229,47 @@ criterion_group!(
     bench_whoosh_swing,
     bench_whistle_pipe_1s,
     bench_cloth_flag_1s,
+    bench_insect_swarm_1s,
+    bench_wingflap_medium_1s,
+    bench_bubble_boiling_1s,
 );
+
+fn bench_insect_swarm_1s(c: &mut Criterion) {
+    c.bench_function("insect_swarm_5_1s", |b| {
+        let mut swarm =
+            garjan::insect::Insect::new_swarm(garjan::creature::InsectType::WingBuzz, 5, SR)
+                .unwrap();
+        swarm.set_intensity(0.6);
+        b.iter(|| {
+            let samples = swarm.synthesize(1.0).unwrap();
+            black_box(samples);
+        });
+    });
+}
+
+fn bench_wingflap_medium_1s(c: &mut Criterion) {
+    c.bench_function("wingflap_medium_1s", |b| {
+        let mut wf =
+            garjan::wingflap::WingFlap::new(garjan::wingflap::BirdSize::Medium, SR).unwrap();
+        wf.set_intensity(0.8);
+        b.iter(|| {
+            let samples = wf.synthesize(1.0).unwrap();
+            black_box(samples);
+        });
+    });
+}
+
+fn bench_bubble_boiling_1s(c: &mut Criterion) {
+    c.bench_function("bubble_boiling_1s", |b| {
+        let mut bub =
+            garjan::bubble::Bubble::new(garjan::creature::BubbleType::Boiling, SR).unwrap();
+        bub.set_intensity(0.8);
+        b.iter(|| {
+            let samples = bub.synthesize(1.0).unwrap();
+            black_box(samples);
+        });
+    });
+}
 
 fn bench_whoosh_swing(c: &mut Criterion) {
     c.bench_function("whoosh_swing", |b| {

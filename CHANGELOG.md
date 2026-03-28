@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-03-28
+
+### Added
+
+- **Creature & Fluid sound synthesis** — 3 new synthesizer modules:
+  - **Insect** (`src/insect.rs`): WingBuzz (AM tone), CricketChirp (stridulation pulse train), CicadaDrone (broadband rattle). Swarm mode (1-8 detuned voices). `set_intensity()` control.
+  - **WingFlap** (`src/wingflap.rs`): Bird wing flap synthesis for Small, Medium, Large birds. Periodic filtered noise bursts at size-dependent rate. `set_intensity()` control.
+  - **Bubble** (`src/bubble.rs`): Underwater, Boiling, Viscous, Pouring — Poisson-scheduled decaying sinusoids (Minnaert resonance model) with onset pop noise. `set_intensity()` control.
+- **Shared creature types** (`src/creature.rs`): `InsectType`, `BubbleType` enums
+- `BirdSize` enum in `wingflap.rs`
+- 13 new tests: all type variants, swarm mode, zero-intensity silence, serde roundtrips
+- 3 new benchmarks: insect_swarm_5_1s, wingflap_medium_1s, bubble_boiling_1s
+- **Science bridge** (`src/bridge.rs`): conversion functions mapping physical simulation outputs to garjan parameters — rain rate (mm/hr) → RainIntensity, wind speed (m/s) → normalized 0-1, Beaufort scale, thermal shear → gustiness, threat level → thunder/wind/rain preset, flash time + temperature → thunder distance, flame temperature → fire intensity, convective flux → fire intensity, seasonal growth → foliage contact, Shannon diversity → foliage density, Reynolds number → WhooshType. All dependency-free (takes primitives, returns garjan types).
+- 6 new bridge tests
+
 ## [0.5.0] - 2026-03-28
 
 ### Added

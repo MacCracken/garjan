@@ -68,16 +68,14 @@ Mechanical sounds → ghurni crate. Doppler math → goonj crate.
 
 ---
 
-## v0.6.0 — Creature & Organic
+## v0.6.0 (current) — Creature & Fluid
 
-Living sounds.
+Physical creature sounds and fluid dynamics. Vocal synthesis → prani/svara.
 
-- [ ] **Insects**: wing buzz (frequency-modulated), chirping (crickets, cicadas)
-- [ ] Insect swarm (granular: many overlapping micro-events)
-- [ ] **Birds**: FM chirps, trills, frequency-modulated songs, wing flaps
-- [ ] **Vocalization**: glottis-based model for growls, howls, purrs, roars
-- [ ] Vocal parameter space: size, tension, breathiness, pitch
-- [ ] **Bubbles**: underwater, boiling, viscous fluid, pouring
+- [x] **Insects**: WingBuzz (AM), CricketChirp (stridulation), CicadaDrone (broadband)
+- [x] Insect swarm (1-8 detuned voices)
+- [x] **Bird wing flaps**: Small, Medium, Large — periodic filtered noise
+- [x] **Bubbles**: Underwater, Boiling, Viscous, Pouring — Minnaert resonance model
 
 ---
 
@@ -88,20 +86,19 @@ Deeper physical models for existing modules.
 - [ ] Rain surface interaction: splatter character varies by surface material
 - [ ] Hail synthesis
 - [ ] Wind: turbulence model with spectral variation by terrain
-- [ ] Waveguide wind for pipes, gaps, building edges
+- [ ] Waveguide wind for pipes, gaps, building edges (extends v0.5 whistle)
 - [ ] Snow/ice cracking and crunching
-- [ ] Underwater ambience (muffled, resonant, pressure-dependent)
+- [ ] Underwater ambience (garjan = source generation, goonj = propagation)
 - [ ] Improved waves: surf zone model with breaking wave phases
-- [ ] Thunder: multi-bolt sequences, rolling echo from terrain
+- [ ] Thunder: multi-bolt sequences (terrain echo → goonj integration point)
 
 ---
 
 ## v0.8.0 — Real-Time & Performance
 
-Production-ready runtime behavior.
+Production-ready runtime behavior. Voice audibility tracking belongs in dhvani.
 
 - [ ] Voice management: priority system, voice stealing, max polyphony
-- [ ] Virtual voices: track inaudible sources without synthesizing
 - [ ] LOD: simplified synthesis models for distant/quiet sources
 - [ ] Pre-allocated buffer pools: zero allocation during synthesis
 - [ ] Object pool for transient events (drops, crackles, debris)
@@ -113,15 +110,14 @@ Production-ready runtime behavior.
 
 ## v0.9.0 — API Hardening & Polish
 
-Ergonomics, safety, completeness.
+Ergonomics, safety, completeness. RTPC mapping and event scheduling belong in
+dhvani/kiran.
 
 - [ ] Builder pattern constructors for all synthesizers
 - [ ] Comprehensive parameter validation at construction time
 - [ ] Graceful degradation: reduce quality under CPU pressure, never panic
 - [ ] Full serde save/restore of mid-synthesis state
 - [ ] Crossfade utilities: equal-power transitions between sound states
-- [ ] RTPC-style parameter mapping: game value -> synthesis parameters
-- [ ] Event system: trigger one-shot sounds, schedule sequences
 - [ ] Complete documentation with acoustic rationale for each model
 
 ---
@@ -131,7 +127,7 @@ Ergonomics, safety, completeness.
 - [ ] API freeze — no breaking changes until v2
 - [ ] All public types: `#[non_exhaustive]`, `#[must_use]`, serde, Send + Sync
 - [ ] Full rustdoc with examples for every public item
-- [ ] Example programs: weather scene, forest ambience, combat impacts, vehicle
+- [ ] Example programs: weather scene, forest ambience, combat impacts
 - [ ] Performance optimization pass: all benchmarks baselined
 - [ ] `cargo fuzz` targets for all public API entry points
 - [ ] Migration guide from 0.x series
@@ -147,7 +143,18 @@ Ergonomics, safety, completeness.
 - **`no_std` compatible**: `libm` fallback, `alloc` only
 - **Composable**: synthesizers are independent, caller mixes
 - **Physical grounding**: models rooted in acoustics, not arbitrary DSP chains
-- **Leverage dependencies**: hisab for math, naad for audio primitives — don't reinvent
+- **Leverage dependencies**: naad for audio primitives — don't reinvent
+
+## Scope Boundaries (sibling crates)
+
+| Domain | Owner | garjan's role |
+|---|---|---|
+| Vocal synthesis (bird song, growls, speech) | **prani** (via **svara**) | Not garjan's domain |
+| Mechanical sounds (engines, gears, motors) | **ghurni** | Not garjan's domain |
+| Acoustics (propagation, Doppler, reverb, RT60) | **goonj** | garjan generates source, goonj propagates |
+| Audio engine (mixing, buses, scheduling, RTPC) | **dhvani** | garjan exposes params, dhvani maps them |
+| Weather physics (rain rate, wind profiles) | **badal** / **pavan** | garjan consumes their outputs as params |
+| Creature behavior (when/why sounds trigger) | **jantu** | jantu decides, garjan synthesizes |
 
 ## Non-Goals (garjan scope)
 
