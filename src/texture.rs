@@ -142,6 +142,7 @@ impl AmbientTexture {
     }
 
     /// Returns the band mix ratios `(low, mid, high)` for the texture type.
+    #[inline]
     #[must_use]
     fn band_mix(&self) -> (f32, f32, f32) {
         match self.texture_type {

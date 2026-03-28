@@ -30,6 +30,7 @@ pub struct Water {
     rng: Rng,
     dc_blocker: DcBlocker,
     sample_position: usize,
+    drip_freq: f32,
     #[cfg(feature = "naad-backend")]
     noise_gen: naad::noise::NoiseGenerator,
     #[cfg(feature = "naad-backend")]
@@ -81,6 +82,7 @@ impl Water {
         let mod_lfo =
             naad::modulation::Lfo::new(naad::modulation::LfoShape::Sine, lfo_rate, sample_rate)
                 .map_err(|e| crate::error::GarjanError::SynthesisFailed(alloc::format!("{e}")))?;
+        let drip_freq = 1200.0 + Rng::new(2749).next_f32_range(-200.0, 200.0);
         Ok(Self {
             water_type,
             intensity: intensity.clamp(0.0, 1.0),
@@ -88,6 +90,7 @@ impl Water {
             rng: Rng::new(2749),
             dc_blocker: DcBlocker::new(sample_rate),
             sample_position: 0,
+            drip_freq,
             #[cfg(feature = "naad-backend")]
             noise_gen: naad::noise::NoiseGenerator::new(noise_type, 2749),
             #[cfg(feature = "naad-backend")]
@@ -145,8 +148,7 @@ impl Water {
     #[inline]
     fn process_drip(&mut self, output: &mut [f32]) {
         // Drip: resonant tone — no naad needed, keep manual sin + exp
-        // Use a fixed-seed rng for consistent frequency across process_block calls
-        let freq = 1200.0 + Rng::new(2749).next_f32_range(-200.0, 200.0);
+        let freq = self.drip_freq;
         let omega = core::f32::consts::TAU * freq / self.sample_rate;
         let drip_len = (self.sample_rate * 0.05) as usize;
 

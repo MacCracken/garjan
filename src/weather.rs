@@ -32,6 +32,7 @@ pub enum RainIntensity {
 
 impl RainIntensity {
     /// Returns drops per second for this intensity.
+    #[inline]
     #[must_use]
     fn drops_per_second(self) -> f32 {
         match self {
@@ -43,6 +44,7 @@ impl RainIntensity {
     }
 
     /// Returns amplitude scaling for this intensity.
+    #[inline]
     #[must_use]
     fn amplitude(self) -> f32 {
         match self {

@@ -798,6 +798,51 @@ fn test_serde_roundtrip_foliage_type() {
 }
 
 #[test]
+fn test_serde_roundtrip_footstep() {
+    let fs = Footstep::new(Terrain::Wood, MovementType::Walk, SR).unwrap();
+    let json = serde_json::to_string(&fs).unwrap();
+    let f2: Footstep = serde_json::from_str(&json).unwrap();
+    let json2 = serde_json::to_string(&f2).unwrap();
+    assert_eq!(json, json2);
+}
+
+#[test]
+fn test_serde_roundtrip_friction() {
+    let f = Friction::new(FrictionType::Scrape, Material::Metal, SR).unwrap();
+    let json = serde_json::to_string(&f).unwrap();
+    let f2: Friction = serde_json::from_str(&json).unwrap();
+    let json2 = serde_json::to_string(&f2).unwrap();
+    assert_eq!(json, json2);
+}
+
+#[test]
+fn test_serde_roundtrip_creak() {
+    let c = Creak::new(CreakSource::Door, SR).unwrap();
+    let json = serde_json::to_string(&c).unwrap();
+    let c2: Creak = serde_json::from_str(&json).unwrap();
+    let json2 = serde_json::to_string(&c2).unwrap();
+    assert_eq!(json, json2);
+}
+
+#[test]
+fn test_serde_roundtrip_rolling() {
+    let r = Rolling::new(RollingBody::Barrel, Material::Wood, SR).unwrap();
+    let json = serde_json::to_string(&r).unwrap();
+    let r2: Rolling = serde_json::from_str(&json).unwrap();
+    let json2 = serde_json::to_string(&r2).unwrap();
+    assert_eq!(json, json2);
+}
+
+#[test]
+fn test_serde_roundtrip_foliage() {
+    let f = Foliage::new(FoliageType::LeafRustle, SR).unwrap();
+    let json = serde_json::to_string(&f).unwrap();
+    let f2: Foliage = serde_json::from_str(&json).unwrap();
+    let json2 = serde_json::to_string(&f2).unwrap();
+    assert_eq!(json, json2);
+}
+
+#[test]
 fn test_serde_roundtrip_creak_source() {
     let json = serde_json::to_string(&CreakSource::Hinge).unwrap();
     let c2: CreakSource = serde_json::from_str(&json).unwrap();

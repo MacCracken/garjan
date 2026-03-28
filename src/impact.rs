@@ -29,6 +29,7 @@ pub enum ImpactType {
 
 impl ImpactType {
     /// Returns the force multiplier for this impact type.
+    #[inline]
     #[must_use]
     fn force(self) -> f32 {
         match self {
@@ -40,6 +41,7 @@ impl ImpactType {
     }
 
     /// Returns the default excitation type and duration in seconds for this impact.
+    #[inline]
     #[must_use]
     fn excitation_config(self, sample_rate: f32) -> ExcitationType {
         match self {

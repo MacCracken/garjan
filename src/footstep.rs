@@ -25,6 +25,7 @@ pub struct Footstep {
     dc_blocker: DcBlocker,
     sample_position: usize,
     // Step timing
+    base_step_interval: usize,
     step_interval_samples: usize,
     samples_since_last_step: usize,
     step_force: f32,
@@ -115,6 +116,7 @@ impl Footstep {
             rng: Rng::new(8888),
             dc_blocker: DcBlocker::new(sample_rate),
             sample_position: 0,
+            base_step_interval: step_interval_samples,
             step_interval_samples,
             samples_since_last_step: step_interval_samples, // trigger immediately
             step_force: force,
@@ -186,17 +188,16 @@ impl Footstep {
     }
 
     fn fire_step(&mut self) {
-        // Add jitter to interval (+/- 5%)
-        let jitter = 1.0 + self.rng.next_f32_range(-0.05, 0.05);
         self.samples_since_last_step = 0;
         self.step_pending = false;
         self.exciter.trigger();
         if let Some(ref mut bank) = self.modal_bank {
             bank.reset();
         }
-        // Apply jitter to next interval
-        if self.step_interval_samples > 0 {
-            self.step_interval_samples = ((self.step_interval_samples as f32) * jitter) as usize;
+        // Apply jitter from base interval (prevents cumulative drift)
+        if self.base_step_interval > 0 {
+            let jitter = 1.0 + self.rng.next_f32_range(-0.05, 0.05);
+            self.step_interval_samples = ((self.base_step_interval as f32) * jitter) as usize;
         }
     }
 

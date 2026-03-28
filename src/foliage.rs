@@ -25,8 +25,6 @@ pub struct Foliage {
     // Real-time parameters
     wind_speed: f32,
     contact_intensity: f32,
-    // Micro-event scheduling
-    block_counter: usize,
     // Branch snap (one-shot)
     snap_modal: Option<ModalBank>,
     snap_exciter: Exciter,
@@ -112,7 +110,6 @@ impl Foliage {
             sample_position: 0,
             wind_speed: 0.0,
             contact_intensity: 0.0,
-            block_counter: 0,
             snap_modal,
             snap_exciter,
             snap_pending: false,
@@ -137,9 +134,11 @@ impl Foliage {
         self.contact_intensity = intensity.clamp(0.0, 1.0);
     }
 
-    /// Triggers a branch snap (one-shot, for `BranchSnap` type).
+    /// Triggers a branch snap (one-shot). Only has effect for `BranchSnap` type.
     pub fn trigger_snap(&mut self) {
-        self.snap_pending = true;
+        if self.foliage_type == FoliageType::BranchSnap {
+            self.snap_pending = true;
+        }
     }
 
     /// Synthesizes foliage audio.
@@ -165,6 +164,7 @@ impl Foliage {
         self.sample_position += output.len();
     }
 
+    #[inline]
     fn process_rustle(&mut self, output: &mut [f32]) {
         let total_rate =
             self.wind_speed * self.event_rate + self.contact_intensity * self.event_rate * 2.0;
@@ -211,6 +211,7 @@ impl Foliage {
         }
     }
 
+    #[inline]
     fn process_branch_snap(&mut self, output: &mut [f32]) {
         if self.snap_pending {
             self.snap_pending = false;
