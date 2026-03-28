@@ -101,10 +101,10 @@ RTPC mapping, event scheduling → dhvani/kiran.
 - [x] Duration validation: all synthesize() methods reject negative/NaN/infinite
 - [x] Deterministic replay verified: 9 synths tested for bit-identical output
 - [x] Benchmark coverage: all 25 synth types now benchmarked (26 benchmarks)
-- [ ] Voice management: priority system, voice stealing, max polyphony — deferred to v0.9+
-- [ ] LOD: simplified models for distant sources — deferred to v0.9+
-- [ ] Builder pattern constructors — deferred to v0.9+
-- [ ] SIMD-friendly buffer layouts — deferred to v0.9+
+- [x] Voice management: VoicePool with Oldest/LowestPriority/None steal policies
+- [ ] LOD: simplified models for distant sources — post v1.0
+- [ ] Builder pattern constructors — post v1.0
+- [ ] SIMD-friendly buffer layouts — post v1.0
 
 ---
 

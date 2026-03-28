@@ -1439,3 +1439,113 @@ fn test_serde_roundtrip_surf() {
     let json2 = serde_json::to_string(&s2).unwrap();
     assert_eq!(json, json2);
 }
+
+// ---------------------------------------------------------------------------
+// Voice management
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_voice_pool_basic() {
+    let mut pool = VoicePool::new(4, StealPolicy::Oldest);
+    assert_eq!(pool.max_voices(), 4);
+    assert_eq!(pool.active_count(), 0);
+
+    let idx = pool.allocate(5, 100).unwrap();
+    assert_eq!(idx, 0);
+    assert_eq!(pool.active_count(), 1);
+    assert!(pool.slot(0).unwrap().active);
+    assert_eq!(pool.slot(0).unwrap().tag, 100);
+
+    pool.release(0);
+    assert_eq!(pool.active_count(), 0);
+}
+
+#[test]
+fn test_voice_pool_fill_and_steal_oldest() {
+    let mut pool = VoicePool::new(2, StealPolicy::Oldest);
+    pool.allocate(5, 1).unwrap(); // slot 0
+    pool.tick();
+    pool.allocate(5, 2).unwrap(); // slot 1
+    assert_eq!(pool.active_count(), 2);
+
+    // Pool full — should steal oldest (slot 0, age=1)
+    let stolen = pool.allocate(5, 3).unwrap();
+    assert_eq!(stolen, 0);
+    assert_eq!(pool.slot(0).unwrap().tag, 3);
+}
+
+#[test]
+fn test_voice_pool_steal_lowest_priority() {
+    let mut pool = VoicePool::new(2, StealPolicy::LowestPriority);
+    pool.allocate(10, 1).unwrap(); // slot 0, high priority
+    pool.allocate(1, 2).unwrap(); // slot 1, low priority
+
+    // New voice with priority 5 — should steal slot 1 (priority 1)
+    let stolen = pool.allocate(5, 3).unwrap();
+    assert_eq!(stolen, 1);
+    assert_eq!(pool.slot(1).unwrap().tag, 3);
+}
+
+#[test]
+fn test_voice_pool_no_steal_policy() {
+    let mut pool = VoicePool::new(1, StealPolicy::None);
+    pool.allocate(5, 1).unwrap();
+    assert!(pool.allocate(5, 2).is_none()); // rejected
+}
+
+#[test]
+fn test_voice_pool_no_steal_higher_priority() {
+    let mut pool = VoicePool::new(1, StealPolicy::LowestPriority);
+    pool.allocate(10, 1).unwrap(); // high priority
+    // Lower priority voice should not steal
+    assert!(pool.allocate(5, 2).is_none());
+}
+
+#[test]
+fn test_voice_pool_tick_ages() {
+    let mut pool = VoicePool::new(2, StealPolicy::Oldest);
+    pool.allocate(5, 1).unwrap();
+    assert_eq!(pool.slot(0).unwrap().age, 0);
+    pool.tick();
+    assert_eq!(pool.slot(0).unwrap().age, 1);
+    pool.tick();
+    assert_eq!(pool.slot(0).unwrap().age, 2);
+}
+
+#[test]
+fn test_voice_pool_release_all() {
+    let mut pool = VoicePool::new(4, StealPolicy::Oldest);
+    pool.allocate(5, 1).unwrap();
+    pool.allocate(5, 2).unwrap();
+    pool.allocate(5, 3).unwrap();
+    assert_eq!(pool.active_count(), 3);
+    pool.release_all();
+    assert_eq!(pool.active_count(), 0);
+}
+
+#[test]
+fn test_voice_pool_active_voices_iterator() {
+    let mut pool = VoicePool::new(4, StealPolicy::Oldest);
+    pool.allocate(5, 10).unwrap();
+    pool.allocate(3, 20).unwrap();
+    let tags: Vec<u32> = pool.active_voices().map(|(_, s)| s.tag).collect();
+    assert_eq!(tags, vec![10, 20]);
+}
+
+#[test]
+fn test_serde_roundtrip_voice_pool() {
+    let mut pool = VoicePool::new(4, StealPolicy::LowestPriority);
+    pool.allocate(5, 42).unwrap();
+    pool.tick();
+    let json = serde_json::to_string(&pool).unwrap();
+    let p2: VoicePool = serde_json::from_str(&json).unwrap();
+    let json2 = serde_json::to_string(&p2).unwrap();
+    assert_eq!(json, json2);
+}
+
+#[test]
+fn test_serde_roundtrip_steal_policy() {
+    let json = serde_json::to_string(&StealPolicy::LowestPriority).unwrap();
+    let s2: StealPolicy = serde_json::from_str(&json).unwrap();
+    assert_eq!(s2, StealPolicy::LowestPriority);
+}

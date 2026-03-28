@@ -18,6 +18,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 3 missing benchmarks: `precipitation_hail_1s`, `underwater_medium_1s`, `surf_moderate_2s`
 - Deterministic replay test: verifies 9 synthesizers produce bit-identical output across two runs with same params
 - Invalid duration test: verifies proper error handling for negative/zero/NaN/infinite
+- **Voice management** (`src/voice.rs`): `VoicePool` with priority-based polyphony, 3 steal policies (Oldest, LowestPriority, None), slot allocation/release, age tracking via `tick()`, active voice iteration
+- 10 voice management tests
 
 ## [0.7.0] - 2026-03-28
 

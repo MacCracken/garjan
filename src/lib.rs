@@ -75,6 +75,7 @@ pub mod rolling;
 pub mod surf;
 pub mod texture;
 pub mod underwater;
+pub mod voice;
 pub mod water;
 pub mod weather;
 pub mod whistle;
@@ -106,6 +107,7 @@ pub mod prelude {
     pub use crate::surf::{Surf, SurfIntensity};
     pub use crate::texture::{AmbientTexture, TextureType};
     pub use crate::underwater::{Underwater, UnderwaterDepth};
+    pub use crate::voice::{StealPolicy, VoicePool, VoiceSlot};
     pub use crate::water::{Water, WaterType};
     pub use crate::weather::{Rain, RainIntensity, Thunder, Wind};
     pub use crate::whistle::Whistle;
@@ -160,6 +162,9 @@ mod assert_traits {
         _assert_send_sync::<crate::wingflap::BirdSize>();
         _assert_send_sync::<crate::wingflap::WingFlap>();
         _assert_send_sync::<crate::bubble::Bubble>();
+        _assert_send_sync::<crate::voice::VoicePool>();
+        _assert_send_sync::<crate::voice::VoiceSlot>();
+        _assert_send_sync::<crate::voice::StealPolicy>();
         _assert_send_sync::<crate::precipitation::Precipitation>();
         _assert_send_sync::<crate::precipitation::PrecipitationType>();
         _assert_send_sync::<crate::precipitation::StoneSize>();
