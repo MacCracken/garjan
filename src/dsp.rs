@@ -20,7 +20,7 @@ impl DcBlocker {
         Self {
             x_prev: 0.0,
             y_prev: 0.0,
-            r: 1.0 - (core::f32::consts::TAU * 10.0 / sample_rate),
+            r: (1.0 - (core::f32::consts::TAU * 10.0 / sample_rate)).clamp(0.9, 0.9999),
         }
     }
 

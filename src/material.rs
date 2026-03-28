@@ -33,7 +33,7 @@ pub enum Material {
 }
 
 /// Acoustic properties of a material for impact/contact synthesis.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MaterialProperties {
     /// Primary resonant frequency (Hz).
     pub resonance: f32,
@@ -48,7 +48,7 @@ pub struct MaterialProperties {
 }
 
 /// Modal synthesis configuration for a material.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct MaterialModeConfig {
     /// Frequency pattern for mode generation.
     pub pattern: crate::modal::ModePattern,

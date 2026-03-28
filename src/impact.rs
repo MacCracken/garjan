@@ -117,19 +117,16 @@ impl Impact {
     /// Creates an impact synthesizer for a material interaction.
     ///
     /// The `surface` material provides the resonant modes (what rings).
-    /// The `striker` material modifies the excitation character:
-    /// harder strikers produce shorter, brighter excitations.
+    /// The `striker` is reserved for future use (v0.4+: excitation hardness
+    /// derived from striker's transient/brightness properties).
+    ///
+    /// Currently equivalent to `Impact::new(surface, sample_rate)`.
     pub fn new_interaction(
         _striker: Material,
         surface: Material,
         sample_rate: f32,
     ) -> Result<Self> {
-        // Surface provides resonance, striker just modifies excitation (via force/type)
-        // The constructor creates modes from the surface material
         Self::new(surface, sample_rate)
-        // Caller uses striker properties to select impact type:
-        // hard striker (Metal, Stone, Glass) → Crash/Strike
-        // soft striker (Fabric, Earth, Leaf) → Tap
     }
 
     /// Returns the material.
@@ -165,49 +162,57 @@ impl Impact {
     }
 
     /// Fills output buffer with impact audio for the given impact type (streaming).
+    ///
+    /// Unlike `synthesize`, this does not reset internal state. Call it once
+    /// after construction to generate the initial impact, then continue calling
+    /// to stream the decay tail. The transient and excitation only fire during
+    /// the first few milliseconds of absolute time.
     #[inline]
     pub fn process_block(&mut self, impact_type: ImpactType, output: &mut [f32]) {
         self.generate_impact(impact_type, impact_type.force(), output);
     }
 
     fn generate_impact(&mut self, impact_type: ImpactType, velocity: f32, output: &mut [f32]) {
-        // Build excitation signal
+        let num_samples = output.len();
+
+        // Build excitation buffer: primary excitation + optional debris
+        let mut excitation = alloc::vec![0.0f32; num_samples];
+
+        // Primary excitation
         let exc_type = impact_type.excitation_config(self.sample_rate);
         let mut exciter = Exciter::new(exc_type, velocity);
         exciter.trigger();
 
-        let num_samples = output.len();
+        let transient_len = (self.sample_rate * 0.005) as usize;
+        for (i, exc) in excitation.iter_mut().enumerate() {
+            *exc = exciter.next_sample();
 
-        // Generate primary excitation + modal response
-        for (i, sample) in output.iter_mut().enumerate() {
-            let mut exc = exciter.next_sample();
-
-            // Add noise transient (filtered through material resonance with naad)
+            // Add noise transient
             let abs_pos = self.sample_position + i;
-            let transient_len = (self.sample_rate * 0.005) as usize;
             if abs_pos < transient_len {
                 let env = 1.0 - (abs_pos as f32 / transient_len as f32);
                 #[cfg(feature = "naad-backend")]
                 {
                     let noise = self.transient_noise.next_sample();
-                    exc += self.resonance_filter.process_sample(noise)
+                    *exc += self.resonance_filter.process_sample(noise)
                         * env
                         * self.props.transient
                         * velocity;
                 }
                 #[cfg(not(feature = "naad-backend"))]
                 {
-                    exc += self.rng.next_f32() * env * self.props.transient * velocity;
+                    *exc += self.rng.next_f32() * env * self.props.transient * velocity;
                 }
             }
-
-            *sample = self.modal_bank.process_sample(exc);
         }
 
-        // Shatter: add debris cascade
+        // Shatter: add debris impulses into the excitation buffer
         if impact_type == ImpactType::Shatter {
-            self.add_shatter_debris(velocity, output);
+            self.add_shatter_debris(velocity, &mut excitation);
         }
+
+        // Process excitation linearly through modal bank
+        self.modal_bank.process_block(&excitation, output);
 
         // DC blocking
         for sample in output.iter_mut() {
@@ -216,30 +221,28 @@ impl Impact {
         self.sample_position += num_samples;
     }
 
-    fn add_shatter_debris(&mut self, velocity: f32, output: &mut [f32]) {
-        let num_samples = output.len();
-        let debris_window = (self.sample_rate * 0.2) as usize; // 200ms window
-        let n_debris = 3 + self.rng.poisson(5.0); // 3-8 debris events
+    /// Adds debris impulses into the excitation buffer for shatter effects.
+    fn add_shatter_debris(&mut self, velocity: f32, excitation: &mut [f32]) {
+        let num_samples = excitation.len();
+        let debris_window = (self.sample_rate * 0.2) as usize;
+        let n_debris = 3 + self.rng.poisson(5.0);
 
         for _ in 0..n_debris {
-            let offset = self.rng.next_f32_range(
-                self.sample_rate * 0.01, // start after 10ms
-                debris_window as f32,
-            ) as usize;
+            let offset = self
+                .rng
+                .next_f32_range(self.sample_rate * 0.01, debris_window as f32)
+                as usize;
 
             if offset >= num_samples {
                 continue;
             }
 
             let debris_amp = velocity * self.rng.next_f32_range(0.1, 0.4);
-            let debris_dur = self.rng.next_f32_range(3.0, 15.0) as usize; // very short burst
+            let debris_dur = self.rng.next_f32_range(3.0, 15.0) as usize;
 
-            // Short impulse excitation at the debris time
             for j in 0..debris_dur.min(num_samples - offset) {
                 let env = 1.0 - (j as f32 / debris_dur as f32);
-                let exc = debris_amp * env * self.rng.next_f32();
-                // Feed through the already-ringing modal bank
-                output[offset + j] += self.modal_bank.process_sample(exc);
+                excitation[offset + j] += debris_amp * env * self.rng.next_f32();
             }
         }
     }

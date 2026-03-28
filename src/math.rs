@@ -22,6 +22,10 @@ pub(crate) mod f32 {
     pub fn sqrt(x: f32) -> f32 {
         x.sqrt()
     }
+    #[inline(always)]
+    pub fn powf(base: f32, exp: f32) -> f32 {
+        base.powf(exp)
+    }
 }
 
 #[cfg(not(feature = "std"))]
@@ -41,5 +45,9 @@ pub(crate) mod f32 {
     #[inline(always)]
     pub fn sqrt(x: f32) -> f32 {
         libm::sqrtf(x)
+    }
+    #[inline(always)]
+    pub fn powf(base: f32, exp: f32) -> f32 {
+        libm::powf(base, exp)
     }
 }

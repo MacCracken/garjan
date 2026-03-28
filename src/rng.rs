@@ -53,7 +53,9 @@ impl Rng {
     /// Poisson-distributed count for a given rate (events per unit time).
     ///
     /// Uses Knuth's algorithm — suitable for small rates (< 30).
+    /// Rates above 30 are clamped to prevent excessive iteration.
     pub fn poisson(&mut self, rate: f32) -> u32 {
+        let rate = rate.clamp(0.0, 30.0);
         let l = crate::math::f32::exp(-rate);
         let mut k = 0u32;
         let mut p = 1.0f32;

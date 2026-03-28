@@ -1,7 +1,6 @@
 //! Integration tests for garjan.
 
 use garjan::prelude::*;
-use garjan::texture::TextureType;
 
 const SR: f32 = 44100.0;
 
@@ -562,6 +561,28 @@ fn test_serde_roundtrip_mode_pattern() {
     let json = serde_json::to_string(&ModePattern::Plate).unwrap();
     let p2: ModePattern = serde_json::from_str(&json).unwrap();
     assert_eq!(p2, ModePattern::Plate);
+}
+
+#[test]
+fn test_serde_roundtrip_exciter() {
+    let exc = Exciter::new(
+        ExcitationType::NoiseBurst {
+            duration_samples: 100,
+        },
+        0.5,
+    );
+    let json = serde_json::to_string(&exc).unwrap();
+    let e2: Exciter = serde_json::from_str(&json).unwrap();
+    let json2 = serde_json::to_string(&e2).unwrap();
+    assert_eq!(json, json2);
+}
+
+#[test]
+fn test_serde_roundtrip_material_mode_config() {
+    let cfg = Material::Metal.mode_config();
+    let json = serde_json::to_string(&cfg).unwrap();
+    let c2: garjan::material::MaterialModeConfig = serde_json::from_str(&json).unwrap();
+    assert_eq!(cfg, c2);
 }
 
 #[test]

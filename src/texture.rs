@@ -122,8 +122,7 @@ impl AmbientTexture {
     #[inline]
     pub fn synthesize(&mut self, duration: f32) -> Result<Vec<f32>> {
         let num_samples = (self.sample_rate * duration) as usize;
-        let mut output = Vec::with_capacity(num_samples);
-        output.resize(num_samples, 0.0);
+        let mut output = alloc::vec![0.0f32; num_samples];
         self.process_block(&mut output);
         Ok(output)
     }

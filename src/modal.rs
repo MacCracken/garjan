@@ -35,7 +35,7 @@ const BEAM_RATIOS: [f32; 16] = [
 // ---------------------------------------------------------------------------
 
 /// Specification for a single resonant mode.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ModeSpec {
     /// Mode frequency in Hz.
     pub frequency: f32,
@@ -154,6 +154,11 @@ impl ModalBank {
     /// Output is overwritten (not accumulated).
     #[inline]
     pub fn process_block(&mut self, excitation: &[f32], output: &mut [f32]) {
+        debug_assert_eq!(
+            excitation.len(),
+            output.len(),
+            "excitation and output buffers must be the same length"
+        );
         let len = excitation.len().min(output.len());
         for i in 0..len {
             output[i] = self.process_sample(excitation[i]);
@@ -208,7 +213,7 @@ pub fn generate_modes(
                 }
                 ModePattern::Plate => {
                     // f_k ~ f0 * k^1.7 — practical plate approximation
-                    f0 * kf.powf(1.7)
+                    f0 * crate::math::f32::powf(kf, 1.7)
                 }
                 ModePattern::StiffString => {
                     let b = 0.001f32;
@@ -223,7 +228,7 @@ pub fn generate_modes(
             }
 
             // Amplitude: spectral tilt from brightness
-            let amplitude = 1.0 / kf.powf(rolloff_exp);
+            let amplitude = 1.0 / crate::math::f32::powf(kf, rolloff_exp);
 
             // Frequency-dependent damping: higher modes decay faster
             let freq_ratio = freq / f0;
@@ -304,9 +309,9 @@ impl Exciter {
         let sample = match self.excitation_type {
             ExcitationType::Impulse => {
                 if self.position == 0 {
+                    self.active = false; // spent after this sample
                     self.amplitude
                 } else {
-                    self.active = false;
                     0.0
                 }
             }

@@ -7,8 +7,8 @@ const SR: f32 = 44100.0;
 
 fn bench_thunder_1s(c: &mut Criterion) {
     c.bench_function("thunder_1s", |b| {
-        let mut thunder = Thunder::new(500.0, SR).unwrap();
         b.iter(|| {
+            let mut thunder = Thunder::new(500.0, SR).unwrap();
             let samples = thunder.synthesize(1.0).unwrap();
             black_box(samples);
         });

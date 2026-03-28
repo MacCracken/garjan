@@ -145,7 +145,8 @@ impl Water {
     #[inline]
     fn process_drip(&mut self, output: &mut [f32]) {
         // Drip: resonant tone — no naad needed, keep manual sin + exp
-        let freq = 1200.0 + self.rng.next_f32_range(-200.0, 200.0);
+        // Use a fixed-seed rng for consistent frequency across process_block calls
+        let freq = 1200.0 + Rng::new(2749).next_f32_range(-200.0, 200.0);
         let omega = core::f32::consts::TAU * freq / self.sample_rate;
         let drip_len = (self.sample_rate * 0.05) as usize;
 
