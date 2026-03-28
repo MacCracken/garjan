@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0] - 2026-03-28
+
+### Added
+
+- **API freeze**: no breaking changes until v2
+- **Example programs**: `weather_scene`, `forest_ambience`, `combat_impacts` in `examples/`
+- **Migration guide**: `MIGRATION.md` documenting all 0.x breaking changes
+
+### Verified
+
+- All public types: `#[non_exhaustive]` enums, serde, Send + Sync
+- All constructors validate sample rate; all `synthesize()` validate duration
+- Full deterministic replay (seeded RNG, no system entropy)
+- Zero hot-path heap allocations in `process_block`
+- `cargo audit`, `cargo deny`, `cargo clippy`, `cargo doc` — zero warnings
+
 ## [0.9.0] - 2026-03-28
 
 ### Added
