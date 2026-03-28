@@ -62,12 +62,14 @@ impl Impact {
     }
 
     /// Returns the material.
+    #[inline]
     #[must_use]
     pub fn material(&self) -> Material {
         self.material
     }
 
     /// Synthesizes an impact sound.
+    #[inline]
     pub fn synthesize(&mut self, impact_type: ImpactType, sample_rate: f32) -> Result<Vec<f32>> {
         let force = impact_type.force();
         let duration = self.props.decay * 2.0 + 0.02; // Transient + decay

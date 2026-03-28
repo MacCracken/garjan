@@ -43,6 +43,7 @@ impl Water {
     }
 
     /// Synthesizes water audio.
+    #[inline]
     pub fn synthesize(&mut self, sample_rate: f32, duration: f32) -> Result<Vec<f32>> {
         let num_samples = (sample_rate * duration) as usize;
         match self.water_type {
@@ -53,6 +54,7 @@ impl Water {
         }
     }
 
+    #[inline]
     fn synthesize_stream(&mut self, sample_rate: f32, num_samples: usize) -> Result<Vec<f32>> {
         let mut output = Vec::with_capacity(num_samples);
         let amp = self.intensity * 0.3;
@@ -69,6 +71,7 @@ impl Water {
         Ok(output)
     }
 
+    #[inline]
     fn synthesize_drip(&mut self, sample_rate: f32, num_samples: usize) -> Result<Vec<f32>> {
         let mut output = alloc::vec![0.0f32; num_samples];
         // Single drip: resonant tone at ~1-2kHz with fast decay
@@ -76,7 +79,11 @@ impl Water {
         let omega = core::f32::consts::TAU * freq / sample_rate;
         let drip_len = (sample_rate * 0.05) as usize;
 
-        for (i, sample) in output.iter_mut().enumerate().take(drip_len.min(num_samples)) {
+        for (i, sample) in output
+            .iter_mut()
+            .enumerate()
+            .take(drip_len.min(num_samples))
+        {
             let t = i as f32 / sample_rate;
             let env = crate::math::f32::exp(-30.0 * t);
             *sample = crate::math::f32::sin(omega * i as f32) * env * self.intensity;
@@ -84,6 +91,7 @@ impl Water {
         Ok(output)
     }
 
+    #[inline]
     fn synthesize_splash(&mut self, sample_rate: f32, num_samples: usize) -> Result<Vec<f32>> {
         let mut output = Vec::with_capacity(num_samples);
         let amp = self.intensity * 0.6;
@@ -97,6 +105,7 @@ impl Water {
         Ok(output)
     }
 
+    #[inline]
     fn synthesize_waves(&mut self, sample_rate: f32, num_samples: usize) -> Result<Vec<f32>> {
         let mut output = Vec::with_capacity(num_samples);
         let amp = self.intensity * 0.4;

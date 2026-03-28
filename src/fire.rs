@@ -35,6 +35,7 @@ impl Fire {
     }
 
     /// Synthesizes fire audio.
+    #[inline]
     pub fn synthesize(&mut self, sample_rate: f32, duration: f32) -> Result<Vec<f32>> {
         let num_samples = (sample_rate * duration) as usize;
         let mut output = alloc::vec![0.0f32; num_samples];

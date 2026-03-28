@@ -57,7 +57,6 @@ pub mod error;
 pub mod fire;
 pub mod impact;
 pub mod material;
-#[allow(dead_code)]
 mod math;
 mod rng;
 pub mod texture;
@@ -70,7 +69,7 @@ pub mod prelude {
     pub use crate::fire::Fire;
     pub use crate::impact::{Impact, ImpactType};
     pub use crate::material::Material;
-    pub use crate::texture::AmbientTexture;
+    pub use crate::texture::{AmbientTexture, TextureType};
     pub use crate::water::{Water, WaterType};
     pub use crate::weather::{Rain, RainIntensity, Thunder, Wind};
 }

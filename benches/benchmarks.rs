@@ -53,6 +53,26 @@ fn bench_fire_1s(c: &mut Criterion) {
     });
 }
 
+fn bench_water_stream_1s(c: &mut Criterion) {
+    c.bench_function("water_stream_1s", |b| {
+        let mut water = Water::new(WaterType::Stream, 0.5);
+        b.iter(|| {
+            let samples = water.synthesize(44100.0, 1.0).unwrap();
+            black_box(samples);
+        });
+    });
+}
+
+fn bench_water_waves_1s(c: &mut Criterion) {
+    c.bench_function("water_waves_1s", |b| {
+        let mut water = Water::new(WaterType::Waves, 0.5);
+        b.iter(|| {
+            let samples = water.synthesize(44100.0, 1.0).unwrap();
+            black_box(samples);
+        });
+    });
+}
+
 fn bench_forest_texture_1s(c: &mut Criterion) {
     c.bench_function("forest_texture_1s", |b| {
         let mut tex = AmbientTexture::new(garjan::texture::TextureType::Forest, 0.5);
@@ -70,6 +90,8 @@ criterion_group!(
     bench_wind_1s,
     bench_impact_wood_strike,
     bench_fire_1s,
+    bench_water_stream_1s,
+    bench_water_waves_1s,
     bench_forest_texture_1s,
 );
 

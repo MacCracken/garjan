@@ -1,6 +1,7 @@
 //! Integration tests for garjan.
 
 use garjan::prelude::*;
+use garjan::texture::TextureType;
 
 #[test]
 fn test_thunder_close() {
@@ -118,7 +119,6 @@ fn test_water_all_types() {
 
 #[test]
 fn test_ambient_textures() {
-    use garjan::texture::TextureType;
     let types = [
         TextureType::Forest,
         TextureType::City,
@@ -169,4 +169,83 @@ fn test_serde_roundtrip_error() {
     let json = serde_json::to_string(&err).unwrap();
     let e2: GarjanError = serde_json::from_str(&json).unwrap();
     assert_eq!(err.to_string(), e2.to_string());
+}
+
+#[test]
+fn test_serde_roundtrip_texture_type() {
+    let json = serde_json::to_string(&TextureType::Cave).unwrap();
+    let t2: TextureType = serde_json::from_str(&json).unwrap();
+    assert_eq!(t2, TextureType::Cave);
+}
+
+#[test]
+fn test_serde_roundtrip_material_properties() {
+    let props = Material::Metal.properties();
+    let json = serde_json::to_string(&props).unwrap();
+    let p2: garjan::material::MaterialProperties = serde_json::from_str(&json).unwrap();
+    assert_eq!(props.resonance, p2.resonance);
+    assert_eq!(props.decay, p2.decay);
+}
+
+#[test]
+fn test_serde_roundtrip_thunder() {
+    let thunder = Thunder::new(500.0);
+    let json = serde_json::to_string(&thunder).unwrap();
+    let t2: Thunder = serde_json::from_str(&json).unwrap();
+    let json2 = serde_json::to_string(&t2).unwrap();
+    assert_eq!(json, json2);
+}
+
+#[test]
+fn test_serde_roundtrip_rain() {
+    let rain = Rain::new(RainIntensity::Heavy);
+    let json = serde_json::to_string(&rain).unwrap();
+    let r2: Rain = serde_json::from_str(&json).unwrap();
+    let json2 = serde_json::to_string(&r2).unwrap();
+    assert_eq!(json, json2);
+}
+
+#[test]
+fn test_serde_roundtrip_wind() {
+    let wind = Wind::new(10.0, 0.3);
+    let json = serde_json::to_string(&wind).unwrap();
+    let w2: Wind = serde_json::from_str(&json).unwrap();
+    let json2 = serde_json::to_string(&w2).unwrap();
+    assert_eq!(json, json2);
+}
+
+#[test]
+fn test_serde_roundtrip_fire() {
+    let fire = Fire::new(0.5);
+    let json = serde_json::to_string(&fire).unwrap();
+    let f2: Fire = serde_json::from_str(&json).unwrap();
+    let json2 = serde_json::to_string(&f2).unwrap();
+    assert_eq!(json, json2);
+}
+
+#[test]
+fn test_serde_roundtrip_water() {
+    let water = Water::new(WaterType::Waves, 0.7);
+    let json = serde_json::to_string(&water).unwrap();
+    let w2: Water = serde_json::from_str(&json).unwrap();
+    let json2 = serde_json::to_string(&w2).unwrap();
+    assert_eq!(json, json2);
+}
+
+#[test]
+fn test_serde_roundtrip_impact() {
+    let impact = Impact::new(Material::Glass);
+    let json = serde_json::to_string(&impact).unwrap();
+    let i2: Impact = serde_json::from_str(&json).unwrap();
+    let json2 = serde_json::to_string(&i2).unwrap();
+    assert_eq!(json, json2);
+}
+
+#[test]
+fn test_serde_roundtrip_ambient_texture() {
+    let tex = AmbientTexture::new(TextureType::Ocean, 0.6);
+    let json = serde_json::to_string(&tex).unwrap();
+    let t2: AmbientTexture = serde_json::from_str(&json).unwrap();
+    let json2 = serde_json::to_string(&t2).unwrap();
+    assert_eq!(json, json2);
 }
