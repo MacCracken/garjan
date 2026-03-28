@@ -71,6 +71,7 @@ pub struct Impact {
     dc_blocker: DcBlocker,
     sample_position: usize,
     modal_bank: ModalBank,
+    excitation_buf: Vec<f32>,
     #[cfg(feature = "naad-backend")]
     transient_noise: naad::noise::NoiseGenerator,
     #[cfg(feature = "naad-backend")]
@@ -101,6 +102,8 @@ impl Impact {
             )
             .map_err(|e| crate::error::GarjanError::SynthesisFailed(alloc::format!("{e}")))?
         };
+        // Pre-allocate excitation buffer for max impact duration
+        let max_samples = ((props.decay * 2.0 + 0.05) * sample_rate) as usize;
         Ok(Self {
             material,
             props,
@@ -109,6 +112,7 @@ impl Impact {
             dc_blocker: DcBlocker::new(sample_rate),
             sample_position: 0,
             modal_bank,
+            excitation_buf: alloc::vec![0.0f32; max_samples],
             #[cfg(feature = "naad-backend")]
             transient_noise: naad::noise::NoiseGenerator::new(naad::noise::NoiseType::White, 5381),
             #[cfg(feature = "naad-backend")]
@@ -177,8 +181,13 @@ impl Impact {
     fn generate_impact(&mut self, impact_type: ImpactType, velocity: f32, output: &mut [f32]) {
         let num_samples = output.len();
 
-        // Build excitation buffer: primary excitation + optional debris
-        let mut excitation = alloc::vec![0.0f32; num_samples];
+        // Use pre-allocated excitation buffer (resize only if block is unexpectedly large)
+        if self.excitation_buf.len() < num_samples {
+            self.excitation_buf.resize(num_samples, 0.0);
+        }
+        for s in self.excitation_buf[..num_samples].iter_mut() {
+            *s = 0.0;
+        }
 
         // Primary excitation
         let exc_type = impact_type.excitation_config(self.sample_rate);
@@ -186,66 +195,57 @@ impl Impact {
         exciter.trigger();
 
         let transient_len = (self.sample_rate * 0.005) as usize;
-        for (i, exc) in excitation.iter_mut().enumerate() {
-            *exc = exciter.next_sample();
+        for i in 0..num_samples {
+            self.excitation_buf[i] = exciter.next_sample();
 
-            // Add noise transient
             let abs_pos = self.sample_position + i;
             if abs_pos < transient_len {
                 let env = 1.0 - (abs_pos as f32 / transient_len as f32);
                 #[cfg(feature = "naad-backend")]
                 {
                     let noise = self.transient_noise.next_sample();
-                    *exc += self.resonance_filter.process_sample(noise)
+                    self.excitation_buf[i] += self.resonance_filter.process_sample(noise)
                         * env
                         * self.props.transient
                         * velocity;
                 }
                 #[cfg(not(feature = "naad-backend"))]
                 {
-                    *exc += self.rng.next_f32() * env * self.props.transient * velocity;
+                    self.excitation_buf[i] +=
+                        self.rng.next_f32() * env * self.props.transient * velocity;
                 }
             }
         }
 
         // Shatter: add debris impulses into the excitation buffer
         if impact_type == ImpactType::Shatter {
-            self.add_shatter_debris(velocity, &mut excitation);
+            let debris_window = (self.sample_rate * 0.2) as usize;
+            let n_debris = 3 + self.rng.poisson(5.0);
+            for _ in 0..n_debris {
+                let offset = self
+                    .rng
+                    .next_f32_range(self.sample_rate * 0.01, debris_window as f32)
+                    as usize;
+                if offset >= num_samples {
+                    continue;
+                }
+                let debris_amp = velocity * self.rng.next_f32_range(0.1, 0.4);
+                let debris_dur = self.rng.next_f32_range(3.0, 15.0) as usize;
+                for j in 0..debris_dur.min(num_samples - offset) {
+                    let env = 1.0 - (j as f32 / debris_dur as f32);
+                    self.excitation_buf[offset + j] += debris_amp * env * self.rng.next_f32();
+                }
+            }
         }
 
         // Process excitation linearly through modal bank
-        self.modal_bank.process_block(&excitation, output);
+        self.modal_bank
+            .process_block(&self.excitation_buf[..num_samples], output);
 
         // DC blocking
         for sample in output.iter_mut() {
             *sample = self.dc_blocker.process(*sample);
         }
         self.sample_position += num_samples;
-    }
-
-    /// Adds debris impulses into the excitation buffer for shatter effects.
-    fn add_shatter_debris(&mut self, velocity: f32, excitation: &mut [f32]) {
-        let num_samples = excitation.len();
-        let debris_window = (self.sample_rate * 0.2) as usize;
-        let n_debris = 3 + self.rng.poisson(5.0);
-
-        for _ in 0..n_debris {
-            let offset = self
-                .rng
-                .next_f32_range(self.sample_rate * 0.01, debris_window as f32)
-                as usize;
-
-            if offset >= num_samples {
-                continue;
-            }
-
-            let debris_amp = velocity * self.rng.next_f32_range(0.1, 0.4);
-            let debris_dur = self.rng.next_f32_range(3.0, 15.0) as usize;
-
-            for j in 0..debris_dur.min(num_samples - offset) {
-                let env = 1.0 - (j as f32 / debris_dur as f32);
-                excitation[offset + j] += debris_amp * env * self.rng.next_f32();
-            }
-        }
     }
 }

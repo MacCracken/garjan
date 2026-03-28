@@ -96,6 +96,7 @@ impl Rain {
     /// Synthesizes rain audio.
     #[inline]
     pub fn synthesize(&mut self, duration: f32) -> Result<Vec<f32>> {
+        crate::dsp::validate_duration(duration)?;
         let num_samples = (self.sample_rate * duration) as usize;
         let mut output = alloc::vec![0.0f32; num_samples];
         self.process_block(&mut output);
@@ -215,6 +216,7 @@ impl Thunder {
     /// Synthesizes a thunderclap.
     #[inline]
     pub fn synthesize(&mut self, duration: f32) -> Result<Vec<f32>> {
+        crate::dsp::validate_duration(duration)?;
         let num_samples = (self.sample_rate * duration) as usize;
         let mut output = alloc::vec![0.0f32; num_samples];
         self.process_block(&mut output);
@@ -372,6 +374,7 @@ impl Wind {
     /// Synthesizes wind audio.
     #[inline]
     pub fn synthesize(&mut self, duration: f32) -> Result<Vec<f32>> {
+        crate::dsp::validate_duration(duration)?;
         let num_samples = (self.sample_rate * duration) as usize;
         let mut output = alloc::vec![0.0f32; num_samples];
         self.process_block(&mut output);

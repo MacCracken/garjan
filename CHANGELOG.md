@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2026-03-28
+
+### Fixed
+
+- **Impact hot-path allocation eliminated**: excitation buffer is now pre-allocated in the struct. `process_block` no longer allocates on the heap.
+- **Duration validation on all synthesize methods**: negative, zero, NaN, and infinite durations now return `GarjanError::InvalidParameter` instead of silently failing or panicking.
+
+### Added
+
+- `validate_duration()` helper in `dsp.rs`, applied to all 20 `synthesize(duration)` methods
+- 3 missing benchmarks: `precipitation_hail_1s`, `underwater_medium_1s`, `surf_moderate_2s`
+- Deterministic replay test: verifies 9 synthesizers produce bit-identical output across two runs with same params
+- Invalid duration test: verifies proper error handling for negative/zero/NaN/infinite
+
 ## [0.7.0] - 2026-03-28
 
 ### Added

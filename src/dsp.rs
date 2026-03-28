@@ -34,6 +34,17 @@ impl DcBlocker {
     }
 }
 
+/// Validates that a duration is positive and finite.
+#[inline]
+pub(crate) fn validate_duration(duration: f32) -> crate::error::Result<()> {
+    if duration <= 0.0 || !duration.is_finite() {
+        return Err(crate::error::GarjanError::InvalidParameter(alloc::format!(
+            "duration must be positive and finite, got {duration}"
+        )));
+    }
+    Ok(())
+}
+
 /// Validates that a sample rate is positive and finite.
 #[inline]
 pub(crate) fn validate_sample_rate(sample_rate: f32) -> crate::error::Result<()> {

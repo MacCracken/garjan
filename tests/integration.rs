@@ -351,6 +351,93 @@ fn test_invalid_sample_rate_inf() {
     assert!(Thunder::new(500.0, f32::INFINITY).is_err());
 }
 
+#[test]
+fn test_invalid_duration() {
+    let mut wind = Wind::new(10.0, 0.5, SR).unwrap();
+    assert!(wind.synthesize(-1.0).is_err());
+    assert!(wind.synthesize(0.0).is_err());
+    assert!(wind.synthesize(f32::NAN).is_err());
+    assert!(wind.synthesize(f32::INFINITY).is_err());
+}
+
+// ---------------------------------------------------------------------------
+// Deterministic replay
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_deterministic_replay_all_synths() {
+    // Every synth with same constructor params must produce identical output
+    macro_rules! check_deterministic {
+        ($name:expr, $a:expr, $b:expr, $dur:expr) => {{
+            let sa = $a.synthesize($dur).unwrap();
+            let sb = $b.synthesize($dur).unwrap();
+            assert_eq!(sa.len(), sb.len(), "{} length mismatch", $name);
+            assert!(
+                sa.iter().zip(sb.iter()).all(|(a, b)| (a - b).abs() < 1e-10),
+                "{} not deterministic",
+                $name
+            );
+        }};
+    }
+
+    check_deterministic!(
+        "Rain",
+        Rain::new(RainIntensity::Moderate, SR).unwrap(),
+        Rain::new(RainIntensity::Moderate, SR).unwrap(),
+        0.5
+    );
+    check_deterministic!(
+        "Thunder",
+        Thunder::new(500.0, SR).unwrap(),
+        Thunder::new(500.0, SR).unwrap(),
+        1.0
+    );
+    check_deterministic!(
+        "Wind",
+        Wind::new(10.0, 0.5, SR).unwrap(),
+        Wind::new(10.0, 0.5, SR).unwrap(),
+        0.5
+    );
+    check_deterministic!(
+        "Fire",
+        Fire::new(0.5, SR).unwrap(),
+        Fire::new(0.5, SR).unwrap(),
+        0.5
+    );
+    check_deterministic!(
+        "Water",
+        Water::new(WaterType::Stream, 0.5, SR).unwrap(),
+        Water::new(WaterType::Stream, 0.5, SR).unwrap(),
+        0.5
+    );
+    check_deterministic!(
+        "AmbientTexture",
+        AmbientTexture::new(TextureType::Forest, 0.5, SR).unwrap(),
+        AmbientTexture::new(TextureType::Forest, 0.5, SR).unwrap(),
+        0.5
+    );
+    check_deterministic!(
+        "Impact",
+        Impact::new(Material::Metal, SR).unwrap(),
+        Impact::new(Material::Metal, SR).unwrap(),
+        ImpactType::Strike
+    );
+    {
+        let mut a = Friction::new(FrictionType::Scrape, Material::Metal, SR).unwrap();
+        let mut b = Friction::new(FrictionType::Scrape, Material::Metal, SR).unwrap();
+        a.set_velocity(0.5);
+        b.set_velocity(0.5);
+        check_deterministic!("Friction", a, b, 0.5);
+    }
+    {
+        let mut a = Bubble::new(BubbleType::Boiling, SR).unwrap();
+        let mut b = Bubble::new(BubbleType::Boiling, SR).unwrap();
+        a.set_intensity(0.8);
+        b.set_intensity(0.8);
+        check_deterministic!("Bubble", a, b, 0.5);
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Modal synthesis
 // ---------------------------------------------------------------------------

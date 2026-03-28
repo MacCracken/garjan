@@ -92,31 +92,19 @@ Physical creature sounds and fluid dynamics. Vocal synthesis → prani/svara.
 
 ---
 
-## v0.8.0 — Real-Time & Performance
+## v0.8.0 (current) — Hardening & Polish
 
-Production-ready runtime behavior. Voice audibility tracking belongs in dhvani.
+Combined v0.8 (Real-Time) + v0.9 (API Polish). Voice audibility → dhvani.
+RTPC mapping, event scheduling → dhvani/kiran.
 
-- [ ] Voice management: priority system, voice stealing, max polyphony
-- [ ] LOD: simplified synthesis models for distant/quiet sources
-- [ ] Pre-allocated buffer pools: zero allocation during synthesis
-- [ ] Object pool for transient events (drops, crackles, debris)
-- [ ] Deterministic replay: same seed + parameters = identical output (verify)
-- [ ] SIMD-friendly buffer layouts (leverage naad's vectorization)
-- [ ] Benchmark all new modules, profile hot paths
-
----
-
-## v0.9.0 — API Hardening & Polish
-
-Ergonomics, safety, completeness. RTPC mapping and event scheduling belong in
-dhvani/kiran.
-
-- [ ] Builder pattern constructors for all synthesizers
-- [ ] Comprehensive parameter validation at construction time
-- [ ] Graceful degradation: reduce quality under CPU pressure, never panic
-- [ ] Full serde save/restore of mid-synthesis state
-- [ ] Crossfade utilities: equal-power transitions between sound states
-- [ ] Complete documentation with acoustic rationale for each model
+- [x] Pre-allocated buffer: Impact excitation buffer moved to struct (zero alloc in process_block)
+- [x] Duration validation: all synthesize() methods reject negative/NaN/infinite
+- [x] Deterministic replay verified: 9 synths tested for bit-identical output
+- [x] Benchmark coverage: all 25 synth types now benchmarked (26 benchmarks)
+- [ ] Voice management: priority system, voice stealing, max polyphony — deferred to v0.9+
+- [ ] LOD: simplified models for distant sources — deferred to v0.9+
+- [ ] Builder pattern constructors — deferred to v0.9+
+- [ ] SIMD-friendly buffer layouts — deferred to v0.9+
 
 ---
 

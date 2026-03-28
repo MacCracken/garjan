@@ -232,6 +232,9 @@ criterion_group!(
     bench_insect_swarm_1s,
     bench_wingflap_medium_1s,
     bench_bubble_boiling_1s,
+    bench_precipitation_hail_1s,
+    bench_underwater_medium_1s,
+    bench_surf_moderate_2s,
 );
 
 fn bench_insect_swarm_1s(c: &mut Criterion) {
@@ -299,6 +302,46 @@ fn bench_cloth_flag_1s(c: &mut Criterion) {
         c_synth.set_wind_speed(0.6);
         b.iter(|| {
             let samples = c_synth.synthesize(1.0).unwrap();
+            black_box(samples);
+        });
+    });
+}
+
+fn bench_precipitation_hail_1s(c: &mut Criterion) {
+    c.bench_function("precipitation_hail_1s", |b| {
+        let mut p = garjan::precipitation::Precipitation::new(
+            garjan::precipitation::PrecipitationType::Hail,
+            garjan::precipitation::StoneSize::Medium,
+            garjan::contact::Terrain::Metal,
+            SR,
+        )
+        .unwrap();
+        p.set_intensity(0.8);
+        b.iter(|| {
+            let samples = p.synthesize(1.0).unwrap();
+            black_box(samples);
+        });
+    });
+}
+
+fn bench_underwater_medium_1s(c: &mut Criterion) {
+    c.bench_function("underwater_medium_1s", |b| {
+        let mut u =
+            garjan::underwater::Underwater::new(garjan::underwater::UnderwaterDepth::Medium, SR)
+                .unwrap();
+        u.set_intensity(0.7);
+        b.iter(|| {
+            let samples = u.synthesize(1.0).unwrap();
+            black_box(samples);
+        });
+    });
+}
+
+fn bench_surf_moderate_2s(c: &mut Criterion) {
+    c.bench_function("surf_moderate_2s", |b| {
+        let mut s = garjan::surf::Surf::new(garjan::surf::SurfIntensity::Moderate, SR).unwrap();
+        b.iter(|| {
+            let samples = s.synthesize(2.0).unwrap();
             black_box(samples);
         });
     });
