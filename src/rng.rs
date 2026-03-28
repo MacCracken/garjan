@@ -32,6 +32,7 @@ impl Rng {
 
     /// Returns a value in [-1.0, 1.0].
     #[inline]
+    #[cfg_attr(feature = "naad-backend", allow(dead_code))]
     pub fn next_f32(&mut self) -> f32 {
         let bits = (self.next_u32() >> 1) as i32;
         bits as f32 * (1.0 / i32::MAX as f32)

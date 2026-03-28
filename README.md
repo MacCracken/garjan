@@ -18,11 +18,11 @@ Procedural synthesis of weather, impacts, water, fire, and ambient textures. All
 ```rust
 use garjan::prelude::*;
 
-let mut thunder = Thunder::new(2000.0); // 2km away
-let samples = thunder.synthesize(44100.0, 3.0).unwrap();
+let mut thunder = Thunder::new(2000.0, 44100.0).unwrap(); // 2km away
+let samples = thunder.synthesize(3.0).unwrap();
 
-let mut rain = Rain::new(RainIntensity::Moderate);
-let samples = rain.synthesize(44100.0, 5.0).unwrap();
+let mut rain = Rain::new(RainIntensity::Moderate, 44100.0).unwrap();
+let samples = rain.synthesize(5.0).unwrap();
 ```
 
 ## Feature Flags

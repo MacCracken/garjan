@@ -3,6 +3,7 @@
 use alloc::vec::Vec;
 use serde::{Deserialize, Serialize};
 
+use crate::dsp::{DcBlocker, validate_sample_rate};
 use crate::error::Result;
 use crate::rng::Rng;
 
@@ -23,100 +24,186 @@ pub enum WaterType {
 /// Water sound synthesizer.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Water {
-    /// Type of water sound.
     water_type: WaterType,
-    /// Intensity (0.0-1.0).
     intensity: f32,
-    /// PRNG.
+    sample_rate: f32,
     rng: Rng,
+    dc_blocker: DcBlocker,
+    sample_position: usize,
+    #[cfg(feature = "naad-backend")]
+    noise_gen: naad::noise::NoiseGenerator,
+    #[cfg(feature = "naad-backend")]
+    shape_filter: naad::filter::BiquadFilter,
+    #[cfg(feature = "naad-backend")]
+    mod_lfo: naad::modulation::Lfo,
 }
 
 impl Water {
     /// Creates a new water synthesizer.
-    #[must_use]
-    pub fn new(water_type: WaterType, intensity: f32) -> Self {
-        Self {
+    pub fn new(water_type: WaterType, intensity: f32, sample_rate: f32) -> Result<Self> {
+        validate_sample_rate(sample_rate)?;
+        #[cfg(feature = "naad-backend")]
+        let (noise_type, filter_type, filter_freq, filter_q, lfo_rate) = match water_type {
+            WaterType::Stream => (
+                naad::noise::NoiseType::Pink,
+                naad::filter::FilterType::BandPass,
+                800.0,
+                1.5,
+                0.5 + intensity * 2.0,
+            ),
+            WaterType::Drip => (
+                naad::noise::NoiseType::White,
+                naad::filter::FilterType::BandPass,
+                1200.0,
+                2.0,
+                1.0,
+            ),
+            WaterType::Splash => (
+                naad::noise::NoiseType::White,
+                naad::filter::FilterType::LowPass,
+                4000.0,
+                0.7,
+                1.0,
+            ),
+            WaterType::Waves => (
+                naad::noise::NoiseType::Brown,
+                naad::filter::FilterType::LowPass,
+                500.0,
+                0.5,
+                0.1,
+            ),
+        };
+        #[cfg(feature = "naad-backend")]
+        let shape_filter =
+            naad::filter::BiquadFilter::new(filter_type, sample_rate, filter_freq, filter_q)
+                .map_err(|e| crate::error::GarjanError::SynthesisFailed(alloc::format!("{e}")))?;
+        #[cfg(feature = "naad-backend")]
+        let mod_lfo =
+            naad::modulation::Lfo::new(naad::modulation::LfoShape::Sine, lfo_rate, sample_rate)
+                .map_err(|e| crate::error::GarjanError::SynthesisFailed(alloc::format!("{e}")))?;
+        Ok(Self {
             water_type,
             intensity: intensity.clamp(0.0, 1.0),
+            sample_rate,
             rng: Rng::new(2749),
-        }
+            dc_blocker: DcBlocker::new(sample_rate),
+            sample_position: 0,
+            #[cfg(feature = "naad-backend")]
+            noise_gen: naad::noise::NoiseGenerator::new(noise_type, 2749),
+            #[cfg(feature = "naad-backend")]
+            shape_filter,
+            #[cfg(feature = "naad-backend")]
+            mod_lfo,
+        })
     }
 
     /// Synthesizes water audio.
     #[inline]
-    pub fn synthesize(&mut self, sample_rate: f32, duration: f32) -> Result<Vec<f32>> {
-        let num_samples = (sample_rate * duration) as usize;
-        match self.water_type {
-            WaterType::Stream => self.synthesize_stream(sample_rate, num_samples),
-            WaterType::Drip => self.synthesize_drip(sample_rate, num_samples),
-            WaterType::Splash => self.synthesize_splash(sample_rate, num_samples),
-            WaterType::Waves => self.synthesize_waves(sample_rate, num_samples),
-        }
-    }
-
-    #[inline]
-    fn synthesize_stream(&mut self, sample_rate: f32, num_samples: usize) -> Result<Vec<f32>> {
-        let mut output = Vec::with_capacity(num_samples);
-        let amp = self.intensity * 0.3;
-
-        for i in 0..num_samples {
-            let t = i as f32 / sample_rate;
-            // Bandpass-filtered noise with slow modulation
-            let mod_freq = 0.5 + self.intensity * 2.0;
-            let modulator =
-                0.7 + 0.3 * crate::math::f32::sin(core::f32::consts::TAU * mod_freq * t);
-            let noise = (self.rng.next_f32() + self.rng.next_f32()) * 0.5;
-            output.push(noise * amp * modulator);
-        }
-        Ok(output)
-    }
-
-    #[inline]
-    fn synthesize_drip(&mut self, sample_rate: f32, num_samples: usize) -> Result<Vec<f32>> {
+    pub fn synthesize(&mut self, duration: f32) -> Result<Vec<f32>> {
+        let num_samples = (self.sample_rate * duration) as usize;
         let mut output = alloc::vec![0.0f32; num_samples];
-        // Single drip: resonant tone at ~1-2kHz with fast decay
-        let freq = 1200.0 + self.rng.next_f32_range(-200.0, 200.0);
-        let omega = core::f32::consts::TAU * freq / sample_rate;
-        let drip_len = (sample_rate * 0.05) as usize;
+        self.process_block(&mut output);
+        Ok(output)
+    }
 
-        for (i, sample) in output
-            .iter_mut()
-            .enumerate()
-            .take(drip_len.min(num_samples))
+    /// Fills output buffer with water audio (streaming).
+    #[inline]
+    pub fn process_block(&mut self, output: &mut [f32]) {
+        match self.water_type {
+            WaterType::Stream => self.process_stream(output),
+            WaterType::Drip => self.process_drip(output),
+            WaterType::Splash => self.process_splash(output),
+            WaterType::Waves => self.process_waves(output),
+        }
+        for sample in output.iter_mut() {
+            *sample = self.dc_blocker.process(*sample);
+        }
+        self.sample_position += output.len();
+    }
+
+    #[inline]
+    fn process_stream(&mut self, output: &mut [f32]) {
+        let amp = self.intensity * 0.3;
+        for sample in output.iter_mut() {
+            #[cfg(feature = "naad-backend")]
+            {
+                let noise = self.noise_gen.next_sample();
+                let filtered = self.shape_filter.process_sample(noise);
+                let modulator = 0.7 + 0.3 * self.mod_lfo.next_value();
+                *sample = filtered * amp * modulator;
+            }
+            #[cfg(not(feature = "naad-backend"))]
+            {
+                let t = self.sample_position as f32 / self.sample_rate;
+                let mod_freq = 0.5 + self.intensity * 2.0;
+                let modulator =
+                    0.7 + 0.3 * crate::math::f32::sin(core::f32::consts::TAU * mod_freq * t);
+                let noise = (self.rng.next_f32() + self.rng.next_f32()) * 0.5;
+                *sample = noise * amp * modulator;
+                self.sample_position += 1;
+            }
+        }
+        #[cfg(feature = "naad-backend")]
         {
-            let t = i as f32 / sample_rate;
-            let env = crate::math::f32::exp(-30.0 * t);
-            *sample = crate::math::f32::sin(omega * i as f32) * env * self.intensity;
+            self.sample_position += output.len();
         }
-        Ok(output)
     }
 
     #[inline]
-    fn synthesize_splash(&mut self, sample_rate: f32, num_samples: usize) -> Result<Vec<f32>> {
-        let mut output = Vec::with_capacity(num_samples);
+    fn process_drip(&mut self, output: &mut [f32]) {
+        // Drip: resonant tone — no naad needed, keep manual sin + exp
+        let freq = 1200.0 + self.rng.next_f32_range(-200.0, 200.0);
+        let omega = core::f32::consts::TAU * freq / self.sample_rate;
+        let drip_len = (self.sample_rate * 0.05) as usize;
+
+        for (i, sample) in output.iter_mut().enumerate() {
+            let abs_pos = self.sample_position + i;
+            if abs_pos < drip_len {
+                let t = abs_pos as f32 / self.sample_rate;
+                let env = crate::math::f32::exp(-30.0 * t);
+                *sample = crate::math::f32::sin(omega * abs_pos as f32) * env * self.intensity;
+            } else {
+                *sample = 0.0;
+            }
+        }
+    }
+
+    #[inline]
+    fn process_splash(&mut self, output: &mut [f32]) {
         let amp = self.intensity * 0.6;
-
-        for i in 0..num_samples {
-            let t = i as f32 / sample_rate;
+        for (i, sample) in output.iter_mut().enumerate() {
+            let abs_pos = self.sample_position + i;
+            let t = abs_pos as f32 / self.sample_rate;
             let env = crate::math::f32::exp(-8.0 * t);
-            let noise = self.rng.next_f32();
-            output.push(noise * amp * env);
+            #[cfg(feature = "naad-backend")]
+            {
+                let noise = self.noise_gen.next_sample();
+                *sample = self.shape_filter.process_sample(noise) * amp * env;
+            }
+            #[cfg(not(feature = "naad-backend"))]
+            {
+                let noise = self.rng.next_f32();
+                *sample = noise * amp * env;
+            }
         }
-        Ok(output)
     }
 
     #[inline]
-    fn synthesize_waves(&mut self, sample_rate: f32, num_samples: usize) -> Result<Vec<f32>> {
-        let mut output = Vec::with_capacity(num_samples);
+    fn process_waves(&mut self, output: &mut [f32]) {
         let amp = self.intensity * 0.4;
-
-        for i in 0..num_samples {
-            let t = i as f32 / sample_rate;
-            // Slow wave rhythm (~0.1 Hz) with noise fill
+        #[cfg(feature = "naad-backend")]
+        for sample in output.iter_mut() {
+            let noise = self.noise_gen.next_sample();
+            let filtered = self.shape_filter.process_sample(noise);
+            let wave_env = 0.5 + 0.5 * self.mod_lfo.next_value();
+            *sample = filtered * amp * wave_env;
+        }
+        #[cfg(not(feature = "naad-backend"))]
+        for (i, sample) in output.iter_mut().enumerate() {
+            let t = (self.sample_position + i) as f32 / self.sample_rate;
             let wave_env = 0.5 + 0.5 * crate::math::f32::sin(core::f32::consts::TAU * 0.1 * t);
             let noise = (self.rng.next_f32() + self.rng.next_f32() + self.rng.next_f32()) / 3.0;
-            output.push(noise * amp * wave_env);
+            *sample = noise * amp * wave_env;
         }
-        Ok(output)
     }
 }
