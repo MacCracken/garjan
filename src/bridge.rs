@@ -2,7 +2,7 @@
 //!
 //! This module provides conversion functions that map outputs from AGNOS science
 //! crates (badal, pavan, goonj, ushma, vanaspati) to garjan synthesizer parameters.
-//! Enabled by the `science` feature flag.
+//! Always available — takes primitive values (f32/f64/u8), no science crate deps.
 //!
 //! # Architecture
 //!

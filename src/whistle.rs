@@ -89,6 +89,7 @@ impl Whistle {
     /// Fills output buffer with whistle audio (streaming).
     #[inline]
     pub fn process_block(&mut self, output: &mut [f32]) {
+        #[cfg(feature = "naad-backend")]
         for sample in output.iter_mut() {
             if self.wind_speed < 0.001 {
                 *sample = 0.0;
@@ -96,34 +97,34 @@ impl Whistle {
                 continue;
             }
 
-            #[cfg(feature = "naad-backend")]
-            {
-                // Pitch modulation from LFO (wobble increases with wind speed)
-                let wobble = self.pitch_lfo.next_value() * self.wind_speed * 0.05;
-                let modulated_freq = self.base_freq * (1.0 + wobble);
-                // Ignore error — frequency stays at previous value if out of range
-                let _ = self.resonance_filter.set_params(
-                    modulated_freq.clamp(20.0, self.sample_rate * 0.45),
-                    (self.base_freq / self.bandwidth.max(1.0)).clamp(0.5, 50.0),
-                );
+            let wobble = self.pitch_lfo.next_value() * self.wind_speed * 0.05;
+            let modulated_freq = self.base_freq * (1.0 + wobble);
+            let _ = self.resonance_filter.set_params(
+                modulated_freq.clamp(20.0, self.sample_rate * 0.45),
+                (self.base_freq / self.bandwidth.max(1.0)).clamp(0.5, 50.0),
+            );
 
-                let noise = self.noise_gen.next_sample();
-                let resonant = self.resonance_filter.process_sample(noise).band_pass;
+            let noise = self.noise_gen.next_sample();
+            let resonant = self.resonance_filter.process_sample(noise).band_pass;
 
-                // Mix: narrow resonance + broadband noise component
-                let broad_noise = noise * self.noise_mix * self.wind_speed * 0.1;
-                *sample = resonant * self.wind_speed * 0.4 + broad_noise;
+            let broad_noise = noise * self.noise_mix * self.wind_speed * 0.1;
+            *sample = resonant * self.wind_speed * 0.4 + broad_noise;
+            *sample = self.dc_blocker.process(*sample);
+        }
+        #[cfg(not(feature = "naad-backend"))]
+        for (i, sample) in output.iter_mut().enumerate() {
+            if self.wind_speed < 0.001 {
+                *sample = 0.0;
+                self.dc_blocker.process(0.0);
+                continue;
             }
-            #[cfg(not(feature = "naad-backend"))]
-            {
-                // Simple tonal approximation: sin at base frequency + noise
-                let t = self.sample_position as f32 / self.sample_rate;
-                let tone = crate::math::f32::sin(core::f32::consts::TAU * self.base_freq * t)
-                    * self.wind_speed
-                    * 0.3;
-                let noise = self.rng.next_f32() * self.noise_mix * self.wind_speed * 0.1;
-                *sample = tone + noise;
-            }
+
+            let t = (self.sample_position + i) as f32 / self.sample_rate;
+            let tone = crate::math::f32::sin(core::f32::consts::TAU * self.base_freq * t)
+                * self.wind_speed
+                * 0.3;
+            let noise = self.rng.next_f32() * self.noise_mix * self.wind_speed * 0.1;
+            *sample = tone + noise;
 
             *sample = self.dc_blocker.process(*sample);
         }

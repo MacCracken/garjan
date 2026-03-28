@@ -51,6 +51,8 @@ pub struct Surf {
     wave_period_samples: usize,
     break_amp: f32,
     wash_amp: f32,
+    // Real-time
+    volume: f32,
     // Phase tracking
     wave_phase: f32,
     #[cfg(feature = "naad-backend")]
@@ -114,6 +116,7 @@ impl Surf {
             wave_period_samples,
             break_amp,
             wash_amp,
+            volume: 1.0,
             wave_phase: 0.0,
             #[cfg(feature = "naad-backend")]
             crash_noise,
@@ -130,6 +133,11 @@ impl Surf {
         })
     }
 
+    /// Sets the volume (0.0 = silent, 1.0 = full).
+    pub fn set_volume(&mut self, volume: f32) {
+        self.volume = volume.clamp(0.0, 1.0);
+    }
+
     /// Synthesizes surf audio.
     #[inline]
     pub fn synthesize(&mut self, duration: f32) -> Result<Vec<f32>> {
@@ -142,14 +150,25 @@ impl Surf {
     /// Fills output buffer with surf audio (streaming).
     #[inline]
     pub fn process_block(&mut self, output: &mut [f32]) {
-        let jitter = 1.0 + self.rng.next_f32_range(-0.1, 0.1);
-        let period = self.wave_period_samples as f32 * jitter;
+        if self.volume < 0.001 {
+            for s in output.iter_mut() {
+                *s = 0.0;
+                self.dc_blocker.process(0.0);
+            }
+            self.sample_position += output.len();
+            return;
+        }
+
+        let mut period = self.wave_period_samples as f32;
 
         for sample in output.iter_mut() {
-            // Advance wave phase (0.0 = start approach, 0.3 = break, 0.5 = peak crash, 1.0 = end wash)
+            // Advance wave phase
             self.wave_phase += 1.0 / period;
             if self.wave_phase >= 1.0 {
                 self.wave_phase -= 1.0;
+                // New jitter per wave cycle
+                let jitter = 1.0 + self.rng.next_f32_range(-0.1, 0.1);
+                period = self.wave_period_samples as f32 * jitter;
             }
 
             let p = self.wave_phase;
@@ -218,6 +237,7 @@ impl Surf {
                 *sample = rumble + crash + wash;
             }
 
+            *sample *= self.volume;
             *sample = self.dc_blocker.process(*sample);
         }
         self.sample_position += output.len();

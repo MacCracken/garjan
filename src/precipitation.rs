@@ -201,9 +201,8 @@ impl Precipitation {
                 }
 
                 let amp = self.amplitude * self.intensity * self.rng.next_f32_range(0.3, 1.0);
-                let this_decay = self
-                    .decay_samples
-                    .max((self.rng.next_f32_range(0.5, 1.5) * self.decay_samples as f32) as usize);
+                let this_decay =
+                    (self.rng.next_f32_range(0.5, 1.5) * self.decay_samples as f32) as usize;
 
                 for j in 0..this_decay.min(num_samples - idx) {
                     let t = j as f32 / this_decay as f32;
