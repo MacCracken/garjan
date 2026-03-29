@@ -68,6 +68,8 @@ pub mod footstep;
 pub mod friction;
 pub mod impact;
 pub mod insect;
+/// Integration APIs for downstream consumers (soorat rendering).
+pub mod integration;
 pub mod lod;
 pub mod material;
 mod math;

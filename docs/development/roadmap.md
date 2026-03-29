@@ -54,6 +54,15 @@ See [CHANGELOG.md](../../CHANGELOG.md) for the full release history.
 - **Physical grounding**: models rooted in acoustics, not arbitrary DSP chains
 - **Leverage dependencies**: naad for audio primitives — don't reinvent
 
+## Soorat Integration
+
+- [ ] `integration/soorat.rs` module — feature-gated `soorat-compat`, visualization data for soorat
+- [ ] **Rain particle field**: particle positions, sizes, velocities for rain/snow rendering
+- [ ] **Fire emitter data**: emitter positions, intensity, color temperature for fire particle rendering
+- [ ] **Wind flow field**: 2D/3D vector field of wind velocities for streamline/arrow visualization
+
+---
+
 ## Scope Boundaries (sibling crates)
 
 | Domain | Owner | garjan's role |

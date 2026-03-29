@@ -1,6 +1,6 @@
 [package]
 name = "garjan"
-version = "1.0.0"
+version = "1.1.0"
 edition = "2024"
 rust-version = "1.89"
 license = "GPL-3.0-only"
@@ -26,7 +26,8 @@ serde_json = "1"
 
 [features]
 default = ["std", "naad-backend"]
-full = ["std", "naad-backend", "logging"]
+soorat-compat = []
+full = ["std", "naad-backend", "logging", "soorat-compat"]
 std = ["serde/std", "thiserror/std"]
 naad-backend = ["dep:naad", "std"]
 logging = ["dep:tracing"]
