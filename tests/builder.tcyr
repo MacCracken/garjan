@@ -1,0 +1,54 @@
+# builder.tcyr -- parity tests for src/builder.cyr.
+include "src/error.cyr"
+include "src/logging.cyr"
+include "src/dsp.cyr"
+include "src/rng.cyr"
+include "src/lod.cyr"
+include "src/material.cyr"
+include "src/modal.cyr"
+include "src/contact.cyr"
+include "src/precipitation.cyr"
+include "src/footstep.cyr"
+include "src/friction.cyr"
+include "src/builder.cyr"
+
+fn main() {
+    alloc_init();
+
+    test_group("precipitation_builder");
+    var pb = precipitation_builder_new(f64_from(44100));
+    pb = precipitation_builder_precip_type(pb, PRECIP_HAIL);
+    pb = precipitation_builder_stone_size(pb, STONE_LARGE);
+    pb = precipitation_builder_surface(pb, TERRAIN_METAL);
+    assert_eq(PrecipitationBuilder_stone_size(pb), STONE_LARGE, "builder stored stone size");
+    var precip = precipitation_builder_build(pb);
+    assert(garjan_is_err(precip) == 0, "precip built ok");
+
+    test_group("footstep_builder");
+    var fb = footstep_builder_new(f64_from(44100));
+    fb = footstep_builder_terrain(fb, TERRAIN_WOOD);
+    fb = footstep_builder_movement(fb, MOVEMENT_RUN);
+    var fs = footstep_builder_build(fb);
+    assert(garjan_is_err(fs) == 0, "footstep built ok");
+
+    test_group("friction_builder");
+    var frb = friction_builder_new(f64_from(44100));
+    frb = friction_builder_friction_type(frb, FRICTION_GRIND);
+    frb = friction_builder_surface(frb, MATERIAL_METAL);
+    var fr = friction_builder_build(frb);
+    assert(garjan_is_err(fr) == 0, "friction built ok");
+
+    test_group("builder_serde");
+    var sb = str_builder_new();
+    PrecipitationBuilder_to_json(pb, sb);
+    var j = str_data(str_builder_build(sb));
+    var pb2 = PrecipitationBuilder_from_json_str(j);
+    assert_eq(PrecipitationBuilder_stone_size(pb2), STONE_LARGE, "builder serde stone size");
+    var sb2 = str_builder_new();
+    PrecipitationBuilder_to_json(pb2, sb2);
+    assert(memeq(j, str_data(str_builder_build(sb2)), strlen(j)) == 1, "builder json roundtrip");
+
+    return assert_summary();
+}
+var ec = main();
+syscall(60, ec);

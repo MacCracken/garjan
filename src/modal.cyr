@@ -1,0 +1,301 @@
+# modal.cyr -- modal synthesis: a bank of damped complex resonators.
+#
+# Ports rust-old/src/modal.rs (ModeSpec, ModePattern, ModalBank [SoA],
+# generate_modes, ExcitationType, Exciter). f32 -> f64. Result<Self> ->
+# pointer / negative GARJAN_* code. Vec<f32> -> stdlib vec. enum-with-data
+# ExcitationType -> EXCITATION_* int + a duration_samples field on Exciter.
+# Requires: error.cyr (codes/is_finite), dsp.cyr (garjan_validate_sample_rate),
+# rng.cyr (Rng), material.cyr (MaterialProperties, used by generate_modes).
+# ModalBank/Exciter hold vec/pointer fields -> #derive(Serialize) can't express
+# them; their JSON codecs are hand-rolled in the serde pass.
+
+# ---- ModePattern ----
+var MODE_PATTERN_HARMONIC     = 0;   # f_k = f0*k (strings, tubes)
+var MODE_PATTERN_BEAM         = 1;   # free-free beam (wood, marimba)
+var MODE_PATTERN_PLATE        = 2;   # f_k = f0*k^1.7 (metal, glass, ceramic)
+var MODE_PATTERN_STIFF_STRING = 3;   # f0*k*sqrt(1 + B*k^2)
+var MODE_PATTERN_DAMPED       = 4;   # all near f0 with small random spread
+
+# ---- ModeSpec (frequency Hz, amplitude linear, decay T60 s) ----
+#derive(accessors)
+#derive(Serialize)
+struct ModeSpec {
+    frequency: f64;
+    amplitude: f64;
+    decay: f64;
+}
+
+#must_use
+fn modal_modespec_new(frequency, amplitude, decay) {
+    var s = alloc(sizeof(ModeSpec));
+    ModeSpec_set_frequency(s, frequency);
+    ModeSpec_set_amplitude(s, amplitude);
+    ModeSpec_set_decay(s, decay);
+    return s;
+}
+
+# Free-free beam mode ratios (B_k/B_1)^2, k = 1..16. Values as num/1000.
+#must_use
+fn modal_beam_ratio(k) {
+    if (k == 1)  { return F64_ONE; }
+    if (k == 2)  { return f64_div(f64_from(2757),   f64_from(1000)); }
+    if (k == 3)  { return f64_div(f64_from(5404),   f64_from(1000)); }
+    if (k == 4)  { return f64_div(f64_from(8933),   f64_from(1000)); }
+    if (k == 5)  { return f64_div(f64_from(13344),  f64_from(1000)); }
+    if (k == 6)  { return f64_div(f64_from(18637),  f64_from(1000)); }
+    if (k == 7)  { return f64_div(f64_from(24812),  f64_from(1000)); }
+    if (k == 8)  { return f64_div(f64_from(31870),  f64_from(1000)); }
+    if (k == 9)  { return f64_div(f64_from(39810),  f64_from(1000)); }
+    if (k == 10) { return f64_div(f64_from(48632),  f64_from(1000)); }
+    if (k == 11) { return f64_div(f64_from(58336),  f64_from(1000)); }
+    if (k == 12) { return f64_div(f64_from(68922),  f64_from(1000)); }
+    if (k == 13) { return f64_div(f64_from(80390),  f64_from(1000)); }
+    if (k == 14) { return f64_div(f64_from(92741),  f64_from(1000)); }
+    if (k == 15) { return f64_div(f64_from(105973), f64_from(1000)); }
+    return f64_div(f64_from(120088), f64_from(1000));   # k == 16
+}
+
+# ---- ModalBank (SoA: 5 parallel vecs + sample_rate) ----
+#derive(accessors)
+struct ModalBank { state_re; state_im; coeff_re; coeff_im; amplitude; sample_rate; }
+
+# Build from a vec of ModeSpec pointers. Excludes modes < 20 Hz, >= Nyquist,
+# or with decay <= 0. Returns a pointer, or a negative code on bad sample_rate.
+#must_use
+fn modal_bank_new(specs, sample_rate) {
+    var e = garjan_validate_sample_rate(sample_rate);
+    if (garjan_is_err(e) == 1) { return e; }
+    var nyquist = f64_mul(sample_rate, F64_HALF);
+    var decay_floor = f64_div(f64_from(1), f64_from(1000));       # 0.001
+    var neg6908 = f64_neg(f64_div(f64_from(6908), f64_from(1000)));  # -6.908
+    var radius_cap = f64_div(f64_from(9999), f64_from(10000));    # 0.9999
+
+    var state_re = vec_new();
+    var state_im = vec_new();
+    var coeff_re = vec_new();
+    var coeff_im = vec_new();
+    var amplitude = vec_new();
+
+    var n = vec_len(specs);
+    var i = 0;
+    while (i < n) {
+        var spec = vec_get(specs, i);
+        var freq = ModeSpec_frequency(spec);
+        var dec = ModeSpec_decay(spec);
+        if (f64_ge(freq, f64_from(20)) == 1) {
+            if (f64_lt(freq, nyquist) == 1) {
+                if (f64_gt(dec, 0) == 1) {
+                    var omega = f64_div(f64_mul(F64_TAU, freq), sample_rate);
+                    var d = f64_max(dec, decay_floor);
+                    var radius = f64_clamp(f64_exp(f64_div(neg6908, f64_mul(d, sample_rate))), 0, radius_cap);
+                    vec_push(coeff_re, f64_mul(radius, f64_cos(omega)));
+                    vec_push(coeff_im, f64_mul(radius, f64_sin(omega)));
+                    vec_push(amplitude, ModeSpec_amplitude(spec));
+                    vec_push(state_re, 0);
+                    vec_push(state_im, 0);
+                }
+            }
+        }
+        i = i + 1;
+    }
+
+    var self = alloc(sizeof(ModalBank));
+    ModalBank_set_state_re(self, state_re);
+    ModalBank_set_state_im(self, state_im);
+    ModalBank_set_coeff_re(self, coeff_re);
+    ModalBank_set_coeff_im(self, coeff_im);
+    ModalBank_set_amplitude(self, amplitude);
+    ModalBank_set_sample_rate(self, sample_rate);
+    return self;
+}
+
+#inline
+#must_use
+fn modal_bank_mode_count(self) {
+    return vec_len(ModalBank_amplitude(self));
+}
+
+# Process one excitation sample through all modes (SoA loop).
+#inline
+#must_use
+fn modal_bank_process_sample(self, excitation) {
+    var cre = ModalBank_coeff_re(self);
+    var cim = ModalBank_coeff_im(self);
+    var sre = ModalBank_state_re(self);
+    var sim = ModalBank_state_im(self);
+    var amp = ModalBank_amplitude(self);
+    var n = vec_len(amp);
+    var out = 0;
+    var i = 0;
+    while (i < n) {
+        var cr = vec_get(cre, i);
+        var ci = vec_get(cim, i);
+        var xr = vec_get(sre, i);
+        var xi = vec_get(sim, i);
+        var new_re = f64_sub(f64_add(excitation, f64_mul(cr, xr)), f64_mul(ci, xi));
+        var new_im = f64_add(f64_mul(ci, xr), f64_mul(cr, xi));
+        vec_set(sre, i, new_re);
+        vec_set(sim, i, new_im);
+        out = f64_add(out, f64_mul(vec_get(amp, i), new_re));
+        i = i + 1;
+    }
+    return out;
+}
+
+# Process a block: output[i] = process_sample(excitation[i]) for min(len) samples.
+fn modal_bank_process_block(self, excitation, output) {
+    var len = vec_len(excitation);
+    var olen = vec_len(output);
+    if (olen < len) { len = olen; }
+    var i = 0;
+    while (i < len) {
+        vec_set(output, i, modal_bank_process_sample(self, vec_get(excitation, i)));
+        i = i + 1;
+    }
+    return 0;
+}
+
+# Reset all mode states to zero.
+fn modal_bank_reset(self) {
+    var sre = ModalBank_state_re(self);
+    var sim = ModalBank_state_im(self);
+    var n = vec_len(sre);
+    var i = 0;
+    while (i < n) {
+        vec_set(sre, i, 0);
+        vec_set(sim, i, 0);
+        i = i + 1;
+    }
+    return 0;
+}
+
+# ---- Mode generation ----
+# Generates a vec of ModeSpec pointers for a material's properties + pattern.
+#must_use
+fn generate_modes(props, pattern, count, damping_factor) {
+    var f0 = MaterialProperties_resonance(props);
+    var brightness = MaterialProperties_brightness(props);
+    var pdecay = MaterialProperties_decay(props);
+    # rolloff_exp = 2.0 - 1.5 * brightness
+    var rolloff_exp = f64_sub(f64_from(2), f64_mul(f64_div(f64_from(15), f64_from(10)), brightness));
+    var rng = rng_new(f64_to(f64_mul(f0, f64_from(1000))));
+
+    var half = F64_HALF;
+    var c1_5056 = f64_div(f64_from(15056), f64_from(10000));
+    var plate_exp = f64_div(f64_from(17), f64_from(10));       # 1.7
+    var stiff_b = f64_div(f64_from(1), f64_from(1000));        # 0.001
+    var damp_span = f64_div(f64_from(1), f64_from(10));        # 0.1
+    var decay_floor = stiff_b;                                 # 0.001
+    var freq_cap = f64_from(20000);
+
+    var out = vec_new();
+    var k = 1;
+    while (k <= count) {
+        var kf = f64_from(k);
+        var freq = 0;
+        if (pattern == MODE_PATTERN_HARMONIC) {
+            freq = f64_mul(f0, kf);
+        } elif (pattern == MODE_PATTERN_BEAM) {
+            if (k <= 16) {
+                freq = f64_mul(f0, modal_beam_ratio(k));
+            } else {
+                var kfp = f64_add(kf, half);
+                freq = f64_div(f64_mul(f0, f64_mul(kfp, kfp)), f64_mul(c1_5056, c1_5056));
+            }
+        } elif (pattern == MODE_PATTERN_PLATE) {
+            freq = f64_mul(f0, f64_pow(kf, plate_exp));
+        } elif (pattern == MODE_PATTERN_STIFF_STRING) {
+            var inner = f64_add(F64_ONE, f64_mul(stiff_b, f64_mul(kf, kf)));
+            freq = f64_mul(f0, f64_mul(kf, f64_sqrt(inner)));
+        } else {
+            # Damped: f0 * (1 + range(-0.1, 0.1))
+            freq = f64_mul(f0, f64_add(F64_ONE, rng_next_f32_range(rng, f64_neg(damp_span), damp_span)));
+        }
+
+        if (f64_gt(freq, freq_cap) == 1) {
+            k = k + 1;
+            continue;
+        }
+
+        var amplitude = f64_div(F64_ONE, f64_pow(kf, rolloff_exp));
+        var freq_ratio = f64_div(freq, f0);
+        var fm1 = f64_sub(freq_ratio, F64_ONE);
+        var decay = f64_div(pdecay, f64_add(F64_ONE, f64_mul(damping_factor, f64_mul(fm1, fm1))));
+        decay = f64_max(decay, decay_floor);
+        vec_push(out, modal_modespec_new(freq, amplitude, decay));
+        k = k + 1;
+    }
+    return out;
+}
+
+# ---- ExcitationType (data-carrying variant duration lives on Exciter) ----
+var EXCITATION_IMPULSE    = 0;
+var EXCITATION_NOISE_BURST = 1;
+var EXCITATION_HALF_SINE  = 2;
+
+# ---- Exciter (drives a modal bank). rng is a live pointer; serde hand-rolled. ----
+#derive(accessors)
+struct Exciter { excitation_type; duration_samples; amplitude; position; active; rng; }
+
+#must_use
+fn exciter_new(excitation_type, duration_samples, amplitude) {
+    var self = alloc(sizeof(Exciter));
+    Exciter_set_excitation_type(self, excitation_type);
+    Exciter_set_duration_samples(self, duration_samples);
+    Exciter_set_amplitude(self, amplitude);
+    Exciter_set_position(self, 0);
+    Exciter_set_active(self, 0);
+    Exciter_set_rng(self, rng_new(31337));
+    return self;
+}
+
+# Trigger: restart excitation from the beginning.
+fn exciter_trigger(self) {
+    Exciter_set_position(self, 0);
+    Exciter_set_active(self, 1);
+    return 0;
+}
+
+# Next excitation sample; 0.0 when spent.
+#inline
+#must_use
+fn exciter_next_sample(self) {
+    if (Exciter_active(self) == 0) { return 0; }
+    var ty = Exciter_excitation_type(self);
+    var pos = Exciter_position(self);
+    var amp = Exciter_amplitude(self);
+    var dur = Exciter_duration_samples(self);
+    var sample = 0;
+    if (ty == EXCITATION_IMPULSE) {
+        if (pos == 0) {
+            Exciter_set_active(self, 0);
+            sample = amp;
+        } else {
+            sample = 0;
+        }
+    } elif (ty == EXCITATION_NOISE_BURST) {
+        if (pos < dur) {
+            sample = f64_mul(amp, rng_next_f32(Exciter_rng(self)));
+        } else {
+            Exciter_set_active(self, 0);
+            sample = 0;
+        }
+    } else {
+        # HalfSine
+        if (pos < dur) {
+            var t = f64_div(f64_from(pos), f64_from(dur));
+            sample = f64_mul(amp, f64_sin(f64_mul(F64_PI, t)));
+        } else {
+            Exciter_set_active(self, 0);
+            sample = 0;
+        }
+    }
+    Exciter_set_position(self, pos + 1);
+    return sample;
+}
+
+#inline
+#must_use
+fn exciter_is_active(self) {
+    return Exciter_active(self);
+}

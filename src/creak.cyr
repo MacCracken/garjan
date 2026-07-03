@@ -1,0 +1,306 @@
+# creak.cyr -- creak synthesis: doors, hinges, rope, wood stress.
+#
+# Ports rust-old/src/creak.rs. Models creaking as low-frequency stick-slip
+# oscillation through material-specific resonant modes. Tension controls
+# pitch, speed controls amplitude. The Cyrius port always uses the naad
+# backend (no feature flags): generate_noise ports the naad path (pink noise
+# through a lowpass shape filter), dropping the rng fallback. f32 -> f64.
+# Result<Self> -> pointer / negative GARJAN_* code. The naad noise_gen +
+# shape_filter AND the ModalBank are reconstructed on deserialize (rebuilt in
+# creak_build_naad from `source`); rng + dc_blocker state ARE serialized (via
+# the flattened CreakParams below), matching the Rust skip+reconstruct split.
+# Requires: error, logging, dsp, rng, material, modal, contact foundations +
+# the naad bundle (noise_new/noise_next_sample,
+# filter_biquad_new/filter_biquad_process_sample).
+
+# ---- CreakParams: the serializable slice. source is a CREAK_* int tag; rng +
+# dc_blocker are FLATTENED to scalar fields for #derive(Serialize)'s fast
+# single-pass from_json_str. modal_bank / noise_gen / shape_filter are NOT
+# serialized -- they are rebuilt from `source` in creak_build_naad. ----
+#derive(accessors)
+#derive(Serialize)
+struct CreakParams {
+    source: i64;
+    sample_rate: f64;
+    sample_position: i64;
+    slip_phase: f64;
+    freq_lo: f64;
+    freq_hi: f64;
+    noise_mix: f64;
+    tension: f64;
+    speed: f64;
+    rng_state: i64;
+    rng_inc: i64;
+    dcb_x_prev: f64;
+    dcb_y_prev: f64;
+    dcb_r: f64;
+}
+
+# ---- Creak: live synth = scalars + live rng/dc_blocker + reconstructed
+# modal_bank + naad component ptrs. ----
+#derive(accessors)
+struct Creak {
+    source;
+    sample_rate;
+    sample_position;
+    slip_phase;
+    freq_lo;
+    freq_hi;
+    noise_mix;
+    tension;
+    speed;
+    rng;
+    dc_blocker;
+    modal_bank;
+    noise_gen;
+    shape_filter;
+}
+
+# Lowpass shape-filter cutoff for a creak source (Rust filter_freq match).
+#must_use
+fn creak_shape_filter_freq(source) {
+    if (source == CREAK_DOOR)  { return f64_from(400); }
+    if (source == CREAK_HINGE) { return f64_from(800); }
+    if (source == CREAK_ROPE)  { return f64_from(300); }
+    return f64_from(250);   # WoodStress
+}
+
+# Build/refresh the reconstructable components from source + sample_rate:
+# the modal bank (material modes) and the naad noise_gen + shape_filter.
+# Shared by creak_new and creak_from_json_str. Returns GARJAN_OK or a negative
+# code if a component constructor rejects its params.
+fn creak_build_naad(self) {
+    var source = Creak_source(self);
+    var sr = Creak_sample_rate(self);
+
+    # ---- Material + mode pattern per source (Rust source match) ----
+    var mat = MATERIAL_WOOD;
+    var pattern = MODE_PATTERN_BEAM;
+    var mode_count = 5;
+    if (source == CREAK_DOOR) {
+        mat = MATERIAL_WOOD;
+        pattern = MODE_PATTERN_BEAM;
+        mode_count = 5;
+    } elif (source == CREAK_HINGE) {
+        mat = MATERIAL_METAL;
+        pattern = MODE_PATTERN_PLATE;
+        mode_count = 6;
+    } elif (source == CREAK_ROPE) {
+        mat = MATERIAL_FABRIC;
+        pattern = MODE_PATTERN_HARMONIC;
+        mode_count = 4;
+    } else {
+        # WoodStress
+        mat = MATERIAL_WOOD;
+        pattern = MODE_PATTERN_DAMPED;
+        mode_count = 4;
+    }
+
+    var props = material_properties(mat);
+    var mode_cfg = material_mode_config(mat);
+    var specs = generate_modes(props, pattern, mode_count, MaterialModeConfig_damping_factor(mode_cfg));
+    var bank = modal_bank_new(specs, sr);
+    if (garjan_is_err(bank) == 1) { return garjan_map_naad_error(bank); }
+    Creak_set_modal_bank(self, bank);
+
+    # ---- naad noise_gen (pink, seed 5555) + lowpass shape filter (Q 0.7) ----
+    var ng = noise_new(NOISE_PINK, 5555);
+    Creak_set_noise_gen(self, ng);
+    var ffreq = creak_shape_filter_freq(source);
+    var sf = filter_biquad_new(FILTER_LOWPASS, sr, ffreq, f64_div(f64_from(7), f64_from(10)));
+    if (garjan_is_err(sf) == 1) { return garjan_map_naad_error(sf); }
+    Creak_set_shape_filter(self, sf);
+    return GARJAN_OK;
+}
+
+# Creates a new creak synthesizer. Returns a pointer or a negative code.
+#must_use
+fn creak_new(source, sample_rate) {
+    var e = garjan_validate_sample_rate(sample_rate);
+    if (garjan_is_err(e) == 1) { return e; }
+
+    # Frequency range + noise mix per source (Rust source match).
+    var freq_lo = f64_from(40);
+    var freq_hi = f64_from(200);
+    var noise_mix = f64_div(f64_from(1), f64_from(10));
+    if (source == CREAK_DOOR) {
+        freq_lo = f64_from(40);
+        freq_hi = f64_from(200);
+        noise_mix = f64_div(f64_from(1), f64_from(10));
+    } elif (source == CREAK_HINGE) {
+        freq_lo = f64_from(100);
+        freq_hi = f64_from(500);
+        noise_mix = f64_div(f64_from(5), f64_from(100));
+    } elif (source == CREAK_ROPE) {
+        freq_lo = f64_from(30);
+        freq_hi = f64_from(150);
+        noise_mix = f64_div(f64_from(3), f64_from(10));
+    } else {
+        # WoodStress
+        freq_lo = f64_from(25);
+        freq_hi = f64_from(105);
+        noise_mix = f64_div(f64_from(15), f64_from(100));
+    }
+
+    var self = alloc(sizeof(Creak));
+    Creak_set_source(self, source);
+    Creak_set_sample_rate(self, sample_rate);
+    Creak_set_sample_position(self, 0);
+    Creak_set_slip_phase(self, 0);
+    Creak_set_freq_lo(self, freq_lo);
+    Creak_set_freq_hi(self, freq_hi);
+    Creak_set_noise_mix(self, noise_mix);
+    Creak_set_tension(self, F64_HALF);
+    Creak_set_speed(self, 0);
+    Creak_set_rng(self, rng_new(5555));
+    Creak_set_dc_blocker(self, garjan_dcblocker_new(sample_rate));
+    var b = creak_build_naad(self);
+    if (garjan_is_err(b) == 1) { return b; }
+    return self;
+}
+
+# Sets the tension (0.0 = low pitch, 1.0 = high pitch). Clamped to [0, 1].
+fn creak_set_tension(self, tension) {
+    Creak_set_tension(self, f64_clamp(tension, 0, F64_ONE));
+    return 0;
+}
+
+# Sets the speed (0.0 = silent, 1.0 = fast creak). Clamped to [0, 1].
+fn creak_set_speed(self, speed) {
+    Creak_set_speed(self, f64_clamp(speed, 0, F64_ONE));
+    return 0;
+}
+
+# One shaped-noise sample: pink noise through the lowpass shape filter (naad
+# path). Ports generate_noise; does NOT touch self.rng.
+#inline
+#must_use
+fn creak_generate_noise(self) {
+    var raw = noise_next_sample(Creak_noise_gen(self));
+    return filter_biquad_process_sample(Creak_shape_filter(self), raw);
+}
+
+# Fills `output` (a vec of f64) with creak audio (streaming). Ports
+# process_block: stick-slip excitation + shaped noise through the modal bank,
+# DC-blocked; silent (but still advancing the dc_blocker) when speed < 0.001.
+fn creak_process_block(self, output) {
+    var num = vec_len(output);
+    var rng = Creak_rng(self);
+    var dc = Creak_dc_blocker(self);
+    var bank = Creak_modal_bank(self);
+    var sr = Creak_sample_rate(self);
+    var freq_lo = Creak_freq_lo(self);
+    var freq_hi = Creak_freq_hi(self);
+    var noise_mix = Creak_noise_mix(self);
+
+    # 0.001 speed floor, +/-0.05 jitter span (readable idioms).
+    var speed_floor = f64_div(f64_from(1), f64_from(1000));
+    var jitter_lo = f64_neg(f64_div(f64_from(5), f64_from(100)));
+    var jitter_hi = f64_div(f64_from(5), f64_from(100));
+
+    var i = 0;
+    while (i < num) {
+        var speed = Creak_speed(self);
+        if (f64_lt(speed, speed_floor) == 1) {
+            vec_set(output, i, 0);
+            var silent = garjan_dcblocker_process(dc, 0);
+        } else {
+            var tension = Creak_tension(self);
+            # Base frequency from tension: freq_lo + tension*(freq_hi-freq_lo).
+            var freq = f64_add(freq_lo, f64_mul(tension, f64_sub(freq_hi, freq_lo)));
+
+            # Advance slip phase with jitter for organic quality.
+            var jitter = f64_add(F64_ONE, rng_next_f32_range(rng, jitter_lo, jitter_hi));
+            var slip = f64_add(Creak_slip_phase(self), f64_div(f64_mul(freq, jitter), sr));
+            if (f64_ge(slip, F64_ONE) == 1) {
+                slip = f64_sub(slip, F64_ONE);
+            }
+            Creak_set_slip_phase(self, slip);
+
+            # Asymmetric sawtooth-like excitation (fast slip, slow stick).
+            var excitation = f64_mul(f64_sub(f64_mul(slip, F64_TWO), F64_ONE), speed);
+
+            # Add noise for texture.
+            var noise = f64_mul(f64_mul(creak_generate_noise(self), noise_mix), speed);
+
+            # Through modal bank.
+            var resonant = modal_bank_process_sample(bank, f64_add(excitation, noise));
+            vec_set(output, i, garjan_dcblocker_process(dc, resonant));
+        }
+        i = i + 1;
+    }
+    Creak_set_sample_position(self, Creak_sample_position(self) + num);
+    return 0;
+}
+
+# Synthesize `duration` seconds of creak audio into a fresh vec. Returns the
+# vec pointer, or a negative code on invalid duration.
+#must_use
+fn creak_synthesize(self, duration) {
+    var e = garjan_validate_duration(duration);
+    if (garjan_is_err(e) == 1) { return e; }
+    var num = f64_to(f64_mul(Creak_sample_rate(self), duration));
+    var output = vec_new();
+    var i = 0;
+    while (i < num) {
+        vec_push(output, 0);
+        i = i + 1;
+    }
+    creak_process_block(self, output);
+    return output;
+}
+
+# ---- serde: snapshot live state -> CreakParams -> JSON, and back. ----
+#must_use
+fn creak_to_json(self, sb) {
+    var p = alloc(sizeof(CreakParams));
+    CreakParams_set_source(p, Creak_source(self));
+    CreakParams_set_sample_rate(p, Creak_sample_rate(self));
+    CreakParams_set_sample_position(p, Creak_sample_position(self));
+    CreakParams_set_slip_phase(p, Creak_slip_phase(self));
+    CreakParams_set_freq_lo(p, Creak_freq_lo(self));
+    CreakParams_set_freq_hi(p, Creak_freq_hi(self));
+    CreakParams_set_noise_mix(p, Creak_noise_mix(self));
+    CreakParams_set_tension(p, Creak_tension(self));
+    CreakParams_set_speed(p, Creak_speed(self));
+    var rng = Creak_rng(self);
+    CreakParams_set_rng_state(p, Rng_state(rng));
+    CreakParams_set_rng_inc(p, Rng_inc(rng));
+    var dc = Creak_dc_blocker(self);
+    CreakParams_set_dcb_x_prev(p, DcBlocker_x_prev(dc));
+    CreakParams_set_dcb_y_prev(p, DcBlocker_y_prev(dc));
+    CreakParams_set_dcb_r(p, DcBlocker_r(dc));
+    return CreakParams_to_json(p, sb);
+}
+
+# Rebuild a Creak from JSON: restore scalars + rng + dc_blocker state, then
+# reconstruct the modal bank + naad components fresh from `source` (matches
+# Rust's skip+reconstruct).
+#must_use
+fn creak_from_json_str(json) {
+    var p = CreakParams_from_json_str(json);
+    var self = alloc(sizeof(Creak));
+    Creak_set_source(self, CreakParams_source(p));
+    Creak_set_sample_rate(self, CreakParams_sample_rate(p));
+    Creak_set_sample_position(self, CreakParams_sample_position(p));
+    Creak_set_slip_phase(self, CreakParams_slip_phase(p));
+    Creak_set_freq_lo(self, CreakParams_freq_lo(p));
+    Creak_set_freq_hi(self, CreakParams_freq_hi(p));
+    Creak_set_noise_mix(self, CreakParams_noise_mix(p));
+    Creak_set_tension(self, CreakParams_tension(p));
+    Creak_set_speed(self, CreakParams_speed(p));
+
+    var rng = rng_new(0);
+    Rng_set_state(rng, CreakParams_rng_state(p));
+    Rng_set_inc(rng, CreakParams_rng_inc(p));
+    Creak_set_rng(self, rng);
+
+    var dc = garjan_dcblocker_new(CreakParams_sample_rate(p));
+    DcBlocker_set_x_prev(dc, CreakParams_dcb_x_prev(p));
+    DcBlocker_set_y_prev(dc, CreakParams_dcb_y_prev(p));
+    DcBlocker_set_r(dc, CreakParams_dcb_r(p));
+    Creak_set_dc_blocker(self, dc);
+
+    creak_build_naad(self);
+    return self;
+}

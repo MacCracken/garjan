@@ -1,0 +1,76 @@
+# texture.tcyr -- parity tests for src/texture.cyr (naad multi-band synth + serde).
+include "src/error.cyr"
+include "src/logging.cyr"
+include "src/dsp.cyr"
+include "src/rng.cyr"
+include "src/lod.cyr"
+include "src/material.cyr"
+include "src/modal.cyr"
+include "src/contact.cyr"
+include "src/aero.cyr"
+include "src/creature.cyr"
+include "src/texture.cyr"
+
+fn main() {
+    alloc_init();
+
+    test_group("texture_new");
+    var f = texture_new(TEXTURE_TYPE_FOREST, F64_HALF, f64_from(44100));
+    assert(garjan_is_err(f) == 0, "texture_new ok");
+    assert(garjan_is_err(texture_new(TEXTURE_TYPE_FOREST, F64_HALF, 0)) == 1, "texture_new rejects sr=0");
+    # level clamps to [0,1]: level 2.0 -> 1.0
+    var fc = texture_new(TEXTURE_TYPE_OCEAN, F64_TWO, f64_from(44100));
+    assert(f64_lt(f64_abs(f64_sub(AmbientTexture_level(fc), F64_ONE)), GARJAN_EPSILON) == 1, "level clamped to 1.0");
+    # ambient_texture_new alias behaves the same
+    var fa = ambient_texture_new(TEXTURE_TYPE_CITY, F64_HALF, f64_from(44100));
+    assert(garjan_is_err(fa) == 0, "ambient_texture_new alias ok");
+
+    test_group("synthesize");
+    var buf = texture_synthesize(f, f64_div(f64_from(1), f64_from(10)));   # 0.1s
+    assert(garjan_is_err(buf) == 0, "synthesize ok");
+    assert_eq(vec_len(buf), 4410, "0.1s @ 44100 = 4410 samples");
+    var i = 0;
+    var allfinite = 1;
+    var energy = 0;
+    while (i < vec_len(buf)) {
+        var s = vec_get(buf, i);
+        if (garjan_is_finite(s) == 0) { allfinite = 0; }
+        energy = f64_add(energy, f64_abs(s));
+        i = i + 1;
+    }
+    assert(allfinite == 1, "all texture samples finite");
+    assert(f64_gt(energy, 0) == 1, "texture produces sound (nonzero energy)");
+    assert(garjan_is_err(texture_synthesize(f, 0)) == 1, "synthesize rejects duration=0");
+
+    test_group("texture_serde");
+    var g = texture_new(TEXTURE_TYPE_NIGHT, f64_div(f64_from(7), f64_from(10)), f64_from(48000));
+    # advance state so rng/dc_blocker/lfo are non-default
+    texture_synthesize(g, f64_div(f64_from(1), f64_from(100)));
+    var sb = str_builder_new();
+    texture_to_json(g, sb);
+    var j = str_data(str_builder_build(sb));
+    var g2 = texture_from_json_str(j);
+    var sb2 = str_builder_new();
+    texture_to_json(g2, sb2);
+    assert(memeq(j, str_data(str_builder_build(sb2)), strlen(j)) == 1, "texture params json roundtrip idempotent");
+    # restored synth resumes the SAME rng sequence
+    assert_eq(rng_next_u32(AmbientTexture_rng(g)), rng_next_u32(AmbientTexture_rng(g2)), "restored texture resumes rng");
+    # restored synth is functional: it synthesizes finite, nonzero audio
+    var bb = texture_synthesize(g2, f64_div(f64_from(1), f64_from(100)));
+    assert(garjan_is_err(bb) == 0, "restored texture synthesizes");
+    var k = 0;
+    var bbfinite = 1;
+    var bbenergy = 0;
+    while (k < vec_len(bb)) {
+        var bs = vec_get(bb, k);
+        if (garjan_is_finite(bs) == 0) { bbfinite = 0; }
+        bbenergy = f64_add(bbenergy, f64_abs(bs));
+        k = k + 1;
+    }
+    assert(bbfinite == 1, "restored texture audio finite");
+    assert(f64_gt(bbenergy, 0) == 1, "restored texture audio nonzero");
+
+    return assert_summary();
+}
+var ec = main();
+syscall(60, ec);

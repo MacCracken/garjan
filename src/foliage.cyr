@@ -1,0 +1,378 @@
+# foliage.cyr -- foliage synthesis: leaf rustle, grass swish, branch snap.
+#
+# Ports rust-old/src/foliage.rs. Models vegetation sounds as continuous
+# wind-driven rustle (pink noise -> bandpass, LFO-modulated) plus stochastic
+# micro-events (individual leaf/twig contacts), and a one-shot branch snap
+# (modal bank driven by a noise-burst exciter). The Cyrius port always uses
+# the naad backend (no feature flags): rustle_noise/rustle_filter/wind_lfo are
+# reconstructed on deserialize; the snap ModalBank + Exciter are likewise
+# rebuilt in foliage_build_naad from the serialized params (matching Rust's
+# skip+reconstruct policy). f32 -> f64. Result<Self> -> pointer / negative
+# GARJAN_* code. rng + dc_blocker + exciter state ARE serialized.
+# Requires: error, logging, dsp, rng, material, modal, contact foundations +
+# the naad bundle (noise_new/noise_next_sample, filter_biquad_new/
+# filter_biquad_process_sample, modulation_lfo_new/modulation_lfo_next_value).
+
+# ---- FoliageParams: the serializable slice (Rust's non-reconstructed fields,
+# flattened so #derive(Serialize)'s single-pass from_json_str works). The snap
+# ModalBank + naad components are NOT here (rebuilt in foliage_build_naad); the
+# Exciter's live state (position/active/rng) IS carried for exact roundtrip. ----
+#derive(accessors)
+#derive(Serialize)
+struct FoliageParams {
+    foliage_type: i64;
+    sample_rate: f64;
+    sample_position: i64;
+    wind_speed: f64;
+    contact_intensity: f64;
+    snap_pending: i64;
+    event_rate: f64;
+    event_duration_samples: i64;
+    rng_state: i64;
+    rng_inc: i64;
+    dcb_x_prev: f64;
+    dcb_y_prev: f64;
+    dcb_r: f64;
+    exc_position: i64;
+    exc_active: i64;
+    exc_rng_state: i64;
+    exc_rng_inc: i64;
+}
+
+# ---- Foliage: live synth = scalars + live rng/dc_blocker + snap modal/exciter
+# + naad component ptrs. snap_modal is a pointer or 0 (Option<ModalBank>::None). ----
+#derive(accessors)
+struct Foliage {
+    foliage_type;
+    sample_rate;
+    sample_position;
+    wind_speed;
+    contact_intensity;
+    snap_pending;
+    event_rate;
+    event_duration_samples;
+    rng;
+    dc_blocker;
+    snap_modal;
+    snap_exciter;
+    rustle_noise;
+    rustle_filter;
+    wind_lfo;
+}
+
+# Build/refresh the naad + reconstructable components from foliage_type +
+# sample_rate. Shared by foliage_new and foliage_from_json_str. Builds the snap
+# ModalBank (only for BranchSnap), the rustle noise/bandpass, and the wind LFO.
+# Returns GARJAN_OK, or a negative code if a naad constructor rejects its params.
+fn foliage_build_naad(self) {
+    var sr = Foliage_sample_rate(self);
+    var ftype = Foliage_foliage_type(self);
+
+    # Branch snap modal bank (only for BranchSnap; else 0 == None).
+    var bank = 0;
+    if (ftype == FOLIAGE_BRANCH_SNAP) {
+        var props = material_properties(MATERIAL_WOOD);
+        var mode_cfg = material_mode_config(MATERIAL_WOOD);
+        var specs = generate_modes(props, MaterialModeConfig_pattern(mode_cfg),
+                                   MaterialModeConfig_mode_count(mode_cfg),
+                                   MaterialModeConfig_damping_factor(mode_cfg));
+        var mb = modal_bank_new(specs, sr);
+        if (garjan_is_err(mb) == 1) { return garjan_map_naad_error(mb); }
+        bank = mb;
+    }
+    Foliage_set_snap_modal(self, bank);
+
+    # Rustle bed: pink noise through a bandpass whose center depends on type.
+    var freq = f64_from(1000);
+    if (ftype == FOLIAGE_LEAF_RUSTLE) {
+        freq = f64_from(4000);
+    } elif (ftype == FOLIAGE_GRASS_SWISH) {
+        freq = f64_from(2000);
+    }
+    var rf = filter_biquad_new(FILTER_BANDPASS, sr, freq, f64_div(f64_from(15), f64_from(10)));
+    if (garjan_is_err(rf) == 1) { return garjan_map_naad_error(rf); }
+    Foliage_set_rustle_filter(self, rf);
+    Foliage_set_rustle_noise(self, noise_new(NOISE_PINK, 4444));
+
+    # Wind LFO: slow sine, rate depends on type.
+    var rate = f64_div(f64_from(1), f64_from(10));
+    if (ftype == FOLIAGE_LEAF_RUSTLE) {
+        rate = f64_div(f64_from(2), f64_from(10));
+    } elif (ftype == FOLIAGE_GRASS_SWISH) {
+        rate = f64_div(f64_from(15), f64_from(100));
+    }
+    var lfo = modulation_lfo_new(MODULATION_LFO_SINE, rate, sr);
+    if (garjan_is_err(lfo) == 1) { return garjan_map_naad_error(lfo); }
+    Foliage_set_wind_lfo(self, lfo);
+    return GARJAN_OK;
+}
+
+# Creates a new foliage synthesizer. Returns a pointer or a negative code.
+#must_use
+fn foliage_new(foliage_type, sample_rate) {
+    var e = garjan_validate_sample_rate(sample_rate);
+    if (garjan_is_err(e) == 1) { return e; }
+
+    # (event_rate, event_dur_ms) by type.
+    var event_rate = 0;
+    var event_dur_ms = 0;
+    if (foliage_type == FOLIAGE_LEAF_RUSTLE) {
+        event_rate = f64_from(20);
+        event_dur_ms = F64_TWO;
+    } elif (foliage_type == FOLIAGE_GRASS_SWISH) {
+        event_rate = f64_from(12);
+        event_dur_ms = f64_from(10);
+    }
+    # event_duration_samples = (event_dur_ms * sample_rate / 1000.0) as usize
+    var event_duration_samples = f64_to(f64_div(f64_mul(event_dur_ms, sample_rate), f64_from(1000)));
+
+    var self = alloc(sizeof(Foliage));
+    Foliage_set_foliage_type(self, foliage_type);
+    Foliage_set_sample_rate(self, sample_rate);
+    Foliage_set_sample_position(self, 0);
+    Foliage_set_wind_speed(self, 0);
+    Foliage_set_contact_intensity(self, 0);
+    Foliage_set_snap_pending(self, 0);
+    Foliage_set_event_rate(self, event_rate);
+    Foliage_set_event_duration_samples(self, event_duration_samples);
+    Foliage_set_rng(self, rng_new(4444));
+    Foliage_set_dc_blocker(self, garjan_dcblocker_new(sample_rate));
+
+    # Snap exciter: NoiseBurst with duration (sample_rate * 0.002) as usize, amp 0.8.
+    var burst_dur = f64_to(f64_mul(sample_rate, f64_div(f64_from(2), f64_from(1000))));
+    var exc = exciter_new(EXCITATION_NOISE_BURST, burst_dur, f64_div(f64_from(8), f64_from(10)));
+    Foliage_set_snap_exciter(self, exc);
+
+    var b = foliage_build_naad(self);
+    if (garjan_is_err(b) == 1) { return b; }
+    return self;
+}
+
+# Sets the wind speed (0.0 = calm, 1.0 = strong wind), clamped.
+fn foliage_set_wind_speed(self, speed) {
+    Foliage_set_wind_speed(self, f64_clamp(speed, 0, F64_ONE));
+    return 0;
+}
+
+# Sets the contact intensity (0.0 = none, 1.0 = heavy movement), clamped.
+fn foliage_set_contact_intensity(self, intensity) {
+    Foliage_set_contact_intensity(self, f64_clamp(intensity, 0, F64_ONE));
+    return 0;
+}
+
+# Triggers a branch snap (one-shot). Only has effect for BranchSnap type.
+fn foliage_trigger_snap(self) {
+    if (Foliage_foliage_type(self) == FOLIAGE_BRANCH_SNAP) {
+        Foliage_set_snap_pending(self, 1);
+    }
+    return 0;
+}
+
+# Rustle path: continuous LFO-modulated bandpassed pink noise + stochastic
+# micro-events. Ports process_rustle (naad branch). Mutates `output` in place.
+fn foliage_process_rustle(self, output) {
+    var num_samples = vec_len(output);
+    var wind_speed = Foliage_wind_speed(self);
+    var contact_intensity = Foliage_contact_intensity(self);
+    var event_rate = Foliage_event_rate(self);
+    var sr = Foliage_sample_rate(self);
+    var rng = Foliage_rng(self);
+    var rustle_noise = Foliage_rustle_noise(self);
+    var rustle_filter = Foliage_rustle_filter(self);
+    var wind_lfo = Foliage_wind_lfo(self);
+    var event_dur = Foliage_event_duration_samples(self);
+
+    # total_rate = wind_speed*event_rate + contact_intensity*event_rate*2.0
+    var total_rate = f64_add(f64_mul(wind_speed, event_rate), f64_mul(f64_mul(contact_intensity, event_rate), F64_TWO));
+    var block_size = f64_to(f64_mul(sr, f64_div(f64_from(1), f64_from(100))));   # sr*0.01
+    var events_per_block = f64_mul(total_rate, f64_div(f64_from(1), f64_from(100)));
+
+    # Continuous rustle bed.
+    var wind_amp = f64_mul(wind_speed, f64_div(f64_from(15), f64_from(100)));    # wind_speed*0.15
+    var c03 = f64_div(f64_from(3), f64_from(10));
+    var c07 = f64_div(f64_from(7), f64_from(10));
+    var i = 0;
+    while (i < num_samples) {
+        var noise = noise_next_sample(rustle_noise);
+        var filtered = filter_biquad_process_sample(rustle_filter, noise);
+        # lfo = 0.7 + 0.3 * wind_lfo.next_value()
+        var lfo = f64_add(c07, f64_mul(c03, modulation_lfo_next_value(wind_lfo)));
+        vec_set(output, i, f64_mul(f64_mul(filtered, wind_amp), lfo));
+        i = i + 1;
+    }
+
+    # Stochastic micro-events.
+    if (f64_gt(total_rate, 0) == 1) {
+        if (event_dur > 0) {
+            var step = block_size;
+            if (step < 1) { step = 1; }
+            var block_start = 0;
+            while (block_start < num_samples) {
+                var block_end = block_start + block_size;
+                if (block_end > num_samples) { block_end = num_samples; }
+                var n_events = rng_poisson(rng, events_per_block);
+                var ev = 0;
+                while (ev < n_events) {
+                    var width = f64_from(block_end - block_start);
+                    var offset = f64_to(rng_next_f32_range(rng, 0, width));
+                    var idx = block_start + offset;
+                    if (idx < num_samples) {
+                        var amp = rng_next_f32_range(rng, f64_div(f64_from(5), f64_from(100)),
+                                                     f64_div(f64_from(15), f64_from(100)));
+                        var span = event_dur;
+                        if (num_samples - idx < span) { span = num_samples - idx; }
+                        var j = 0;
+                        while (j < span) {
+                            var env = f64_sub(F64_ONE, f64_div(f64_from(j), f64_from(event_dur)));
+                            var contrib = f64_mul(amp, f64_mul(env, rng_next_f32(rng)));
+                            vec_set(output, idx + j, f64_add(vec_get(output, idx + j), contrib));
+                            j = j + 1;
+                        }
+                    }
+                    ev = ev + 1;
+                }
+                block_start = block_start + step;
+            }
+        }
+    }
+    return 0;
+}
+
+# Branch-snap path: fire the noise-burst exciter through the wood modal bank.
+# Ports process_branch_snap. Mutates `output` in place.
+fn foliage_process_branch_snap(self, output) {
+    var exciter = Foliage_snap_exciter(self);
+    var bank = Foliage_snap_modal(self);
+
+    if (Foliage_snap_pending(self) == 1) {
+        Foliage_set_snap_pending(self, 0);
+        exciter_trigger(exciter);
+        if (bank != 0) { modal_bank_reset(bank); }
+    }
+
+    var num = vec_len(output);
+    var i = 0;
+    while (i < num) {
+        var exc = exciter_next_sample(exciter);
+        var s = 0;
+        if (bank != 0) {
+            s = modal_bank_process_sample(bank, exc);
+        } else {
+            s = f64_mul(exc, F64_HALF);
+        }
+        vec_set(output, i, s);
+        i = i + 1;
+    }
+    return 0;
+}
+
+# Fills `output` (a vec of f64) with foliage audio (streaming). Ports
+# process_block: type-dispatched synthesis, then DC-block, then advance position.
+fn foliage_process_block(self, output) {
+    if (Foliage_foliage_type(self) == FOLIAGE_BRANCH_SNAP) {
+        foliage_process_branch_snap(self, output);
+    } else {
+        foliage_process_rustle(self, output);
+    }
+
+    var dc = Foliage_dc_blocker(self);
+    var num = vec_len(output);
+    var i = 0;
+    while (i < num) {
+        vec_set(output, i, garjan_dcblocker_process(dc, vec_get(output, i)));
+        i = i + 1;
+    }
+    Foliage_set_sample_position(self, Foliage_sample_position(self) + num);
+    return 0;
+}
+
+# Synthesize `duration` seconds of foliage audio into a fresh vec. Returns the
+# vec pointer, or a negative code on invalid duration.
+#must_use
+fn foliage_synthesize(self, duration) {
+    var e = garjan_validate_duration(duration);
+    if (garjan_is_err(e) == 1) { return e; }
+    var num = f64_to(f64_mul(Foliage_sample_rate(self), duration));
+    var output = vec_new();
+    var i = 0;
+    while (i < num) {
+        vec_push(output, 0);
+        i = i + 1;
+    }
+    foliage_process_block(self, output);
+    return output;
+}
+
+# ---- serde: snapshot live state -> FoliageParams -> JSON, and back. ----
+#must_use
+fn foliage_to_json(self, sb) {
+    var p = alloc(sizeof(FoliageParams));
+    FoliageParams_set_foliage_type(p, Foliage_foliage_type(self));
+    FoliageParams_set_sample_rate(p, Foliage_sample_rate(self));
+    FoliageParams_set_sample_position(p, Foliage_sample_position(self));
+    FoliageParams_set_wind_speed(p, Foliage_wind_speed(self));
+    FoliageParams_set_contact_intensity(p, Foliage_contact_intensity(self));
+    FoliageParams_set_snap_pending(p, Foliage_snap_pending(self));
+    FoliageParams_set_event_rate(p, Foliage_event_rate(self));
+    FoliageParams_set_event_duration_samples(p, Foliage_event_duration_samples(self));
+
+    var rng = Foliage_rng(self);
+    FoliageParams_set_rng_state(p, Rng_state(rng));
+    FoliageParams_set_rng_inc(p, Rng_inc(rng));
+
+    var dc = Foliage_dc_blocker(self);
+    FoliageParams_set_dcb_x_prev(p, DcBlocker_x_prev(dc));
+    FoliageParams_set_dcb_y_prev(p, DcBlocker_y_prev(dc));
+    FoliageParams_set_dcb_r(p, DcBlocker_r(dc));
+
+    var exc = Foliage_snap_exciter(self);
+    FoliageParams_set_exc_position(p, Exciter_position(exc));
+    FoliageParams_set_exc_active(p, Exciter_active(exc));
+    var exc_rng = Exciter_rng(exc);
+    FoliageParams_set_exc_rng_state(p, Rng_state(exc_rng));
+    FoliageParams_set_exc_rng_inc(p, Rng_inc(exc_rng));
+
+    return FoliageParams_to_json(p, sb);
+}
+
+# Rebuild a Foliage from JSON: restore scalars + rng + dc_blocker + exciter
+# state, then reconstruct the naad + modal components fresh (matches Rust's
+# skip+reconstruct). Returns the synth pointer.
+#must_use
+fn foliage_from_json_str(json) {
+    var p = FoliageParams_from_json_str(json);
+    var self = alloc(sizeof(Foliage));
+    Foliage_set_foliage_type(self, FoliageParams_foliage_type(p));
+    Foliage_set_sample_rate(self, FoliageParams_sample_rate(p));
+    Foliage_set_sample_position(self, FoliageParams_sample_position(p));
+    Foliage_set_wind_speed(self, FoliageParams_wind_speed(p));
+    Foliage_set_contact_intensity(self, FoliageParams_contact_intensity(p));
+    Foliage_set_snap_pending(self, FoliageParams_snap_pending(p));
+    Foliage_set_event_rate(self, FoliageParams_event_rate(p));
+    Foliage_set_event_duration_samples(self, FoliageParams_event_duration_samples(p));
+
+    var rng = rng_new(0);
+    Rng_set_state(rng, FoliageParams_rng_state(p));
+    Rng_set_inc(rng, FoliageParams_rng_inc(p));
+    Foliage_set_rng(self, rng);
+
+    var dc = garjan_dcblocker_new(FoliageParams_sample_rate(p));
+    DcBlocker_set_x_prev(dc, FoliageParams_dcb_x_prev(p));
+    DcBlocker_set_y_prev(dc, FoliageParams_dcb_y_prev(p));
+    DcBlocker_set_r(dc, FoliageParams_dcb_r(p));
+    Foliage_set_dc_blocker(self, dc);
+
+    # Rebuild the exciter, restoring its live state.
+    var burst_dur = f64_to(f64_mul(FoliageParams_sample_rate(p), f64_div(f64_from(2), f64_from(1000))));
+    var exc = exciter_new(EXCITATION_NOISE_BURST, burst_dur, f64_div(f64_from(8), f64_from(10)));
+    Exciter_set_position(exc, FoliageParams_exc_position(p));
+    Exciter_set_active(exc, FoliageParams_exc_active(p));
+    var exc_rng = Exciter_rng(exc);
+    Rng_set_state(exc_rng, FoliageParams_exc_rng_state(p));
+    Rng_set_inc(exc_rng, FoliageParams_exc_rng_inc(p));
+    Foliage_set_snap_exciter(self, exc);
+
+    var b = foliage_build_naad(self);
+    if (garjan_is_err(b) == 1) { return b; }
+    return self;
+}

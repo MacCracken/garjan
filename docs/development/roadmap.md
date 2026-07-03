@@ -1,86 +1,36 @@
-# garjan Roadmap
+# garjan — Roadmap
 
-> Environmental and nature sound synthesis for AGNOS.
+> Milestone plan through v1.0. State lives in [`state.md`](state.md);
+> this file is the sequencing — what ships, in what order, against
+> what dependency gates.
 
-## v1.0.0 (Released)
+## v1.0 criteria
 
-See [CHANGELOG.md](../../CHANGELOG.md) for the full release history.
+_Define before tagging v0.1.0:_
 
----
+- [ ] Rust → Cyrius surface parity verified (function-level diff against `rust-old/`)
+- [ ] Test coverage adequate for the surface area
+- [ ] Benchmarks captured in `docs/benchmarks.md`
+- [ ] At least one downstream consumer green
+- [ ] CHANGELOG complete from v0.1.0 onward
+- [ ] Security audit pass (`docs/audit/YYYY-MM-DD-audit.md`)
 
-## v1.1.0
+## Milestones
 
-### High Priority
+### M0 — Port scaffold (v0.1.0) — ✅ shipped 2026-07-03
 
-- Parameter smoothing (one-pole filter on real-time setters to prevent clicks)
-- Real-time setters for Weather v1 synths (Rain intensity, Wind speed/gustiness, Fire intensity)
+- `cyrius port` scaffold landed
+- Rust source moved to `rust-old/`
+- Doc-tree per [first-party-documentation.md](https://github.com/MacCracken/agnosticos/blob/main/docs/development/applications/first-party-documentation.md)
 
-### Medium Priority
+### M1 — Surface parity (v0.2.0)
 
-- Fade-in/fade-out on all continuous synthesizers (click-free start/stop)
-- Thunder multi-bolt sequences
-- Wind turbulence model with terrain spectral variation
+_Pick a parseable Rust subset and verify the Cyrius port matches it function-for-function. Specify the dep gates and the acceptance criteria._
 
-### Lower Priority
+### M2 — _Title_ (v0.3.0)
 
-- Karplus-Strong for metallic ping and plucked-string transients
-- Waveguide wind (extends whistle module with physical tube model)
-- Destruction/fracture: sustained collapse sequences
+_…_
 
----
+## Out of scope (for v1.0)
 
-## v2.0+
-
-### Performance
-
-- SIMD explicit intrinsics for ModalBank (currently relies on auto-vectorization)
-- Object pool for transient events (drops, crackles, debris)
-
-### New Sound Categories
-
-- Explosion synthesis (layered: initial burst, debris, rumble tail)
-- Machinery integration points (garjan provides ambient hum, ghurni provides mechanical detail)
-- Terrain-specific ambient textures (cave drip reverb, desert wind howl)
-
----
-
-## Design Principles
-
-- **No samples**: every sound is synthesized from math
-- **No allocations on hot path**: pre-allocate at construction, stream into caller's buffer
-- **Deterministic**: seeded RNG, reproducible output
-- **`no_std` compatible**: `libm` fallback, `alloc` only
-- **Composable**: synthesizers are independent, caller mixes
-- **Physical grounding**: models rooted in acoustics, not arbitrary DSP chains
-- **Leverage dependencies**: naad for audio primitives — don't reinvent
-
-## Soorat Integration
-
-- [ ] `integration/soorat.rs` module — feature-gated `soorat-compat`, visualization data for soorat
-- [ ] **Rain particle field**: particle positions, sizes, velocities for rain/snow rendering
-- [ ] **Fire emitter data**: emitter positions, intensity, color temperature for fire particle rendering
-- [ ] **Wind flow field**: 2D/3D vector field of wind velocities for streamline/arrow visualization
-
----
-
-## Scope Boundaries (sibling crates)
-
-| Domain | Owner | garjan's role |
-|---|---|---|
-| Vocal synthesis (bird song, growls, speech) | **prani** (via **svara**) | Not garjan's domain |
-| Mechanical sounds (engines, gears, motors) | **ghurni** | Not garjan's domain |
-| Acoustics (propagation, Doppler, reverb, RT60) | **goonj** | garjan generates source, goonj propagates |
-| Audio engine (mixing, buses, scheduling, RTPC) | **dhvani** | garjan exposes params, dhvani maps them |
-| Weather physics (rain rate, wind profiles) | **badal** / **pavan** | garjan consumes their outputs as params |
-| Creature behavior (when/why sounds trigger) | **jantu** | jantu decides, garjan synthesizes |
-
-## Non-Goals
-
-These belong in **dhvani** (audio engine) or **kiran** (game engine):
-
-- Spatial audio / 3D positioning / HRTF
-- Reverb zones and room acoustics simulation
-- Audio bus architecture and mixing
-- Compression / limiting on master output
-- Speaker layout and format conversion
-- Asset management and sound banks
+_Capture what's deliberately NOT in scope for v1.0._

@@ -1,0 +1,279 @@
+# rolling.cyr -- rolling synthesis: ball, wheel, boulder, barrel on surfaces.
+#
+# Ports rust-old/src/rolling.rs. Models continuous contact between a round
+# body and a surface: material-shaped surface noise plus periodic rotation
+# bumps, and (for hollow bodies) a modal bank. The Cyrius port always uses the
+# naad backend (no feature flags), so it ports the naad generate_noise path
+# (pink noise -> bandpass surface_filter) and drops the rng fallback. f32 ->
+# f64. Result<Self> -> pointer / negative GARJAN_* code. The Rust
+# `#[serde(skip)]`-equivalent live components (noise_gen, surface_filter,
+# modal_bank) are reconstructed on deserialize; rng + dc_blocker state ARE
+# serialized (via the flattened RollingParams below).
+#
+# Requires: error, logging, dsp, rng, material, modal, contact foundations +
+# the naad bundle (noise_new/noise_next_sample,
+# filter_biquad_new/filter_biquad_process_sample).
+
+# ---- RollingParams: the serializable slice (exactly Rust's fields, with rng +
+# dc_blocker FLATTENED so #derive(Serialize)'s single-pass from_json_str works).
+# body/surface are enum ints. modal_bank / naad components are NOT serialized;
+# they are rebuilt from these params in rolling_build_naad. ----
+#derive(accessors)
+#derive(Serialize)
+struct RollingParams {
+    body: i64;
+    surface: i64;
+    sample_rate: f64;
+    sample_position: i64;
+    radius: f64;
+    mass_factor: f64;
+    hollowness: f64;
+    rotation_phase: f64;
+    velocity: f64;
+    rng_state: i64;
+    rng_inc: i64;
+    dcb_x_prev: f64;
+    dcb_y_prev: f64;
+    dcb_r: f64;
+}
+
+# ---- Rolling: live synth = scalars + live rng/dc_blocker + modal bank +
+# naad component ptrs. modal_bank is 0 when the body is not hollow. ----
+#derive(accessors)
+struct Rolling {
+    body;
+    surface;
+    sample_rate;
+    sample_position;
+    radius;
+    mass_factor;
+    hollowness;
+    rotation_phase;
+    velocity;
+    rng;
+    dc_blocker;
+    modal_bank;
+    noise_gen;
+    surface_filter;
+}
+
+# Build/refresh the naad components + modal bank from the stored scalars.
+# Shared by rolling_new and rolling_from_json_str. Returns GARJAN_OK or a
+# negative code if a naad constructor / modal bank rejects its params.
+fn rolling_build_naad(self) {
+    var sr = Rolling_sample_rate(self);
+
+    # Modal bank for hollow bodies (barrels are wooden). Rebuilt, not serialized.
+    if (f64_gt(Rolling_hollowness(self), 0) == 1) {
+        var props = material_properties(MATERIAL_WOOD);
+        var mode_cfg = material_mode_config(MATERIAL_WOOD);
+        var count = MaterialModeConfig_mode_count(mode_cfg);
+        if (count > 6) { count = 6; }
+        var specs = generate_modes(props, MaterialModeConfig_pattern(mode_cfg), count,
+                                   MaterialModeConfig_damping_factor(mode_cfg));
+        var bank = modal_bank_new(specs, sr);
+        if (garjan_is_err(bank) == 1) { return garjan_map_naad_error(bank); }
+        Rolling_set_modal_bank(self, bank);
+    } else {
+        Rolling_set_modal_bank(self, 0);
+    }
+
+    # Surface filter: bandpass at material resonance * (1 - 0.3*mass_factor),
+    # clamped to [50, 8000] Hz, Q = 1.0.
+    var surf_props = material_properties(Rolling_surface(self));
+    var resonance = MaterialProperties_resonance(surf_props);
+    var scale = f64_sub(F64_ONE, f64_mul(f64_div(f64_from(3), f64_from(10)), Rolling_mass_factor(self)));
+    var base_cutoff = f64_mul(resonance, scale);
+    var cutoff = f64_clamp(base_cutoff, f64_from(50), f64_from(8000));
+    var sf = filter_biquad_new(FILTER_BANDPASS, sr, cutoff, F64_ONE);
+    if (garjan_is_err(sf) == 1) { return garjan_map_naad_error(sf); }
+    Rolling_set_surface_filter(self, sf);
+
+    Rolling_set_noise_gen(self, noise_new(NOISE_PINK, 3333));
+    return GARJAN_OK;
+}
+
+# Creates a new rolling synthesizer. Returns a pointer or a negative code.
+#must_use
+fn rolling_new(body, surface, sample_rate) {
+    var e = garjan_validate_sample_rate(sample_rate);
+    if (garjan_is_err(e) == 1) { return e; }
+
+    # Body properties: (radius, mass_factor, hollowness) per RollingBody.
+    var radius = 0;
+    var mass_factor = 0;
+    var hollowness = 0;
+    if (body == ROLLING_BALL) {
+        radius = f64_div(f64_from(5), f64_from(100));       # 0.05
+        mass_factor = f64_div(f64_from(2), f64_from(10));   # 0.2
+        hollowness = 0;
+    } elif (body == ROLLING_WHEEL) {
+        radius = f64_div(f64_from(3), f64_from(10));        # 0.3
+        mass_factor = F64_HALF;                             # 0.5
+        hollowness = 0;
+    } elif (body == ROLLING_BOULDER) {
+        radius = F64_ONE;                                   # 1.0
+        mass_factor = F64_ONE;                              # 1.0
+        hollowness = 0;
+    } else {
+        # Barrel
+        radius = f64_div(f64_from(4), f64_from(10));        # 0.4
+        mass_factor = f64_div(f64_from(6), f64_from(10));   # 0.6
+        hollowness = f64_div(f64_from(8), f64_from(10));    # 0.8
+    }
+
+    var self = alloc(sizeof(Rolling));
+    Rolling_set_body(self, body);
+    Rolling_set_surface(self, surface);
+    Rolling_set_sample_rate(self, sample_rate);
+    Rolling_set_sample_position(self, 0);
+    Rolling_set_radius(self, radius);
+    Rolling_set_mass_factor(self, mass_factor);
+    Rolling_set_hollowness(self, hollowness);
+    Rolling_set_rotation_phase(self, 0);
+    Rolling_set_velocity(self, 0);
+    Rolling_set_rng(self, rng_new(3333));
+    Rolling_set_dc_blocker(self, garjan_dcblocker_new(sample_rate));
+
+    var b = rolling_build_naad(self);
+    if (garjan_is_err(b) == 1) { return b; }
+    return self;
+}
+
+# Sets the rolling velocity (0.0 = still, 1.0 = fast). Clamped to [0, 1].
+fn rolling_set_velocity(self, velocity) {
+    Rolling_set_velocity(self, f64_clamp(velocity, 0, F64_ONE));
+    return 0;
+}
+
+# Surface noise: one pink sample through the bandpass surface_filter.
+#inline
+#must_use
+fn rolling_generate_noise(self) {
+    var raw = noise_next_sample(Rolling_noise_gen(self));
+    return filter_biquad_process_sample(Rolling_surface_filter(self), raw);
+}
+
+# Fills `output` (a vec of f64) with rolling audio (streaming). Ports
+# process_block: per-sample rotation phase, surface noise, rotation bumps,
+# optional hollow-body resonance, then DC-block; then advance position.
+fn rolling_process_block(self, output) {
+    var num = vec_len(output);
+    var dc = Rolling_dc_blocker(self);
+    var bank = Rolling_modal_bank(self);
+    var velocity = Rolling_velocity(self);
+    var radius = Rolling_radius(self);
+    var sr = Rolling_sample_rate(self);
+    var hollowness = Rolling_hollowness(self);
+
+    var threshold = f64_div(f64_from(1), f64_from(1000));   # 0.001
+    var amp03 = f64_div(f64_from(3), f64_from(10));         # 0.3
+    var amp02 = f64_div(f64_from(2), f64_from(10));         # 0.2
+    var amp01 = f64_div(f64_from(1), f64_from(10));         # 0.1
+
+    var i = 0;
+    while (i < num) {
+        if (f64_lt(velocity, threshold) == 1) {
+            vec_set(output, i, 0);
+            garjan_dcblocker_process(dc, 0);
+        } else {
+            # Rotation rate from velocity and radius; advance phase, wrap at 1.
+            var rotation_rate = f64_div(velocity, f64_mul(F64_TAU, radius));
+            var phase = f64_add(Rolling_rotation_phase(self), f64_div(rotation_rate, sr));
+            if (f64_ge(phase, F64_ONE) == 1) { phase = f64_sub(phase, F64_ONE); }
+            Rolling_set_rotation_phase(self, phase);
+
+            # Surface noise, scaled by velocity * 0.3.
+            var surface_noise = f64_mul(rolling_generate_noise(self), f64_mul(velocity, amp03));
+
+            # Rotation bumps from imperfections.
+            var bump_env = f64_mul(f64_sub(F64_ONE, f64_cos(f64_mul(F64_TAU, phase))), F64_HALF);
+            var bump = f64_mul(bump_env, f64_mul(velocity, amp02));
+
+            # Hollow body resonance.
+            var resonant = 0;
+            if (bank != 0) {
+                var excite = f64_mul(f64_add(bump, f64_mul(surface_noise, amp01)), hollowness);
+                resonant = f64_mul(modal_bank_process_sample(bank, excite), F64_HALF);
+            }
+
+            var s = f64_add(f64_add(surface_noise, bump), resonant);
+            vec_set(output, i, garjan_dcblocker_process(dc, s));
+        }
+        i = i + 1;
+    }
+    Rolling_set_sample_position(self, Rolling_sample_position(self) + num);
+    return 0;
+}
+
+# Synthesize `duration` seconds of rolling audio into a fresh vec. Returns the
+# vec pointer, or a negative code on invalid duration.
+#must_use
+fn rolling_synthesize(self, duration) {
+    var e = garjan_validate_duration(duration);
+    if (garjan_is_err(e) == 1) { return e; }
+    var num = f64_to(f64_mul(Rolling_sample_rate(self), duration));
+    var output = vec_new();
+    var i = 0;
+    while (i < num) {
+        vec_push(output, 0);
+        i = i + 1;
+    }
+    rolling_process_block(self, output);
+    return output;
+}
+
+# ---- serde: snapshot live state -> RollingParams -> JSON, and back. ----
+#must_use
+fn rolling_to_json(self, sb) {
+    var p = alloc(sizeof(RollingParams));
+    RollingParams_set_body(p, Rolling_body(self));
+    RollingParams_set_surface(p, Rolling_surface(self));
+    RollingParams_set_sample_rate(p, Rolling_sample_rate(self));
+    RollingParams_set_sample_position(p, Rolling_sample_position(self));
+    RollingParams_set_radius(p, Rolling_radius(self));
+    RollingParams_set_mass_factor(p, Rolling_mass_factor(self));
+    RollingParams_set_hollowness(p, Rolling_hollowness(self));
+    RollingParams_set_rotation_phase(p, Rolling_rotation_phase(self));
+    RollingParams_set_velocity(p, Rolling_velocity(self));
+    var rng = Rolling_rng(self);
+    RollingParams_set_rng_state(p, Rng_state(rng));
+    RollingParams_set_rng_inc(p, Rng_inc(rng));
+    var dc = Rolling_dc_blocker(self);
+    RollingParams_set_dcb_x_prev(p, DcBlocker_x_prev(dc));
+    RollingParams_set_dcb_y_prev(p, DcBlocker_y_prev(dc));
+    RollingParams_set_dcb_r(p, DcBlocker_r(dc));
+    return RollingParams_to_json(p, sb);
+}
+
+# Rebuild a Rolling from JSON: restore scalars + rng + dc_blocker state, then
+# reconstruct the naad components + modal bank fresh (matches Rust's skip +
+# reconstruct semantics).
+#must_use
+fn rolling_from_json_str(json) {
+    var p = RollingParams_from_json_str(json);
+    var self = alloc(sizeof(Rolling));
+    Rolling_set_body(self, RollingParams_body(p));
+    Rolling_set_surface(self, RollingParams_surface(p));
+    Rolling_set_sample_rate(self, RollingParams_sample_rate(p));
+    Rolling_set_sample_position(self, RollingParams_sample_position(p));
+    Rolling_set_radius(self, RollingParams_radius(p));
+    Rolling_set_mass_factor(self, RollingParams_mass_factor(p));
+    Rolling_set_hollowness(self, RollingParams_hollowness(p));
+    Rolling_set_rotation_phase(self, RollingParams_rotation_phase(p));
+    Rolling_set_velocity(self, RollingParams_velocity(p));
+
+    var rng = rng_new(0);
+    Rng_set_state(rng, RollingParams_rng_state(p));
+    Rng_set_inc(rng, RollingParams_rng_inc(p));
+    Rolling_set_rng(self, rng);
+
+    var dc = garjan_dcblocker_new(RollingParams_sample_rate(p));
+    DcBlocker_set_x_prev(dc, RollingParams_dcb_x_prev(p));
+    DcBlocker_set_y_prev(dc, RollingParams_dcb_y_prev(p));
+    DcBlocker_set_r(dc, RollingParams_dcb_r(p));
+    Rolling_set_dc_blocker(self, dc);
+
+    rolling_build_naad(self);
+    return self;
+}

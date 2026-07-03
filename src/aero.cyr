@@ -1,0 +1,112 @@
+# aero.cyr -- shared types for aerodynamic synthesis.
+#
+# Ports rust-old/src/aero.rs (WhooshType, WhistleSource, ClothType enums +
+# their config() tuples). Enums -> module-prefixed int constants; config
+# tuples -> transient config structs (accessor-read, no serde). Booleans
+# become 0/1 ints. f32 -> f64. Standalone (stdlib math only).
+
+# ---- WhooshType ----
+var WHOOSH_SWING      = 0;
+var WHOOSH_PROJECTILE = 1;
+var WHOOSH_VEHICLE    = 2;
+var WHOOSH_THROW      = 3;
+
+# config (envelope_duration_s, brightness, low_freq_content).
+#derive(accessors)
+struct WhooshConfig { duration; brightness; low_freq; }
+
+#must_use
+fn aero_whoosh_config(ty) {
+    var c = alloc(sizeof(WhooshConfig));
+    if (ty == WHOOSH_SWING) {
+        WhooshConfig_set_duration(c, f64_div(f64_from(3), f64_from(10)));       # 0.3
+        WhooshConfig_set_brightness(c, f64_div(f64_from(7), f64_from(10)));     # 0.7
+        WhooshConfig_set_low_freq(c, f64_div(f64_from(2), f64_from(10)));       # 0.2
+    } elif (ty == WHOOSH_PROJECTILE) {
+        WhooshConfig_set_duration(c, f64_div(f64_from(15), f64_from(100)));     # 0.15
+        WhooshConfig_set_brightness(c, f64_div(f64_from(9), f64_from(10)));     # 0.9
+        WhooshConfig_set_low_freq(c, f64_div(f64_from(1), f64_from(10)));       # 0.1
+    } elif (ty == WHOOSH_VEHICLE) {
+        WhooshConfig_set_duration(c, f64_div(f64_from(15), f64_from(10)));      # 1.5
+        WhooshConfig_set_brightness(c, f64_div(f64_from(4), f64_from(10)));     # 0.4
+        WhooshConfig_set_low_freq(c, f64_div(f64_from(6), f64_from(10)));       # 0.6
+    } else {
+        # Throw
+        WhooshConfig_set_duration(c, f64_div(f64_from(5), f64_from(10)));       # 0.5
+        WhooshConfig_set_brightness(c, f64_div(f64_from(5), f64_from(10)));     # 0.5
+        WhooshConfig_set_low_freq(c, f64_div(f64_from(3), f64_from(10)));       # 0.3
+    }
+    return c;
+}
+
+# ---- WhistleSource ----
+var WHISTLE_GAP    = 0;
+var WHISTLE_PIPE   = 1;
+var WHISTLE_BOTTLE = 2;
+var WHISTLE_WIRE   = 3;
+
+# config (base_frequency_hz, bandwidth, noise_mix).
+#derive(accessors)
+struct WhistleConfig { base_freq; bandwidth; noise_mix; }
+
+#must_use
+fn aero_whistle_config(ty) {
+    var c = alloc(sizeof(WhistleConfig));
+    if (ty == WHISTLE_GAP) {
+        WhistleConfig_set_base_freq(c, f64_from(2000));
+        WhistleConfig_set_bandwidth(c, f64_from(200));
+        WhistleConfig_set_noise_mix(c, f64_div(f64_from(3), f64_from(10)));     # 0.3
+    } elif (ty == WHISTLE_PIPE) {
+        WhistleConfig_set_base_freq(c, f64_from(800));
+        WhistleConfig_set_bandwidth(c, f64_from(50));
+        WhistleConfig_set_noise_mix(c, f64_div(f64_from(1), f64_from(10)));     # 0.1
+    } elif (ty == WHISTLE_BOTTLE) {
+        WhistleConfig_set_base_freq(c, f64_from(300));
+        WhistleConfig_set_bandwidth(c, f64_from(30));
+        WhistleConfig_set_noise_mix(c, f64_div(f64_from(15), f64_from(100)));   # 0.15
+    } else {
+        # Wire
+        WhistleConfig_set_base_freq(c, f64_from(1500));
+        WhistleConfig_set_bandwidth(c, f64_from(80));
+        WhistleConfig_set_noise_mix(c, f64_div(f64_from(2), f64_from(10)));     # 0.2
+    }
+    return c;
+}
+
+# ---- ClothType ----
+var CLOTH_FLAG = 0;
+var CLOTH_CAPE = 1;
+var CLOTH_SAIL = 2;
+var CLOTH_TARP = 3;
+
+# config (base_flap_rate_hz, amplitude, filter_freq, use_modal[0/1]).
+#derive(accessors)
+struct ClothConfig { flap_rate; amplitude; filter_freq; use_modal; }
+
+#must_use
+fn aero_cloth_config(ty) {
+    var c = alloc(sizeof(ClothConfig));
+    if (ty == CLOTH_FLAG) {
+        ClothConfig_set_flap_rate(c, f64_from(8));
+        ClothConfig_set_amplitude(c, f64_div(f64_from(3), f64_from(10)));       # 0.3
+        ClothConfig_set_filter_freq(c, f64_from(3000));
+        ClothConfig_set_use_modal(c, 0);
+    } elif (ty == CLOTH_CAPE) {
+        ClothConfig_set_flap_rate(c, f64_from(5));
+        ClothConfig_set_amplitude(c, f64_div(f64_from(25), f64_from(100)));     # 0.25
+        ClothConfig_set_filter_freq(c, f64_from(2500));
+        ClothConfig_set_use_modal(c, 0);
+    } elif (ty == CLOTH_SAIL) {
+        ClothConfig_set_flap_rate(c, f64_from(2));
+        ClothConfig_set_amplitude(c, f64_div(f64_from(5), f64_from(10)));       # 0.5
+        ClothConfig_set_filter_freq(c, f64_from(1000));
+        ClothConfig_set_use_modal(c, 1);
+    } else {
+        # Tarp
+        ClothConfig_set_flap_rate(c, f64_from(6));
+        ClothConfig_set_amplitude(c, f64_div(f64_from(4), f64_from(10)));       # 0.4
+        ClothConfig_set_filter_freq(c, f64_from(4000));
+        ClothConfig_set_use_modal(c, 0);
+    }
+    return c;
+}

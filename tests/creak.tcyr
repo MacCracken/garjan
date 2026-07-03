@@ -1,0 +1,85 @@
+# creak.tcyr -- parity tests for src/creak.cyr (naad modal synth + serde).
+include "src/error.cyr"
+include "src/logging.cyr"
+include "src/dsp.cyr"
+include "src/rng.cyr"
+include "src/lod.cyr"
+include "src/material.cyr"
+include "src/modal.cyr"
+include "src/contact.cyr"
+include "src/aero.cyr"
+include "src/creature.cyr"
+include "src/creak.cyr"
+
+fn main() {
+    alloc_init();
+
+    test_group("creak_new");
+    var c = creak_new(CREAK_DOOR, f64_from(44100));
+    assert(garjan_is_err(c) == 0, "creak_new ok");
+    assert(garjan_is_err(creak_new(CREAK_DOOR, 0)) == 1, "creak_new rejects sr=0");
+    # Door freq range: 40 .. 200, noise_mix 0.1.
+    assert(f64_lt(f64_abs(f64_sub(Creak_freq_lo(c), f64_from(40))), GARJAN_EPSILON) == 1, "door freq_lo 40");
+    assert(f64_lt(f64_abs(f64_sub(Creak_freq_hi(c), f64_from(200))), GARJAN_EPSILON) == 1, "door freq_hi 200");
+    # Default tension 0.5, speed 0.0.
+    assert(f64_lt(f64_abs(f64_sub(Creak_tension(c), F64_HALF)), GARJAN_EPSILON) == 1, "default tension 0.5");
+    assert(f64_lt(f64_abs(Creak_speed(c)), GARJAN_EPSILON) == 1, "default speed 0.0");
+
+    test_group("setters clamp");
+    creak_set_tension(c, f64_from(2));
+    assert(f64_lt(f64_abs(f64_sub(Creak_tension(c), F64_ONE)), GARJAN_EPSILON) == 1, "tension clamps to 1.0");
+    creak_set_speed(c, f64_neg(F64_ONE));
+    assert(f64_lt(f64_abs(Creak_speed(c)), GARJAN_EPSILON) == 1, "speed clamps to 0.0");
+
+    test_group("synthesize");
+    # speed 0.0 -> silence; give it a real speed for audible output.
+    creak_set_speed(c, f64_div(f64_from(8), f64_from(10)));
+    creak_set_tension(c, F64_HALF);
+    var buf = creak_synthesize(c, f64_div(f64_from(1), f64_from(10)));   # 0.1s
+    assert(garjan_is_err(buf) == 0, "synthesize ok");
+    assert_eq(vec_len(buf), 4410, "0.1s @ 44100 = 4410 samples");
+    var i = 0;
+    var allfinite = 1;
+    var energy = 0;
+    while (i < vec_len(buf)) {
+        var s = vec_get(buf, i);
+        if (garjan_is_finite(s) == 0) { allfinite = 0; }
+        energy = f64_add(energy, f64_abs(s));
+        i = i + 1;
+    }
+    assert(allfinite == 1, "all creak samples finite");
+    assert(f64_gt(energy, 0) == 1, "creak produces sound (nonzero energy)");
+    assert(garjan_is_err(creak_synthesize(c, 0)) == 1, "synthesize rejects duration=0");
+
+    test_group("silence at zero speed");
+    var q = creak_new(CREAK_HINGE, f64_from(44100));
+    creak_set_speed(q, 0);
+    var sbuf = creak_synthesize(q, f64_div(f64_from(1), f64_from(100)));
+    var j2 = 0;
+    var silent_energy = 0;
+    while (j2 < vec_len(sbuf)) {
+        silent_energy = f64_add(silent_energy, f64_abs(vec_get(sbuf, j2)));
+        j2 = j2 + 1;
+    }
+    assert(f64_lt(silent_energy, GARJAN_EPSILON) == 1, "zero speed is silent");
+
+    test_group("creak_serde");
+    var g = creak_new(CREAK_ROPE, f64_from(48000));
+    creak_set_speed(g, f64_div(f64_from(6), f64_from(10)));
+    creak_set_tension(g, f64_div(f64_from(3), f64_from(10)));
+    # advance state so rng/dc_blocker/slip_phase are non-default
+    creak_synthesize(g, f64_div(f64_from(1), f64_from(100)));
+    var sb = str_builder_new();
+    creak_to_json(g, sb);
+    var jstr = str_data(str_builder_build(sb));
+    var g2 = creak_from_json_str(jstr);
+    var sb2 = str_builder_new();
+    creak_to_json(g2, sb2);
+    assert(memeq(jstr, str_data(str_builder_build(sb2)), strlen(jstr)) == 1, "creak params json roundtrip idempotent");
+    # restored synth resumes the SAME rng sequence
+    assert_eq(rng_next_u32(Creak_rng(g)), rng_next_u32(Creak_rng(g2)), "restored creak resumes rng");
+
+    return assert_summary();
+}
+var ec = main();
+syscall(60, ec);

@@ -1,0 +1,272 @@
+# texture.cyr -- ambient texture synthesis: continuous environmental backgrounds.
+#
+# Ports rust-old/src/texture.rs. Textures are layered multi-band noise with a
+# characteristic spectral shape (forest ambience, city hum, ocean surf, cave
+# drip, desert wind, night). The Cyrius port always uses the naad backend (no
+# feature flags), so it ports process_block_naad and drops the fallback.
+# f32 -> f64. Result<Self> -> pointer / negative GARJAN_* code. The Rust
+# `#[serde(skip)]`-equivalent naad components (3 noise gens, 3 biquad filters,
+# 1 LFO) are reconstructed on deserialize; rng + dc_blocker state ARE
+# serialized (via the flattened AmbientTextureParams below).
+#
+# Requires: error, logging, dsp, rng foundations + the naad bundle
+# (noise_new/noise_next_sample, filter_biquad_new/filter_biquad_process_sample,
+# modulation_lfo_new/modulation_lfo_next_value).
+
+# ================================================================
+# TextureType (enum) -> integer constants, declaration order.
+# ================================================================
+var TEXTURE_TYPE_FOREST = 0;
+var TEXTURE_TYPE_CITY   = 1;
+var TEXTURE_TYPE_OCEAN  = 2;
+var TEXTURE_TYPE_CAVE   = 3;
+var TEXTURE_TYPE_DESERT = 4;
+var TEXTURE_TYPE_NIGHT  = 5;
+
+# ---- AmbientTextureParams: the serializable slice (exactly Rust's fields,
+# with rng + dc_blocker FLATTENED so #derive(Serialize)'s single-pass
+# from_json_str works). texture_type is an int tag. ----
+#derive(accessors)
+#derive(Serialize)
+struct AmbientTextureParams {
+    texture_type: i64;
+    level: f64;
+    sample_rate: f64;
+    sample_position: i64;
+    rng_state: i64;
+    rng_inc: i64;
+    dcb_x_prev: f64;
+    dcb_y_prev: f64;
+    dcb_r: f64;
+}
+
+# ---- AmbientTexture: live synth = scalars + live rng/dc_blocker + naad
+# component ptrs (3 noise, 3 filter, 1 lfo). ----
+#derive(accessors)
+struct AmbientTexture {
+    texture_type;
+    level;
+    sample_rate;
+    sample_position;
+    rng;
+    dc_blocker;
+    low_noise;
+    mid_noise;
+    high_noise;
+    low_filter;
+    mid_filter;
+    high_filter;
+    mod_lfo;
+}
+
+# Modulation LFO rate (Hz) for a texture type. Ports the mod_rate match.
+#must_use
+fn texture_mod_rate(texture_type) {
+    if (texture_type == TEXTURE_TYPE_FOREST) { return f64_div(f64_from(2), f64_from(10)); }
+    if (texture_type == TEXTURE_TYPE_CITY) { return f64_div(f64_from(1), f64_from(10)); }
+    if (texture_type == TEXTURE_TYPE_OCEAN) { return f64_div(f64_from(8), f64_from(100)); }
+    if (texture_type == TEXTURE_TYPE_CAVE) { return f64_div(f64_from(2), f64_from(100)); }
+    if (texture_type == TEXTURE_TYPE_DESERT) { return f64_div(f64_from(15), f64_from(100)); }
+    return f64_div(f64_from(5), f64_from(100));
+}
+
+# Build/refresh the naad components from sample_rate + texture_type. Shared by
+# texture_new and texture_from_json_str. Returns GARJAN_OK or a negative code
+# if a naad constructor rejects its params.
+fn texture_build_naad(self) {
+    var sr = AmbientTexture_sample_rate(self);
+
+    # low: brown noise through lowpass 300 Hz, Q 0.7.
+    var lf = filter_biquad_new(FILTER_LOWPASS, sr, f64_from(300), f64_div(f64_from(7), f64_from(10)));
+    if (garjan_is_err(lf) == 1) { return garjan_map_naad_error(lf); }
+    # mid: pink noise through bandpass 1500 Hz, Q 1.0.
+    var mf = filter_biquad_new(FILTER_BANDPASS, sr, f64_from(1500), F64_ONE);
+    if (garjan_is_err(mf) == 1) { return garjan_map_naad_error(mf); }
+    # high: white noise through highpass 4000 Hz, Q 0.7.
+    var hf = filter_biquad_new(FILTER_HIGHPASS, sr, f64_from(4000), f64_div(f64_from(7), f64_from(10)));
+    if (garjan_is_err(hf) == 1) { return garjan_map_naad_error(hf); }
+
+    var rate = texture_mod_rate(AmbientTexture_texture_type(self));
+    var lfo = modulation_lfo_new(MODULATION_LFO_SINE, rate, sr);
+    if (garjan_is_err(lfo) == 1) { return garjan_map_naad_error(lfo); }
+
+    AmbientTexture_set_low_filter(self, lf);
+    AmbientTexture_set_mid_filter(self, mf);
+    AmbientTexture_set_high_filter(self, hf);
+    AmbientTexture_set_mod_lfo(self, lfo);
+    AmbientTexture_set_low_noise(self, noise_new(NOISE_BROWN, 9001));
+    AmbientTexture_set_mid_noise(self, noise_new(NOISE_PINK, 9002));
+    AmbientTexture_set_high_noise(self, noise_new(NOISE_WHITE, 9003));
+    return GARJAN_OK;
+}
+
+# Creates a new ambient texture. Returns a pointer or a negative code.
+#must_use
+fn texture_new(texture_type, level, sample_rate) {
+    var e = garjan_validate_sample_rate(sample_rate);
+    if (garjan_is_err(e) == 1) { return e; }
+    var lvl = f64_clamp(level, 0, F64_ONE);
+
+    var self = alloc(sizeof(AmbientTexture));
+    AmbientTexture_set_texture_type(self, texture_type);
+    AmbientTexture_set_level(self, lvl);
+    AmbientTexture_set_sample_rate(self, sample_rate);
+    AmbientTexture_set_sample_position(self, 0);
+    AmbientTexture_set_rng(self, rng_new(9001));
+    AmbientTexture_set_dc_blocker(self, garjan_dcblocker_new(sample_rate));
+    var b = texture_build_naad(self);
+    if (garjan_is_err(b) == 1) { return b; }
+    return self;
+}
+
+# Alias matching Rust's AmbientTexture::new — same signature/behaviour.
+#must_use
+fn ambient_texture_new(texture_type, level, sample_rate) {
+    return texture_new(texture_type, level, sample_rate);
+}
+
+# Band mix ratios (low, mid, high) for a texture type, returned via a small
+# 3-slot buffer. Ports the band_mix match. Slot 0=low, 1=mid, 2=high.
+#must_use
+fn texture_band_mix(texture_type) {
+    var m = alloc(24);
+    var low = f64_div(f64_from(2), f64_from(10));
+    var mid = F64_HALF;
+    var high = f64_div(f64_from(3), f64_from(10));
+    if (texture_type == TEXTURE_TYPE_FOREST) {
+        low = f64_div(f64_from(2), f64_from(10));
+        mid = F64_HALF;
+        high = f64_div(f64_from(3), f64_from(10));
+    } elif (texture_type == TEXTURE_TYPE_CITY) {
+        low = F64_HALF;
+        mid = f64_div(f64_from(3), f64_from(10));
+        high = f64_div(f64_from(2), f64_from(10));
+    } elif (texture_type == TEXTURE_TYPE_OCEAN) {
+        low = f64_div(f64_from(6), f64_from(10));
+        mid = f64_div(f64_from(3), f64_from(10));
+        high = f64_div(f64_from(1), f64_from(10));
+    } elif (texture_type == TEXTURE_TYPE_CAVE) {
+        low = f64_div(f64_from(3), f64_from(10));
+        mid = f64_div(f64_from(1), f64_from(10));
+        high = f64_div(f64_from(5), f64_from(100));
+    } elif (texture_type == TEXTURE_TYPE_DESERT) {
+        low = f64_div(f64_from(1), f64_from(10));
+        mid = f64_div(f64_from(2), f64_from(10));
+        high = f64_div(f64_from(1), f64_from(10));
+    } elif (texture_type == TEXTURE_TYPE_NIGHT) {
+        low = f64_div(f64_from(1), f64_from(10));
+        mid = f64_div(f64_from(2), f64_from(10));
+        high = f64_div(f64_from(15), f64_from(100));
+    }
+    store64(m, low);
+    store64(m + 8, mid);
+    store64(m + 16, high);
+    return m;
+}
+
+# Fills `output` (a vec of f64) with ambient texture audio (streaming). Ports
+# process_block: naad multi-band synthesis, then DC-block, then advance.
+fn texture_process_block(self, output) {
+    var num = vec_len(output);
+    var low_noise = AmbientTexture_low_noise(self);
+    var mid_noise = AmbientTexture_mid_noise(self);
+    var high_noise = AmbientTexture_high_noise(self);
+    var low_filter = AmbientTexture_low_filter(self);
+    var mid_filter = AmbientTexture_mid_filter(self);
+    var high_filter = AmbientTexture_high_filter(self);
+    var lfo = AmbientTexture_mod_lfo(self);
+    var level = AmbientTexture_level(self);
+
+    var mix = texture_band_mix(AmbientTexture_texture_type(self));
+    var low_mix = load64(mix);
+    var mid_mix = load64(mix + 8);
+    var high_mix = load64(mix + 16);
+
+    # 0.7 and 0.3 for the modulator: modulator = 0.7 + 0.3*lfo.
+    var mod_base = f64_div(f64_from(7), f64_from(10));
+    var mod_depth = f64_div(f64_from(3), f64_from(10));
+
+    var i = 0;
+    while (i < num) {
+        var modulator = f64_add(mod_base, f64_mul(mod_depth, modulation_lfo_next_value(lfo)));
+
+        var low = filter_biquad_process_sample(low_filter, noise_next_sample(low_noise));
+        var mid = filter_biquad_process_sample(mid_filter, noise_next_sample(mid_noise));
+        var high = filter_biquad_process_sample(high_filter, noise_next_sample(high_noise));
+
+        var mixed = f64_add(f64_add(f64_mul(low, low_mix), f64_mul(mid, mid_mix)), f64_mul(high, high_mix));
+        vec_set(output, i, f64_mul(f64_mul(mixed, level), modulator));
+        i = i + 1;
+    }
+
+    # DC-block the whole buffer, then advance the sample cursor.
+    var dc = AmbientTexture_dc_blocker(self);
+    i = 0;
+    while (i < num) {
+        vec_set(output, i, garjan_dcblocker_process(dc, vec_get(output, i)));
+        i = i + 1;
+    }
+    AmbientTexture_set_sample_position(self, AmbientTexture_sample_position(self) + num);
+    return 0;
+}
+
+# Synthesize `duration` seconds of ambient texture audio into a fresh vec.
+# Returns the vec pointer, or a negative code on invalid duration.
+#must_use
+fn texture_synthesize(self, duration) {
+    var e = garjan_validate_duration(duration);
+    if (garjan_is_err(e) == 1) { return e; }
+    var num = f64_to(f64_mul(AmbientTexture_sample_rate(self), duration));
+    var output = vec_new();
+    var i = 0;
+    while (i < num) {
+        vec_push(output, 0);
+        i = i + 1;
+    }
+    texture_process_block(self, output);
+    return output;
+}
+
+# ---- serde: snapshot live state -> AmbientTextureParams -> JSON, and back. ----
+#must_use
+fn texture_to_json(self, sb) {
+    var p = alloc(sizeof(AmbientTextureParams));
+    AmbientTextureParams_set_texture_type(p, AmbientTexture_texture_type(self));
+    AmbientTextureParams_set_level(p, AmbientTexture_level(self));
+    AmbientTextureParams_set_sample_rate(p, AmbientTexture_sample_rate(self));
+    AmbientTextureParams_set_sample_position(p, AmbientTexture_sample_position(self));
+    var rng = AmbientTexture_rng(self);
+    AmbientTextureParams_set_rng_state(p, Rng_state(rng));
+    AmbientTextureParams_set_rng_inc(p, Rng_inc(rng));
+    var dc = AmbientTexture_dc_blocker(self);
+    AmbientTextureParams_set_dcb_x_prev(p, DcBlocker_x_prev(dc));
+    AmbientTextureParams_set_dcb_y_prev(p, DcBlocker_y_prev(dc));
+    AmbientTextureParams_set_dcb_r(p, DcBlocker_r(dc));
+    return AmbientTextureParams_to_json(p, sb);
+}
+
+# Rebuild an AmbientTexture from JSON: restore scalars + rng + dc_blocker
+# state, then reconstruct the naad components fresh.
+#must_use
+fn texture_from_json_str(json) {
+    var p = AmbientTextureParams_from_json_str(json);
+    var self = alloc(sizeof(AmbientTexture));
+    AmbientTexture_set_texture_type(self, AmbientTextureParams_texture_type(p));
+    AmbientTexture_set_level(self, AmbientTextureParams_level(p));
+    AmbientTexture_set_sample_rate(self, AmbientTextureParams_sample_rate(p));
+    AmbientTexture_set_sample_position(self, AmbientTextureParams_sample_position(p));
+
+    var rng = rng_new(0);
+    Rng_set_state(rng, AmbientTextureParams_rng_state(p));
+    Rng_set_inc(rng, AmbientTextureParams_rng_inc(p));
+    AmbientTexture_set_rng(self, rng);
+
+    var dc = garjan_dcblocker_new(AmbientTextureParams_sample_rate(p));
+    DcBlocker_set_x_prev(dc, AmbientTextureParams_dcb_x_prev(p));
+    DcBlocker_set_y_prev(dc, AmbientTextureParams_dcb_y_prev(p));
+    DcBlocker_set_r(dc, AmbientTextureParams_dcb_r(p));
+    AmbientTexture_set_dc_blocker(self, dc);
+
+    texture_build_naad(self);
+    return self;
+}

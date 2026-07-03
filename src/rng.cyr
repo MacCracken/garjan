@@ -1,0 +1,83 @@
+# rng.cyr -- PCG32 PRNG for stochastic environmental synthesis.
+#
+# Ports rust-old/src/rng.rs (the `Rng` struct + next_u32/next_f32/
+# next_f32_unsigned/next_f32_range/poisson). u64 state is held in i64 slots;
+# Cyrius `>>` is a LOGICAL shift and bare `* + -` wrap at 64 bits (2's
+# complement), so the PCG update ports directly with no masking gymnastics.
+# f32 -> f64 for the float draws. Requires: error.cyr (nothing hard) + stdlib
+# math (f64_clamp) / ganita is not needed (only exp, a builtin).
+#
+# Fields are TYPED i64 for #derive(Serialize). u64 states with the high bit
+# set serialize as negative decimals but roundtrip bit-exactly via str_to_int.
+
+var RNG_U32_MASK = 0xFFFFFFFF;
+var RNG_PCG_MUL  = 6364136223846793005;   # PCG32 LCG multiplier
+var RNG_POISSON_MAX = 0x403E000000000000;  # 30.0 (Knuth rate clamp)
+
+#derive(accessors)
+#derive(Serialize)
+struct Rng {
+    state: i64;
+    inc: i64;
+}
+
+# Advance the generator, returning the next 32-bit output. Not #must_use:
+# the PCG seeding path (rng_new) calls it purely to advance state.
+#inline
+fn rng_next_u32(self) {
+    var old = Rng_state(self);
+    Rng_set_state(self, (old * RNG_PCG_MUL) + Rng_inc(self));   # wraps at 64 bits
+    var xor_shifted = (((old >> 18) ^ old) >> 27) & RNG_U32_MASK;
+    var rot = (old >> 59) & 31;
+    var neg_rot = (0 - rot) & 31;
+    return ((xor_shifted >> rot) | (xor_shifted << neg_rot)) & RNG_U32_MASK;
+}
+
+# Seed the generator (PCG32 seeding: two warm-up draws around a state bump).
+#must_use
+fn rng_new(seed) {
+    var self = alloc(sizeof(Rng));
+    Rng_set_state(self, 0);
+    Rng_set_inc(self, (seed << 1) | 1);
+    rng_next_u32(self);
+    Rng_set_state(self, Rng_state(self) + seed);   # wrapping_add
+    rng_next_u32(self);
+    return self;
+}
+
+# Value in [-1.0, 1.0]. bits = (next_u32 >> 1), scaled by 1/i32::MAX.
+#inline
+#must_use
+fn rng_next_f32(self) {
+    var bits = rng_next_u32(self) >> 1;                       # 0 .. 2^31-1
+    return f64_mul(f64_from(bits), f64_div(F64_ONE, f64_from(2147483647)));
+}
+
+# Value in [0.0, 1.0): next_u32 * 1/u32::MAX.
+#inline
+#must_use
+fn rng_next_f32_unsigned(self) {
+    return f64_mul(f64_from(rng_next_u32(self)), f64_div(F64_ONE, f64_from(4294967295)));
+}
+
+# Value in [lo, hi): lo + (hi-lo) * unsigned.
+#inline
+#must_use
+fn rng_next_f32_range(self, lo, hi) {
+    return f64_add(lo, f64_mul(f64_sub(hi, lo), rng_next_f32_unsigned(self)));
+}
+
+# Poisson-distributed count (Knuth), rate clamped to [0, 30].
+#must_use
+fn rng_poisson(self, rate) {
+    var r = f64_clamp(rate, 0, RNG_POISSON_MAX);
+    var l = f64_exp(f64_neg(r));
+    var k = 0;
+    var p = F64_ONE;
+    while (1 == 1) {
+        k = k + 1;
+        p = f64_mul(p, rng_next_f32_unsigned(self));
+        if (f64_lt(p, l) == 1) { break; }
+    }
+    return k - 1;
+}

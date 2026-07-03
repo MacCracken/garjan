@@ -1,0 +1,280 @@
+# wingflap.cyr -- bird wing flap synthesis: aerodynamic displacement sounds.
+#
+# Ports rust-old/src/wingflap.rs. Models bird wings as periodic air
+# displacement events: each flap is a short filtered noise burst, with rate
+# and character set by bird size. The Cyrius port always uses the naad
+# backend (no feature flags), so generate_noise() = noise_next_sample through
+# shape_filter (the non-naad rng.next_f32 fallback is dropped). f32 -> f64.
+# Result<Self> -> pointer / negative GARJAN_* code.
+#
+# The Rust `#[serde(skip)]` naad components (noise_gen, shape_filter) are
+# reconstructable from filter_freq + sample_rate, so they are NOT serialized;
+# they are rebuilt in wingflap_build_naad on deserialize. rng + dc_blocker
+# state ARE serialized (via the flattened WingFlapParams below).
+# Requires: error, logging, dsp, rng foundations + the naad bundle
+# (noise_new/noise_next_sample, filter_biquad_new/filter_biquad_process_sample).
+
+# ---- BirdSize (enum) -> integer constants (declaration order). ----
+var BIRD_SIZE_SMALL  = 0;
+var BIRD_SIZE_MEDIUM = 1;
+var BIRD_SIZE_LARGE  = 2;
+
+# ---- WingFlapParams: the serializable slice (Rust's non-skipped fields, with
+# rng + dc_blocker FLATTENED to scalars so #derive(Serialize)'s single-pass
+# from_json_str works). bird_size is a BIRD_SIZE_* int. filter_freq is carried
+# so build_naad can reconstruct the bandpass shape filter. Synced to/from the
+# live WingFlap on (de)serialize. ----
+#derive(accessors)
+#derive(Serialize)
+struct WingFlapParams {
+    bird_size: i64;
+    sample_rate: f64;
+    sample_position: i64;
+    flap_rate: f64;
+    flap_duration_samples: i64;
+    amplitude: f64;
+    flap_phase: f64;
+    intensity: f64;
+    filter_freq: f64;
+    rng_state: i64;
+    rng_inc: i64;
+    dcb_x_prev: f64;
+    dcb_y_prev: f64;
+    dcb_r: f64;
+}
+
+# ---- WingFlap: live synth = scalars + live rng/dc_blocker + naad ptrs. ----
+#derive(accessors)
+struct WingFlap {
+    bird_size;
+    sample_rate;
+    sample_position;
+    flap_rate;
+    flap_duration_samples;
+    amplitude;
+    flap_phase;
+    intensity;
+    filter_freq;
+    rng;
+    dc_blocker;
+    noise_gen;
+    shape_filter;
+}
+
+# Returns the flap_rate_hz for a bird size (BirdSize::config field 0).
+#must_use
+fn wingflap_config_flap_rate(bird_size) {
+    if (bird_size == BIRD_SIZE_SMALL) { return f64_from(12); }
+    if (bird_size == BIRD_SIZE_MEDIUM) { return f64_from(6); }
+    return f64_div(f64_from(25), f64_from(10));
+}
+
+# Returns the flap_duration_s for a bird size (BirdSize::config field 1).
+#must_use
+fn wingflap_config_flap_duration(bird_size) {
+    if (bird_size == BIRD_SIZE_SMALL) { return f64_div(f64_from(15), f64_from(1000)); }
+    if (bird_size == BIRD_SIZE_MEDIUM) { return f64_div(f64_from(3), f64_from(100)); }
+    return f64_div(f64_from(6), f64_from(100));
+}
+
+# Returns the filter_freq for a bird size (BirdSize::config field 2).
+#must_use
+fn wingflap_config_filter_freq(bird_size) {
+    if (bird_size == BIRD_SIZE_SMALL) { return f64_from(4000); }
+    if (bird_size == BIRD_SIZE_MEDIUM) { return f64_from(2000); }
+    return f64_from(800);
+}
+
+# Returns the amplitude for a bird size (BirdSize::config field 3).
+#must_use
+fn wingflap_config_amplitude(bird_size) {
+    if (bird_size == BIRD_SIZE_SMALL) { return f64_div(f64_from(15), f64_from(100)); }
+    if (bird_size == BIRD_SIZE_MEDIUM) { return f64_div(f64_from(25), f64_from(100)); }
+    return f64_div(f64_from(4), f64_from(10));
+}
+
+# Build/refresh the naad components from filter_freq + sample_rate. Shared by
+# wingflap_new and wingflap_from_json_str. Returns GARJAN_OK, or a negative
+# code if a naad constructor rejects its params.
+fn wingflap_build_naad(self) {
+    var sr = WingFlap_sample_rate(self);
+    # naad: pink noise generator + bandpass shape filter (Q = 1.0).
+    WingFlap_set_noise_gen(self, noise_new(NOISE_PINK, 7070));
+    var sf = filter_biquad_new(FILTER_BANDPASS, sr, WingFlap_filter_freq(self), F64_ONE);
+    if (garjan_is_err(sf) == 1) { return garjan_map_naad_error(sf); }
+    WingFlap_set_shape_filter(self, sf);
+    return GARJAN_OK;
+}
+
+# Creates a new wing flap synthesizer. Returns a pointer or a negative code.
+#must_use
+fn wingflap_new(bird_size, sample_rate) {
+    var e = garjan_validate_sample_rate(sample_rate);
+    if (garjan_is_err(e) == 1) { return e; }
+
+    var flap_rate = wingflap_config_flap_rate(bird_size);
+    var flap_duration_s = wingflap_config_flap_duration(bird_size);
+    var flap_duration_samples = f64_to(f64_mul(flap_duration_s, sample_rate));
+    var filter_freq = wingflap_config_filter_freq(bird_size);
+    var amplitude = wingflap_config_amplitude(bird_size);
+
+    var self = alloc(sizeof(WingFlap));
+    WingFlap_set_bird_size(self, bird_size);
+    WingFlap_set_sample_rate(self, sample_rate);
+    WingFlap_set_sample_position(self, 0);
+    WingFlap_set_flap_rate(self, flap_rate);
+    WingFlap_set_flap_duration_samples(self, flap_duration_samples);
+    WingFlap_set_amplitude(self, amplitude);
+    WingFlap_set_flap_phase(self, 0);
+    WingFlap_set_intensity(self, F64_ONE);
+    WingFlap_set_filter_freq(self, filter_freq);
+    WingFlap_set_rng(self, rng_new(7070));
+    WingFlap_set_dc_blocker(self, garjan_dcblocker_new(sample_rate));
+    var b = wingflap_build_naad(self);
+    if (garjan_is_err(b) == 1) { return b; }
+    return self;
+}
+
+# Sets the flapping intensity (0.0 = still, 1.0 = active flight).
+fn wingflap_set_intensity(self, intensity) {
+    WingFlap_set_intensity(self, f64_clamp(intensity, 0, F64_ONE));
+    return 0;
+}
+
+# Generate one shaped noise sample: pink noise through the bandpass filter.
+#must_use
+fn wingflap_generate_noise(self) {
+    var raw = noise_next_sample(WingFlap_noise_gen(self));
+    return filter_biquad_process_sample(WingFlap_shape_filter(self), raw);
+}
+
+# Fills `output` (a vec of f64) with wing flap audio (streaming). Ports
+# process_block: phase-driven flap bursts through a bandpass, DC-blocked.
+fn wingflap_process_block(self, output) {
+    var num = vec_len(output);
+    var dc = WingFlap_dc_blocker(self);
+    var intensity = WingFlap_intensity(self);
+
+    # intensity < 0.001: silence, but still advance the dc_blocker each sample.
+    var thresh = f64_div(F64_ONE, f64_from(1000));
+    if (f64_lt(intensity, thresh) == 1) {
+        var z = 0;
+        while (z < num) {
+            vec_set(output, z, 0);
+            garjan_dcblocker_process(dc, 0);
+            z = z + 1;
+        }
+        WingFlap_set_sample_position(self, WingFlap_sample_position(self) + num);
+        return 0;
+    }
+
+    var sr = WingFlap_sample_rate(self);
+    var flap_rate = WingFlap_flap_rate(self);
+    var flap_dur = f64_from(WingFlap_flap_duration_samples(self));
+    var amplitude = WingFlap_amplitude(self);
+    var attack = f64_div(f64_from(15), f64_from(100));   # 0.15
+    var neg4 = f64_neg(f64_from(4));
+
+    var i = 0;
+    while (i < num) {
+        # Advance flap phase: flap_phase += flap_rate * intensity / sample_rate.
+        var phase = f64_add(WingFlap_flap_phase(self), f64_div(f64_mul(flap_rate, intensity), sr));
+        if (f64_ge(phase, F64_ONE) == 1) {
+            phase = f64_sub(phase, F64_ONE);
+        }
+        WingFlap_set_flap_phase(self, phase);
+
+        # flap_progress = flap_phase * sample_rate / flap_rate.
+        var flap_progress = f64_div(f64_mul(phase, sr), flap_rate);
+        var sample = 0;
+        if (f64_lt(flap_progress, flap_dur) == 1) {
+            var t = f64_div(flap_progress, flap_dur);
+            # Envelope: fast attack, smooth decay.
+            var env = 0;
+            if (f64_lt(t, attack) == 1) {
+                env = f64_div(t, attack);
+            } else {
+                env = f64_exp(f64_mul(neg4, f64_sub(t, attack)));
+            }
+            var noise = wingflap_generate_noise(self);
+            sample = f64_mul(f64_mul(f64_mul(noise, env), amplitude), intensity);
+        }
+
+        sample = garjan_dcblocker_process(dc, sample);
+        vec_set(output, i, sample);
+        i = i + 1;
+    }
+    WingFlap_set_sample_position(self, WingFlap_sample_position(self) + num);
+    return 0;
+}
+
+# Synthesize `duration` seconds of wing flap audio into a fresh vec. Returns
+# the vec pointer, or a negative code on invalid duration.
+#must_use
+fn wingflap_synthesize(self, duration) {
+    var e = garjan_validate_duration(duration);
+    if (garjan_is_err(e) == 1) { return e; }
+    var num = f64_to(f64_mul(WingFlap_sample_rate(self), duration));
+    var output = vec_new();
+    var i = 0;
+    while (i < num) {
+        vec_push(output, 0);
+        i = i + 1;
+    }
+    wingflap_process_block(self, output);
+    return output;
+}
+
+# ---- serde: snapshot live state -> WingFlapParams -> JSON, and back. ----
+#must_use
+fn wingflap_to_json(self, sb) {
+    var p = alloc(sizeof(WingFlapParams));
+    WingFlapParams_set_bird_size(p, WingFlap_bird_size(self));
+    WingFlapParams_set_sample_rate(p, WingFlap_sample_rate(self));
+    WingFlapParams_set_sample_position(p, WingFlap_sample_position(self));
+    WingFlapParams_set_flap_rate(p, WingFlap_flap_rate(self));
+    WingFlapParams_set_flap_duration_samples(p, WingFlap_flap_duration_samples(self));
+    WingFlapParams_set_amplitude(p, WingFlap_amplitude(self));
+    WingFlapParams_set_flap_phase(p, WingFlap_flap_phase(self));
+    WingFlapParams_set_intensity(p, WingFlap_intensity(self));
+    WingFlapParams_set_filter_freq(p, WingFlap_filter_freq(self));
+    var rng = WingFlap_rng(self);
+    WingFlapParams_set_rng_state(p, Rng_state(rng));
+    WingFlapParams_set_rng_inc(p, Rng_inc(rng));
+    var dc = WingFlap_dc_blocker(self);
+    WingFlapParams_set_dcb_x_prev(p, DcBlocker_x_prev(dc));
+    WingFlapParams_set_dcb_y_prev(p, DcBlocker_y_prev(dc));
+    WingFlapParams_set_dcb_r(p, DcBlocker_r(dc));
+    return WingFlapParams_to_json(p, sb);
+}
+
+# Rebuild a WingFlap from JSON: restore scalars + rng + dc_blocker state, then
+# reconstruct the naad components fresh (matches Rust's skip+reconstruct).
+#must_use
+fn wingflap_from_json_str(json) {
+    var p = WingFlapParams_from_json_str(json);
+    var self = alloc(sizeof(WingFlap));
+    WingFlap_set_bird_size(self, WingFlapParams_bird_size(p));
+    WingFlap_set_sample_rate(self, WingFlapParams_sample_rate(p));
+    WingFlap_set_sample_position(self, WingFlapParams_sample_position(p));
+    WingFlap_set_flap_rate(self, WingFlapParams_flap_rate(p));
+    WingFlap_set_flap_duration_samples(self, WingFlapParams_flap_duration_samples(p));
+    WingFlap_set_amplitude(self, WingFlapParams_amplitude(p));
+    WingFlap_set_flap_phase(self, WingFlapParams_flap_phase(p));
+    WingFlap_set_intensity(self, WingFlapParams_intensity(p));
+    WingFlap_set_filter_freq(self, WingFlapParams_filter_freq(p));
+
+    var rng = rng_new(0);
+    Rng_set_state(rng, WingFlapParams_rng_state(p));
+    Rng_set_inc(rng, WingFlapParams_rng_inc(p));
+    WingFlap_set_rng(self, rng);
+
+    var dc = garjan_dcblocker_new(WingFlapParams_sample_rate(p));
+    DcBlocker_set_x_prev(dc, WingFlapParams_dcb_x_prev(p));
+    DcBlocker_set_y_prev(dc, WingFlapParams_dcb_y_prev(p));
+    DcBlocker_set_r(dc, WingFlapParams_dcb_r(p));
+    WingFlap_set_dc_blocker(self, dc);
+
+    wingflap_build_naad(self);
+    return self;
+}

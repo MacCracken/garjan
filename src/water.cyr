@@ -1,0 +1,304 @@
+# water.cyr -- water synthesis: streams, drips, splashes, waves.
+#
+# Ports rust-old/src/water.rs. The Cyrius port always uses the naad backend
+# (no feature flags), so it ports the #[cfg(feature="naad-backend")] paths and
+# drops the fallback. f32 -> f64. Result<Self> -> pointer / negative GARJAN_*
+# code. The Rust #[serde(skip)]-equivalent naad components (noise_gen,
+# shape_filter, mod_lfo) are reconstructed on deserialize; water_type,
+# intensity, sample_rate, sample_position, drip_freq, rng, and dc_blocker are
+# serialized (via the flattened WaterParams below).
+# Requires: error, logging, dsp, rng foundations + the naad bundle
+# (noise_new/noise_next_sample, filter_biquad_new/filter_biquad_process_sample,
+# modulation_lfo_new/modulation_lfo_next_value).
+
+# ---- WaterType (enum) -> module-prefixed int constants (declaration order). ----
+var WATER_STREAM = 0;
+var WATER_DRIP   = 1;
+var WATER_SPLASH = 2;
+var WATER_WAVES  = 3;
+
+# ---- WaterParams: the serializable slice (Rust's non-skipped fields, with
+# water_type as an int tag and rng + dc_blocker FLATTENED to scalars so
+# #derive(Serialize)'s single-pass from_json_str works). Synced to/from the
+# live Water on (de)serialize. ----
+#derive(accessors)
+#derive(Serialize)
+struct WaterParams {
+    water_type: i64;
+    intensity: f64;
+    sample_rate: f64;
+    sample_position: i64;
+    drip_freq: f64;
+    rng_state: i64;
+    rng_inc: i64;
+    dcb_x_prev: f64;
+    dcb_y_prev: f64;
+    dcb_r: f64;
+}
+
+# ---- Water: live synth = scalars + live rng/dc_blocker + naad component ptrs. ----
+#derive(accessors)
+struct Water {
+    water_type;
+    intensity;
+    sample_rate;
+    sample_position;
+    drip_freq;
+    rng;
+    dc_blocker;
+    noise_gen;
+    shape_filter;
+    mod_lfo;
+}
+
+# Build/refresh the naad components (noise_gen, shape_filter, mod_lfo) from
+# water_type + intensity + sample_rate. Shared by water_new and
+# water_from_json_str. Returns GARJAN_OK or a negative code if a naad
+# constructor rejects its params. Mirrors the Rust `match water_type` that
+# picks (noise_type, filter_type, filter_freq, filter_q, lfo_rate).
+fn water_build_naad(self) {
+    var wt = Water_water_type(self);
+    var sr = Water_sample_rate(self);
+    var inten = Water_intensity(self);
+
+    # Select naad params per water type (Rust match).
+    var noise_type = NOISE_WHITE;
+    var filter_type = FILTER_LOWPASS;
+    var filter_freq = f64_from(1000);
+    var filter_q = F64_ONE;
+    var lfo_rate = F64_ONE;
+    if (wt == WATER_STREAM) {
+        noise_type = NOISE_PINK;
+        filter_type = FILTER_BANDPASS;
+        filter_freq = f64_from(800);
+        filter_q = f64_div(f64_from(3), f64_from(2));
+        # 0.5 + intensity * 2.0
+        lfo_rate = f64_add(F64_HALF, f64_mul(inten, F64_TWO));
+    } elif (wt == WATER_DRIP) {
+        noise_type = NOISE_WHITE;
+        filter_type = FILTER_BANDPASS;
+        filter_freq = f64_from(1200);
+        filter_q = F64_TWO;
+        lfo_rate = F64_ONE;
+    } elif (wt == WATER_SPLASH) {
+        noise_type = NOISE_WHITE;
+        filter_type = FILTER_LOWPASS;
+        filter_freq = f64_from(4000);
+        filter_q = f64_div(f64_from(7), f64_from(10));
+        lfo_rate = F64_ONE;
+    } else {
+        noise_type = NOISE_BROWN;
+        filter_type = FILTER_LOWPASS;
+        filter_freq = f64_from(500);
+        filter_q = F64_HALF;
+        lfo_rate = f64_div(f64_from(1), f64_from(10));
+    }
+
+    var sf = filter_biquad_new(filter_type, sr, filter_freq, filter_q);
+    if (garjan_is_err(sf) == 1) { return garjan_map_naad_error(sf); }
+    var lfo = modulation_lfo_new(MODULATION_LFO_SINE, lfo_rate, sr);
+    if (garjan_is_err(lfo) == 1) { return garjan_map_naad_error(lfo); }
+
+    Water_set_shape_filter(self, sf);
+    Water_set_mod_lfo(self, lfo);
+    Water_set_noise_gen(self, noise_new(noise_type, 2749));
+    return GARJAN_OK;
+}
+
+# Creates a new water synthesizer. Returns a pointer or a negative code.
+#must_use
+fn water_new(water_type, intensity, sample_rate) {
+    var e = garjan_validate_sample_rate(sample_rate);
+    if (garjan_is_err(e) == 1) { return e; }
+    var inten = f64_clamp(intensity, 0, F64_ONE);
+
+    # drip_freq = 1200.0 + Rng::new(2749).next_f32_range(-200.0, 200.0)
+    # (a THROWAWAY rng seeded 2749; the live rng is a fresh Rng::new(2749)).
+    var tmp_rng = rng_new(2749);
+    var drip_freq = f64_add(f64_from(1200), rng_next_f32_range(tmp_rng, f64_neg(f64_from(200)), f64_from(200)));
+
+    var self = alloc(sizeof(Water));
+    Water_set_water_type(self, water_type);
+    Water_set_intensity(self, inten);
+    Water_set_sample_rate(self, sample_rate);
+    Water_set_sample_position(self, 0);
+    Water_set_drip_freq(self, drip_freq);
+    Water_set_rng(self, rng_new(2749));
+    Water_set_dc_blocker(self, garjan_dcblocker_new(sample_rate));
+    var b = water_build_naad(self);
+    if (garjan_is_err(b) == 1) { return b; }
+    return self;
+}
+
+# Stream: pink noise through bandpass, amplitude-modulated by a slow LFO.
+fn water_process_stream(self, output) {
+    var num = vec_len(output);
+    var noise_gen = Water_noise_gen(self);
+    var shape_filter = Water_shape_filter(self);
+    var mod_lfo = Water_mod_lfo(self);
+    var amp = f64_mul(Water_intensity(self), f64_div(f64_from(3), f64_from(10)));
+    var i = 0;
+    while (i < num) {
+        var noise = noise_next_sample(noise_gen);
+        var filtered = filter_biquad_process_sample(shape_filter, noise);
+        # modulator = 0.7 + 0.3 * lfo
+        var modulator = f64_add(f64_div(f64_from(7), f64_from(10)),
+                            f64_mul(f64_div(f64_from(3), f64_from(10)), modulation_lfo_next_value(mod_lfo)));
+        vec_set(output, i, f64_mul(f64_mul(filtered, amp), modulator));
+        i = i + 1;
+    }
+    return 0;
+}
+
+# Drip: resonant decaying sine (no naad, no rng). Active only for the first
+# drip_len samples of the whole stream (absolute position).
+fn water_process_drip(self, output) {
+    var num = vec_len(output);
+    var freq = Water_drip_freq(self);
+    var sr = Water_sample_rate(self);
+    var omega = f64_div(f64_mul(F64_TAU, freq), sr);
+    var drip_len = f64_to(f64_mul(sr, f64_div(f64_from(5), f64_from(100))));   # sr*0.05
+    var base = Water_sample_position(self);
+    var i = 0;
+    while (i < num) {
+        var abs_pos = base + i;
+        if (abs_pos < drip_len) {
+            var t = f64_div(f64_from(abs_pos), sr);
+            var env = f64_exp(f64_mul(f64_neg(f64_from(30)), t));
+            var s = f64_mul(f64_mul(f64_sin(f64_mul(omega, f64_from(abs_pos))), env), Water_intensity(self));
+            vec_set(output, i, s);
+        } else {
+            vec_set(output, i, 0);
+        }
+        i = i + 1;
+    }
+    return 0;
+}
+
+# Splash: white noise through lowpass with a fast exponential decay envelope
+# (no LFO). Envelope keyed to absolute position.
+fn water_process_splash(self, output) {
+    var num = vec_len(output);
+    var noise_gen = Water_noise_gen(self);
+    var shape_filter = Water_shape_filter(self);
+    var sr = Water_sample_rate(self);
+    var amp = f64_mul(Water_intensity(self), f64_div(f64_from(6), f64_from(10)));
+    var base = Water_sample_position(self);
+    var i = 0;
+    while (i < num) {
+        var abs_pos = base + i;
+        var t = f64_div(f64_from(abs_pos), sr);
+        var env = f64_exp(f64_mul(f64_neg(f64_from(8)), t));
+        var noise = noise_next_sample(noise_gen);
+        vec_set(output, i, f64_mul(f64_mul(filter_biquad_process_sample(shape_filter, noise), amp), env));
+        i = i + 1;
+    }
+    return 0;
+}
+
+# Waves: brown noise through lowpass, slowly swelled by a wave envelope LFO.
+fn water_process_waves(self, output) {
+    var num = vec_len(output);
+    var noise_gen = Water_noise_gen(self);
+    var shape_filter = Water_shape_filter(self);
+    var mod_lfo = Water_mod_lfo(self);
+    var amp = f64_mul(Water_intensity(self), f64_div(f64_from(4), f64_from(10)));
+    var i = 0;
+    while (i < num) {
+        var noise = noise_next_sample(noise_gen);
+        var filtered = filter_biquad_process_sample(shape_filter, noise);
+        # wave_env = 0.5 + 0.5 * lfo
+        var wave_env = f64_add(F64_HALF, f64_mul(F64_HALF, modulation_lfo_next_value(mod_lfo)));
+        vec_set(output, i, f64_mul(f64_mul(filtered, amp), wave_env));
+        i = i + 1;
+    }
+    return 0;
+}
+
+# Fills `output` (a vec of f64) with water audio (streaming). Dispatches on
+# water_type, then DC-blocks the whole buffer and advances the sample cursor.
+fn water_process_block(self, output) {
+    var wt = Water_water_type(self);
+    if (wt == WATER_STREAM) {
+        water_process_stream(self, output);
+    } elif (wt == WATER_DRIP) {
+        water_process_drip(self, output);
+    } elif (wt == WATER_SPLASH) {
+        water_process_splash(self, output);
+    } else {
+        water_process_waves(self, output);
+    }
+
+    var dc = Water_dc_blocker(self);
+    var num = vec_len(output);
+    var i = 0;
+    while (i < num) {
+        vec_set(output, i, garjan_dcblocker_process(dc, vec_get(output, i)));
+        i = i + 1;
+    }
+    Water_set_sample_position(self, Water_sample_position(self) + num);
+    return 0;
+}
+
+# Synthesize `duration` seconds of water audio into a fresh vec. Returns the
+# vec pointer, or a negative code on invalid duration.
+#must_use
+fn water_synthesize(self, duration) {
+    var e = garjan_validate_duration(duration);
+    if (garjan_is_err(e) == 1) { return e; }
+    var num = f64_to(f64_mul(Water_sample_rate(self), duration));
+    var output = vec_new();
+    var i = 0;
+    while (i < num) {
+        vec_push(output, 0);
+        i = i + 1;
+    }
+    water_process_block(self, output);
+    return output;
+}
+
+# ---- serde: snapshot live state -> WaterParams -> JSON, and back. ----
+#must_use
+fn water_to_json(self, sb) {
+    var p = alloc(sizeof(WaterParams));
+    WaterParams_set_water_type(p, Water_water_type(self));
+    WaterParams_set_intensity(p, Water_intensity(self));
+    WaterParams_set_sample_rate(p, Water_sample_rate(self));
+    WaterParams_set_sample_position(p, Water_sample_position(self));
+    WaterParams_set_drip_freq(p, Water_drip_freq(self));
+    var rng = Water_rng(self);
+    WaterParams_set_rng_state(p, Rng_state(rng));
+    WaterParams_set_rng_inc(p, Rng_inc(rng));
+    var dc = Water_dc_blocker(self);
+    WaterParams_set_dcb_x_prev(p, DcBlocker_x_prev(dc));
+    WaterParams_set_dcb_y_prev(p, DcBlocker_y_prev(dc));
+    WaterParams_set_dcb_r(p, DcBlocker_r(dc));
+    return WaterParams_to_json(p, sb);
+}
+
+# Rebuild a Water from JSON: restore scalars + rng + dc_blocker state, then
+# reconstruct the naad components fresh (matches Rust's skip+reconstruct).
+#must_use
+fn water_from_json_str(json) {
+    var p = WaterParams_from_json_str(json);
+    var self = alloc(sizeof(Water));
+    Water_set_water_type(self, WaterParams_water_type(p));
+    Water_set_intensity(self, WaterParams_intensity(p));
+    Water_set_sample_rate(self, WaterParams_sample_rate(p));
+    Water_set_sample_position(self, WaterParams_sample_position(p));
+    Water_set_drip_freq(self, WaterParams_drip_freq(p));
+
+    var rng = rng_new(0);
+    Rng_set_state(rng, WaterParams_rng_state(p));
+    Rng_set_inc(rng, WaterParams_rng_inc(p));
+    Water_set_rng(self, rng);
+
+    var dc = garjan_dcblocker_new(WaterParams_sample_rate(p));
+    DcBlocker_set_x_prev(dc, WaterParams_dcb_x_prev(p));
+    DcBlocker_set_y_prev(dc, WaterParams_dcb_y_prev(p));
+    DcBlocker_set_r(dc, WaterParams_dcb_r(p));
+    Water_set_dc_blocker(self, dc);
+
+    water_build_naad(self);
+    return self;
+}

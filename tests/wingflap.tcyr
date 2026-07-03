@@ -1,0 +1,77 @@
+# wingflap.tcyr -- parity tests for src/wingflap.cyr (naad synth + serde).
+include "src/error.cyr"
+include "src/logging.cyr"
+include "src/dsp.cyr"
+include "src/rng.cyr"
+include "src/lod.cyr"
+include "src/material.cyr"
+include "src/modal.cyr"
+include "src/contact.cyr"
+include "src/aero.cyr"
+include "src/creature.cyr"
+include "src/wingflap.cyr"
+
+fn main() {
+    alloc_init();
+
+    test_group("wingflap_new");
+    var w = wingflap_new(BIRD_SIZE_MEDIUM, f64_from(44100));
+    assert(garjan_is_err(w) == 0, "wingflap_new ok");
+    assert(garjan_is_err(wingflap_new(BIRD_SIZE_MEDIUM, 0)) == 1, "wingflap_new rejects sr=0");
+    # Medium: flap_rate = 6.0
+    assert(f64_lt(f64_abs(f64_sub(WingFlap_flap_rate(w), f64_from(6))), GARJAN_EPSILON) == 1, "medium flap_rate 6");
+    # Medium: flap_duration_samples = (0.03 * 44100) = 1323
+    assert_eq(WingFlap_flap_duration_samples(w), 1323, "medium flap_duration_samples 1323");
+    # Medium: amplitude = 0.25
+    assert(f64_lt(f64_abs(f64_sub(WingFlap_amplitude(w), f64_div(f64_from(25), f64_from(100)))), GARJAN_EPSILON) == 1, "medium amplitude 0.25");
+    # default intensity = 1.0
+    assert(f64_lt(f64_abs(f64_sub(WingFlap_intensity(w), F64_ONE)), GARJAN_EPSILON) == 1, "default intensity 1");
+
+    test_group("synthesize");
+    var buf = wingflap_synthesize(w, f64_div(f64_from(1), f64_from(2)));   # 0.5s
+    assert(garjan_is_err(buf) == 0, "synthesize ok");
+    assert_eq(vec_len(buf), 22050, "0.5s @ 44100 = 22050 samples");
+    var i = 0;
+    var allfinite = 1;
+    var energy = 0;
+    while (i < vec_len(buf)) {
+        var s = vec_get(buf, i);
+        if (garjan_is_finite(s) == 0) { allfinite = 0; }
+        energy = f64_add(energy, f64_abs(s));
+        i = i + 1;
+    }
+    assert(allfinite == 1, "all wingflap samples finite");
+    assert(f64_gt(energy, 0) == 1, "wingflap produces sound (nonzero energy)");
+    assert(garjan_is_err(wingflap_synthesize(w, 0)) == 1, "synthesize rejects duration=0");
+
+    test_group("intensity_gate");
+    # intensity below 0.001 -> silence
+    var q = wingflap_new(BIRD_SIZE_SMALL, f64_from(44100));
+    wingflap_set_intensity(q, 0);
+    var sbuf = wingflap_synthesize(q, f64_div(f64_from(1), f64_from(10)));
+    var j = 0;
+    var silent = 1;
+    while (j < vec_len(sbuf)) {
+        if (f64_eq(vec_get(sbuf, j), 0) == 0) { silent = 0; }
+        j = j + 1;
+    }
+    assert(silent == 1, "zero intensity produces silence");
+
+    test_group("wingflap_serde");
+    var g = wingflap_new(BIRD_SIZE_LARGE, f64_from(48000));
+    # advance state so rng/dc_blocker/phase are non-default
+    wingflap_synthesize(g, f64_div(f64_from(1), f64_from(10)));
+    var sb = str_builder_new();
+    wingflap_to_json(g, sb);
+    var jj = str_data(str_builder_build(sb));
+    var g2 = wingflap_from_json_str(jj);
+    var sb2 = str_builder_new();
+    wingflap_to_json(g2, sb2);
+    assert(memeq(jj, str_data(str_builder_build(sb2)), strlen(jj)) == 1, "wingflap params json roundtrip idempotent");
+    # restored synth resumes the SAME rng sequence
+    assert_eq(rng_next_u32(WingFlap_rng(g)), rng_next_u32(WingFlap_rng(g2)), "restored wingflap resumes rng");
+
+    return assert_summary();
+}
+var ec = main();
+syscall(60, ec);

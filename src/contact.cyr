@@ -1,0 +1,153 @@
+# contact.cyr -- shared types for contact/surface synthesis (footstep,
+# friction, rolling, foliage, creak).
+#
+# Ports rust-old/src/contact.rs (Terrain, MovementType, FrictionType,
+# RollingBody, FoliageType, CreakSource enums + NoisePreference +
+# TerrainNoiseConfig + config accessors). f32 -> f64. Option<Material> ->
+# MATERIAL_* const or CONTACT_NO_MATERIAL (-1). CONTACT_NOISE_* deliberately
+# share naad's NOISE_WHITE/PINK/BROWN values (0/1/2) so a synth can pass them
+# straight to noise_new. Requires: material.cyr (MATERIAL_* constants).
+
+var CONTACT_NO_MATERIAL = (0 - 1);   # Option<Material>::None
+
+# ---- NoisePreference (maps 1:1 to naad NOISE_WHITE/PINK/BROWN) ----
+var CONTACT_NOISE_WHITE = 0;
+var CONTACT_NOISE_PINK  = 1;
+var CONTACT_NOISE_BROWN = 2;
+
+# ---- Terrain ----
+var TERRAIN_GRAVEL = 0;
+var TERRAIN_SAND   = 1;
+var TERRAIN_MUD    = 2;
+var TERRAIN_SNOW   = 3;
+var TERRAIN_WOOD   = 4;
+var TERRAIN_METAL  = 5;
+var TERRAIN_TILE   = 6;
+var TERRAIN_WET    = 7;
+
+# Material for modal resonance, or CONTACT_NO_MATERIAL if the terrain is inert.
+#must_use
+fn terrain_resonant_material(t) {
+    if (t == TERRAIN_WOOD)  { return MATERIAL_WOOD; }
+    if (t == TERRAIN_METAL) { return MATERIAL_METAL; }
+    if (t == TERRAIN_TILE)  { return MATERIAL_CERAMIC; }
+    if (t == TERRAIN_WET)   { return MATERIAL_CERAMIC; }
+    return CONTACT_NO_MATERIAL;
+}
+
+# TerrainNoiseConfig (transient; noise_type CONTACT_NOISE_*, filter_freq Hz,
+# filter_q, highpass 0/1, amplitude). No serde (internal helper type).
+#derive(accessors)
+struct TerrainNoiseConfig { noise_type; filter_freq; filter_q; highpass; amplitude; }
+
+#must_use
+fn terrain_noise_config(t) {
+    var c = alloc(sizeof(TerrainNoiseConfig));
+    if (t == TERRAIN_GRAVEL) {
+        TerrainNoiseConfig_set_noise_type(c, CONTACT_NOISE_PINK);
+        TerrainNoiseConfig_set_filter_freq(c, f64_from(1500));
+        TerrainNoiseConfig_set_filter_q(c, F64_ONE);
+        TerrainNoiseConfig_set_highpass(c, 1);
+        TerrainNoiseConfig_set_amplitude(c, f64_div(f64_from(4), f64_from(10)));
+    } elif (t == TERRAIN_SAND) {
+        TerrainNoiseConfig_set_noise_type(c, CONTACT_NOISE_BROWN);
+        TerrainNoiseConfig_set_filter_freq(c, f64_from(2000));
+        TerrainNoiseConfig_set_filter_q(c, f64_div(f64_from(7), f64_from(10)));
+        TerrainNoiseConfig_set_highpass(c, 0);
+        TerrainNoiseConfig_set_amplitude(c, f64_div(f64_from(2), f64_from(10)));
+    } elif (t == TERRAIN_MUD) {
+        TerrainNoiseConfig_set_noise_type(c, CONTACT_NOISE_BROWN);
+        TerrainNoiseConfig_set_filter_freq(c, f64_from(800));
+        TerrainNoiseConfig_set_filter_q(c, F64_ONE);
+        TerrainNoiseConfig_set_highpass(c, 0);
+        TerrainNoiseConfig_set_amplitude(c, f64_div(f64_from(3), f64_from(10)));
+    } elif (t == TERRAIN_SNOW) {
+        TerrainNoiseConfig_set_noise_type(c, CONTACT_NOISE_WHITE);
+        TerrainNoiseConfig_set_filter_freq(c, f64_from(4000));
+        TerrainNoiseConfig_set_filter_q(c, F64_HALF);
+        TerrainNoiseConfig_set_highpass(c, 0);
+        TerrainNoiseConfig_set_amplitude(c, f64_div(f64_from(1), f64_from(10)));
+    } elif (t == TERRAIN_WOOD) {
+        TerrainNoiseConfig_set_noise_type(c, CONTACT_NOISE_PINK);
+        TerrainNoiseConfig_set_filter_freq(c, f64_from(1000));
+        TerrainNoiseConfig_set_filter_q(c, f64_div(f64_from(15), f64_from(10)));
+        TerrainNoiseConfig_set_highpass(c, 0);
+        TerrainNoiseConfig_set_amplitude(c, f64_div(f64_from(15), f64_from(100)));
+    } elif (t == TERRAIN_METAL) {
+        TerrainNoiseConfig_set_noise_type(c, CONTACT_NOISE_WHITE);
+        TerrainNoiseConfig_set_filter_freq(c, f64_from(3000));
+        TerrainNoiseConfig_set_filter_q(c, f64_from(2));
+        TerrainNoiseConfig_set_highpass(c, 1);
+        TerrainNoiseConfig_set_amplitude(c, f64_div(f64_from(2), f64_from(10)));
+    } elif (t == TERRAIN_TILE) {
+        TerrainNoiseConfig_set_noise_type(c, CONTACT_NOISE_WHITE);
+        TerrainNoiseConfig_set_filter_freq(c, f64_from(2500));
+        TerrainNoiseConfig_set_filter_q(c, f64_div(f64_from(15), f64_from(10)));
+        TerrainNoiseConfig_set_highpass(c, 0);
+        TerrainNoiseConfig_set_amplitude(c, f64_div(f64_from(25), f64_from(100)));
+    } else {
+        # Wet
+        TerrainNoiseConfig_set_noise_type(c, CONTACT_NOISE_WHITE);
+        TerrainNoiseConfig_set_filter_freq(c, f64_from(3500));
+        TerrainNoiseConfig_set_filter_q(c, F64_ONE);
+        TerrainNoiseConfig_set_highpass(c, 0);
+        TerrainNoiseConfig_set_amplitude(c, f64_div(f64_from(3), f64_from(10)));
+    }
+    return c;
+}
+
+# ---- MovementType ----
+var MOVEMENT_WALK      = 0;
+var MOVEMENT_RUN       = 1;
+var MOVEMENT_SNEAK     = 2;
+var MOVEMENT_JUMP_LAND = 3;
+
+# config (step_interval_s, force, excitation_duration_s). step_interval 0 = one-shot.
+#derive(accessors)
+struct MovementConfig { step_interval; force; excitation_duration; }
+
+#must_use
+fn movement_config(m) {
+    var c = alloc(sizeof(MovementConfig));
+    if (m == MOVEMENT_WALK) {
+        MovementConfig_set_step_interval(c, F64_HALF);
+        MovementConfig_set_force(c, F64_HALF);
+        MovementConfig_set_excitation_duration(c, f64_div(f64_from(4), f64_from(1000)));    # 0.004
+    } elif (m == MOVEMENT_RUN) {
+        MovementConfig_set_step_interval(c, f64_div(f64_from(3), f64_from(10)));            # 0.3
+        MovementConfig_set_force(c, f64_div(f64_from(7), f64_from(10)));                    # 0.7
+        MovementConfig_set_excitation_duration(c, f64_div(f64_from(25), f64_from(10000)));  # 0.0025
+    } elif (m == MOVEMENT_SNEAK) {
+        MovementConfig_set_step_interval(c, f64_div(f64_from(7), f64_from(10)));            # 0.7
+        MovementConfig_set_force(c, f64_div(f64_from(15), f64_from(100)));                  # 0.15
+        MovementConfig_set_excitation_duration(c, f64_div(f64_from(10), f64_from(1000)));   # 0.010
+    } else {
+        # JumpLand (0.0 interval = one-shot)
+        MovementConfig_set_step_interval(c, 0);
+        MovementConfig_set_force(c, F64_ONE);
+        MovementConfig_set_excitation_duration(c, f64_div(f64_from(15), f64_from(10000)));  # 0.0015
+    }
+    return c;
+}
+
+# ---- FrictionType ----
+var FRICTION_SCRAPE = 0;
+var FRICTION_SLIDE  = 1;
+var FRICTION_GRIND  = 2;
+
+# ---- RollingBody ----
+var ROLLING_BALL    = 0;
+var ROLLING_WHEEL   = 1;
+var ROLLING_BOULDER = 2;
+var ROLLING_BARREL  = 3;
+
+# ---- FoliageType ----
+var FOLIAGE_LEAF_RUSTLE = 0;
+var FOLIAGE_GRASS_SWISH = 1;
+var FOLIAGE_BRANCH_SNAP = 2;
+
+# ---- CreakSource ----
+var CREAK_DOOR        = 0;
+var CREAK_HINGE       = 1;
+var CREAK_ROPE        = 2;
+var CREAK_WOOD_STRESS = 3;

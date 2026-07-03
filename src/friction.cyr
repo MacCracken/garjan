@@ -1,0 +1,295 @@
+# friction.cyr -- friction synthesis: scraping, sliding, grinding.
+#
+# Ports rust-old/src/friction.rs. Models stick-slip friction: the contact
+# alternates between static (stuck) and kinetic (slipping) friction, creating
+# quasi-periodic excitation through a material's resonant modes. The Cyrius
+# port always uses the naad backend (no feature flags): it ports the naad
+# generate_noise path (noise_gen + shape_filter) and drops the rng fallback.
+# f32 -> f64. Result<Self> -> pointer / negative GARJAN_* code.
+#
+# The Rust `#[serde(skip)]`-equivalent naad components (noise_gen, shape_filter)
+# plus the reconstructable modal_bank are NOT serialized; they are rebuilt on
+# deserialize in friction_build_naad from friction_type/surface/sample_rate.
+# The scalar params + rng + dc_blocker state ARE serialized (via the flattened
+# FrictionParams below).
+#
+# Requires: error, logging, dsp, rng, material, modal, contact foundations +
+# the naad bundle (noise_new/noise_next_sample, filter_biquad_new/
+# filter_biquad_process_sample).
+
+# ---- FrictionParams: the serializable slice (Rust's non-naad fields, with
+# rng + dc_blocker FLATTENED so #derive(Serialize)'s single-pass from_json_str
+# works). friction_type + surface are enum ints. Synced to/from the live
+# Friction on (de)serialize; modal_bank is rebuilt, not serialized. ----
+#derive(accessors)
+#derive(Serialize)
+struct FrictionParams {
+    friction_type: i64;
+    surface: i64;
+    sample_rate: f64;
+    sample_position: i64;
+    slip_phase: f64;
+    stick_threshold: f64;
+    base_rate: f64;
+    noise_mix: f64;
+    velocity: f64;
+    pressure: f64;
+    rng_state: i64;
+    rng_inc: i64;
+    dcb_x_prev: f64;
+    dcb_y_prev: f64;
+    dcb_r: f64;
+}
+
+# ---- Friction: live synth = scalars + live rng/dc_blocker + rebuilt modal
+# bank + naad component ptrs. ----
+#derive(accessors)
+struct Friction {
+    friction_type;
+    surface;
+    sample_rate;
+    sample_position;
+    slip_phase;
+    stick_threshold;
+    base_rate;
+    noise_mix;
+    velocity;
+    pressure;
+    rng;
+    dc_blocker;
+    modal_bank;
+    noise_gen;
+    shape_filter;
+}
+
+# Bandpass shape-filter center frequency for a friction type (Rust match).
+#must_use
+fn friction_filter_freq(friction_type) {
+    if (friction_type == FRICTION_SCRAPE) { return f64_from(2000); }
+    if (friction_type == FRICTION_SLIDE)  { return f64_from(3000); }
+    return f64_from(800);   # Grind
+}
+
+# Build/refresh the modal bank + naad components from friction_type, surface,
+# and sample_rate. Shared by friction_new and friction_from_json_str. Returns
+# GARJAN_OK, or a negative code if a component constructor rejects its params.
+fn friction_build_naad(self) {
+    var sr = Friction_sample_rate(self);
+    var surface = Friction_surface(self);
+    var friction_type = Friction_friction_type(self);
+
+    # Modal bank: generate_modes(props, pattern, mode_count.min(6), damping).
+    var props = material_properties(surface);
+    var mode_cfg = material_mode_config(surface);
+    var count = MaterialModeConfig_mode_count(mode_cfg);
+    if (count > 6) { count = 6; }
+    var specs = generate_modes(props, MaterialModeConfig_pattern(mode_cfg), count,
+                               MaterialModeConfig_damping_factor(mode_cfg));
+    var bank = modal_bank_new(specs, sr);
+    if (garjan_is_err(bank) == 1) { return garjan_map_naad_error(bank); }
+    Friction_set_modal_bank(self, bank);
+
+    # Bandpass shape filter (naad), q = 1.5.
+    var filter_freq = friction_filter_freq(friction_type);
+    var sf = filter_biquad_new(FILTER_BANDPASS, sr, filter_freq, f64_div(f64_from(15), f64_from(10)));
+    if (garjan_is_err(sf) == 1) { return garjan_map_naad_error(sf); }
+    Friction_set_shape_filter(self, sf);
+
+    # White noise generator seeded 7777 (matches Rust).
+    Friction_set_noise_gen(self, noise_new(NOISE_WHITE, 7777));
+    return GARJAN_OK;
+}
+
+# Creates a new friction synthesizer. Returns a pointer or a negative code.
+#must_use
+fn friction_new(friction_type, surface, sample_rate) {
+    var e = garjan_validate_sample_rate(sample_rate);
+    if (garjan_is_err(e) == 1) { return e; }
+
+    # (base_rate, stick_threshold, noise_mix) per friction type (Rust match).
+    var base_rate = 0;
+    var stick_threshold = 0;
+    var noise_mix = 0;
+    if (friction_type == FRICTION_SCRAPE) {
+        base_rate = f64_from(200);
+        stick_threshold = f64_div(f64_from(8), f64_from(10));    # 0.8
+        noise_mix = f64_div(f64_from(3), f64_from(10));          # 0.3
+    } elif (friction_type == FRICTION_SLIDE) {
+        base_rate = f64_from(400);
+        stick_threshold = F64_HALF;                              # 0.5
+        noise_mix = f64_div(f64_from(15), f64_from(100));        # 0.15
+    } else {
+        # Grind
+        base_rate = f64_from(60);
+        stick_threshold = f64_div(f64_from(12), f64_from(10));   # 1.2
+        noise_mix = F64_HALF;                                    # 0.5
+    }
+
+    var self = alloc(sizeof(Friction));
+    Friction_set_friction_type(self, friction_type);
+    Friction_set_surface(self, surface);
+    Friction_set_sample_rate(self, sample_rate);
+    Friction_set_sample_position(self, 0);
+    Friction_set_slip_phase(self, 0);
+    Friction_set_stick_threshold(self, stick_threshold);
+    Friction_set_base_rate(self, base_rate);
+    Friction_set_noise_mix(self, noise_mix);
+    Friction_set_velocity(self, 0);
+    Friction_set_pressure(self, F64_HALF);
+    Friction_set_rng(self, rng_new(7777));
+    Friction_set_dc_blocker(self, garjan_dcblocker_new(sample_rate));
+
+    var b = friction_build_naad(self);
+    if (garjan_is_err(b) == 1) { return b; }
+    return self;
+}
+
+# Sets the friction velocity (0.0 = still, 1.0 = fast).
+fn friction_set_velocity(self, velocity) {
+    Friction_set_velocity(self, f64_clamp(velocity, 0, F64_ONE));
+    return 0;
+}
+
+# Sets the contact pressure (0.0 = light, 1.0 = heavy).
+fn friction_set_pressure(self, pressure) {
+    Friction_set_pressure(self, f64_clamp(pressure, 0, F64_ONE));
+    return 0;
+}
+
+# One shaped-noise sample: white noise through the bandpass shape filter.
+#inline
+#must_use
+fn friction_generate_noise(self) {
+    var raw = noise_next_sample(Friction_noise_gen(self));
+    return filter_biquad_process_sample(Friction_shape_filter(self), raw);
+}
+
+# Fills `output` (a vec of f64) with friction audio (streaming). Ports
+# process_block: per-sample stick-slip excitation + shaped noise, modal
+# resonance, DC-block, then advance position.
+fn friction_process_block(self, output) {
+    var num = vec_len(output);
+    var rng = Friction_rng(self);
+    var dc = Friction_dc_blocker(self);
+    var modal_bank = Friction_modal_bank(self);
+    var sr = Friction_sample_rate(self);
+    var base_rate = Friction_base_rate(self);
+    var stick_threshold = Friction_stick_threshold(self);
+    var noise_mix = Friction_noise_mix(self);
+
+    var vel_floor = f64_div(F64_ONE, f64_from(1000));   # 0.001
+    var neg_jit = f64_neg(f64_div(F64_ONE, f64_from(10)));   # -0.1
+    var pos_jit = f64_div(F64_ONE, f64_from(10));            # 0.1
+    var half_c = F64_HALF;
+    var micro_c = f64_div(f64_from(2), f64_from(100));       # 0.02
+
+    var i = 0;
+    while (i < num) {
+        var velocity = Friction_velocity(self);
+        var pressure = Friction_pressure(self);
+        if (f64_lt(velocity, vel_floor) == 1) {
+            vec_set(output, i, 0);
+            garjan_dcblocker_process(dc, 0);
+        } else {
+            # Advance stick-slip phase: += velocity*base_rate*jitter / sample_rate.
+            var jitter = f64_add(F64_ONE, rng_next_f32_range(rng, neg_jit, pos_jit));
+            var phase_inc = f64_div(f64_mul(f64_mul(velocity, base_rate), jitter), sr);
+            var slip_phase = f64_add(Friction_slip_phase(self), phase_inc);
+
+            # Slip event vs micro-noise during stick.
+            var excitation = 0;
+            if (f64_ge(slip_phase, stick_threshold) == 1) {
+                slip_phase = f64_sub(slip_phase, stick_threshold);
+                excitation = f64_mul(pressure, half_c);
+            } else {
+                excitation = f64_mul(f64_mul(f64_mul(pressure, velocity), rng_next_f32(rng)), micro_c);
+            }
+            Friction_set_slip_phase(self, slip_phase);
+
+            # Continuous shaped-noise component.
+            var noise = f64_mul(f64_mul(f64_mul(friction_generate_noise(self), velocity), pressure), noise_mix);
+
+            # Modal resonance + noise, then DC-block.
+            var resonant = modal_bank_process_sample(modal_bank, excitation);
+            var mixed = f64_add(resonant, noise);
+            vec_set(output, i, garjan_dcblocker_process(dc, mixed));
+        }
+        i = i + 1;
+    }
+    Friction_set_sample_position(self, Friction_sample_position(self) + num);
+    return 0;
+}
+
+# Synthesize `duration` seconds of friction audio into a fresh vec. Returns
+# the vec pointer, or a negative code on invalid duration.
+#must_use
+fn friction_synthesize(self, duration) {
+    var e = garjan_validate_duration(duration);
+    if (garjan_is_err(e) == 1) { return e; }
+    var num = f64_to(f64_mul(Friction_sample_rate(self), duration));
+    var output = vec_new();
+    var i = 0;
+    while (i < num) {
+        vec_push(output, 0);
+        i = i + 1;
+    }
+    friction_process_block(self, output);
+    return output;
+}
+
+# ---- serde: snapshot live state -> FrictionParams -> JSON, and back. ----
+#must_use
+fn friction_to_json(self, sb) {
+    var p = alloc(sizeof(FrictionParams));
+    FrictionParams_set_friction_type(p, Friction_friction_type(self));
+    FrictionParams_set_surface(p, Friction_surface(self));
+    FrictionParams_set_sample_rate(p, Friction_sample_rate(self));
+    FrictionParams_set_sample_position(p, Friction_sample_position(self));
+    FrictionParams_set_slip_phase(p, Friction_slip_phase(self));
+    FrictionParams_set_stick_threshold(p, Friction_stick_threshold(self));
+    FrictionParams_set_base_rate(p, Friction_base_rate(self));
+    FrictionParams_set_noise_mix(p, Friction_noise_mix(self));
+    FrictionParams_set_velocity(p, Friction_velocity(self));
+    FrictionParams_set_pressure(p, Friction_pressure(self));
+    var rng = Friction_rng(self);
+    FrictionParams_set_rng_state(p, Rng_state(rng));
+    FrictionParams_set_rng_inc(p, Rng_inc(rng));
+    var dc = Friction_dc_blocker(self);
+    FrictionParams_set_dcb_x_prev(p, DcBlocker_x_prev(dc));
+    FrictionParams_set_dcb_y_prev(p, DcBlocker_y_prev(dc));
+    FrictionParams_set_dcb_r(p, DcBlocker_r(dc));
+    return FrictionParams_to_json(p, sb);
+}
+
+# Rebuild a Friction from JSON: restore scalars + rng + dc_blocker state, then
+# reconstruct the modal bank + naad components fresh (matches Rust's
+# skip/reconstruct semantics).
+#must_use
+fn friction_from_json_str(json) {
+    var p = FrictionParams_from_json_str(json);
+    var self = alloc(sizeof(Friction));
+    Friction_set_friction_type(self, FrictionParams_friction_type(p));
+    Friction_set_surface(self, FrictionParams_surface(p));
+    Friction_set_sample_rate(self, FrictionParams_sample_rate(p));
+    Friction_set_sample_position(self, FrictionParams_sample_position(p));
+    Friction_set_slip_phase(self, FrictionParams_slip_phase(p));
+    Friction_set_stick_threshold(self, FrictionParams_stick_threshold(p));
+    Friction_set_base_rate(self, FrictionParams_base_rate(p));
+    Friction_set_noise_mix(self, FrictionParams_noise_mix(p));
+    Friction_set_velocity(self, FrictionParams_velocity(p));
+    Friction_set_pressure(self, FrictionParams_pressure(p));
+
+    var rng = rng_new(0);
+    Rng_set_state(rng, FrictionParams_rng_state(p));
+    Rng_set_inc(rng, FrictionParams_rng_inc(p));
+    Friction_set_rng(self, rng);
+
+    var dc = garjan_dcblocker_new(FrictionParams_sample_rate(p));
+    DcBlocker_set_x_prev(dc, FrictionParams_dcb_x_prev(p));
+    DcBlocker_set_y_prev(dc, FrictionParams_dcb_y_prev(p));
+    DcBlocker_set_r(dc, FrictionParams_dcb_r(p));
+    Friction_set_dc_blocker(self, dc);
+
+    friction_build_naad(self);
+    return self;
+}

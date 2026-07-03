@@ -1,0 +1,23 @@
+# aero.tcyr -- parity tests for src/aero.cyr.
+include "src/error.cyr"
+include "src/aero.cyr"
+
+fn main() {
+    alloc_init();
+    test_group("whoosh_config");
+    var s = aero_whoosh_config(WHOOSH_VEHICLE);
+    assert(f64_lt(f64_abs(f64_sub(WhooshConfig_duration(s), f64_div(f64_from(15), f64_from(10)))), GARJAN_EPSILON) == 1, "vehicle dur 1.5");
+
+    test_group("whistle_config");
+    var w = aero_whistle_config(WHISTLE_BOTTLE);
+    assert(f64_lt(f64_abs(f64_sub(WhistleConfig_base_freq(w), f64_from(300))), GARJAN_EPSILON) == 1, "bottle 300hz");
+
+    test_group("cloth_config");
+    var f = aero_cloth_config(CLOTH_FLAG);
+    assert_eq(ClothConfig_use_modal(f), 0, "flag no modal");
+    var sa = aero_cloth_config(CLOTH_SAIL);
+    assert_eq(ClothConfig_use_modal(sa), 1, "sail uses modal");
+    return assert_summary();
+}
+var ec = main();
+syscall(60, ec);

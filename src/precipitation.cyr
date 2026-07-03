@@ -1,0 +1,350 @@
+# precipitation.cyr -- extended precipitation synthesis: hail, snow,
+# surface-dependent rain.
+#
+# Ports rust-old/src/precipitation.rs. The Cyrius port always uses the naad
+# backend (no feature flags), so it ports the naad path (noise_gen +
+# shape_filter) and drops the fallback. f32 -> f64. Result<Self> -> pointer /
+# negative GARJAN_* code. The Rust `#[serde(skip)]`-style naad components
+# (noise_gen, shape_filter) AND the modal_bank are reconstructed on
+# deserialize from the serialized params (precip_type + stone_size + surface +
+# sample_rate deterministically pin them). rng + dc_blocker state ARE
+# serialized (via the flattened PrecipitationParams below).
+# Requires: error, logging, dsp, rng, material, modal, contact foundations +
+# the naad bundle (noise_new/noise_next_sample, filter_biquad_new/
+# filter_biquad_process_sample).
+
+# ---- PrecipitationType ----
+var PRECIP_HAIL         = 0;
+var PRECIP_SNOW         = 1;
+var PRECIP_SURFACE_RAIN = 2;
+
+# ---- StoneSize ----
+var STONE_SMALL  = 0;
+var STONE_MEDIUM = 1;
+var STONE_LARGE  = 2;
+
+# StoneSize config: (rate_per_sec, amplitude, decay_ms). Returned as a small
+# 3-slot config struct.
+#derive(accessors)
+struct StoneConfig { rate; amplitude; decay_ms; }
+
+#must_use
+fn stone_size_config(s) {
+    var c = alloc(sizeof(StoneConfig));
+    if (s == STONE_SMALL) {
+        StoneConfig_set_rate(c, f64_from(30));
+        StoneConfig_set_amplitude(c, f64_div(f64_from(2), f64_from(10)));
+        StoneConfig_set_decay_ms(c, f64_from(5));
+    } elif (s == STONE_MEDIUM) {
+        StoneConfig_set_rate(c, f64_from(15));
+        StoneConfig_set_amplitude(c, f64_div(f64_from(4), f64_from(10)));
+        StoneConfig_set_decay_ms(c, f64_from(10));
+    } else {
+        StoneConfig_set_rate(c, f64_from(5));
+        StoneConfig_set_amplitude(c, f64_div(f64_from(7), f64_from(10)));
+        StoneConfig_set_decay_ms(c, f64_from(20));
+    }
+    return c;
+}
+
+# ---- PrecipitationParams: the serializable slice. rng + dc_blocker FLATTENED
+# to scalars. Enum-valued fields are i64. modal_bank + naad components are NOT
+# serialized (rebuilt from these params). ----
+#derive(accessors)
+#derive(Serialize)
+struct PrecipitationParams {
+    precip_type: i64;
+    stone_size: i64;
+    surface: i64;
+    sample_rate: f64;
+    sample_position: i64;
+    rate: f64;
+    amplitude: f64;
+    decay_samples: i64;
+    intensity: f64;
+    rng_state: i64;
+    rng_inc: i64;
+    dcb_x_prev: f64;
+    dcb_y_prev: f64;
+    dcb_r: f64;
+}
+
+# ---- Precipitation: live synth = scalars + live rng/dc_blocker + modal_bank
+# ptr (0 = none) + naad component ptrs. ----
+#derive(accessors)
+struct Precipitation {
+    precip_type;
+    stone_size;
+    surface;
+    sample_rate;
+    rng;
+    dc_blocker;
+    sample_position;
+    rate;
+    amplitude;
+    decay_samples;
+    intensity;
+    modal_bank;
+    noise_gen;
+    shape_filter;
+}
+
+# Build/refresh the modal_bank + naad components from precip_type/surface/
+# sample_rate. Shared by precipitation_new and precipitation_from_json_str.
+# Returns GARJAN_OK or a negative code if a naad constructor rejects params.
+fn precipitation_build_naad(self) {
+    var sr = Precipitation_sample_rate(self);
+    var precip_type = Precipitation_precip_type(self);
+    var surface = Precipitation_surface(self);
+
+    # Modal bank for hail impacts on resonant surfaces.
+    var bank = 0;
+    if (precip_type == PRECIP_HAIL) {
+        var mat = terrain_resonant_material(surface);
+        if (mat != CONTACT_NO_MATERIAL) {
+            var props = material_properties(mat);
+            var mode_cfg = material_mode_config(mat);
+            var count = MaterialModeConfig_mode_count(mode_cfg);
+            if (count > 4) { count = 4; }
+            var specs = generate_modes(props, MaterialModeConfig_pattern(mode_cfg), count,
+                                       MaterialModeConfig_damping_factor(mode_cfg));
+            var mb = modal_bank_new(specs, sr);
+            if (garjan_is_err(mb) == 1) { return garjan_map_naad_error(mb); }
+            bank = mb;
+        }
+    }
+    Precipitation_set_modal_bank(self, bank);
+
+    # Noise generator + bandpass shape filter (naad path).
+    var nt = NOISE_WHITE;
+    var filter_freq = f64_from(3000);
+    if (precip_type == PRECIP_HAIL) {
+        nt = NOISE_WHITE;
+        filter_freq = f64_from(3000);
+    } elif (precip_type == PRECIP_SNOW) {
+        nt = NOISE_BROWN;
+        filter_freq = f64_from(1500);
+    } else {
+        var cfg = terrain_noise_config(surface);
+        var pref = TerrainNoiseConfig_noise_type(cfg);
+        var mapped = NOISE_WHITE;
+        if (pref == CONTACT_NOISE_WHITE) { mapped = NOISE_WHITE; }
+        elif (pref == CONTACT_NOISE_PINK) { mapped = NOISE_PINK; }
+        else { mapped = NOISE_BROWN; }
+        nt = mapped;
+        filter_freq = TerrainNoiseConfig_filter_freq(cfg);
+    }
+
+    var sf = filter_biquad_new(FILTER_BANDPASS, sr, filter_freq, f64_div(f64_from(15), f64_from(10)));
+    if (garjan_is_err(sf) == 1) { return garjan_map_naad_error(sf); }
+    Precipitation_set_noise_gen(self, noise_new(nt, 5050));
+    Precipitation_set_shape_filter(self, sf);
+    return GARJAN_OK;
+}
+
+# Creates a new extended precipitation synthesizer. Returns a pointer or a
+# negative code.
+#must_use
+fn precipitation_new(precip_type, stone_size, surface, sample_rate) {
+    var e = garjan_validate_sample_rate(sample_rate);
+    if (garjan_is_err(e) == 1) { return e; }
+
+    var cfg = stone_size_config(stone_size);
+    var rate = StoneConfig_rate(cfg);
+    var amplitude = StoneConfig_amplitude(cfg);
+    var decay_ms = StoneConfig_decay_ms(cfg);
+    # decay_samples = (decay_ms * sample_rate / 1000.0) as usize
+    var decay_samples = f64_to(f64_div(f64_mul(decay_ms, sample_rate), f64_from(1000)));
+
+    var self = alloc(sizeof(Precipitation));
+    Precipitation_set_precip_type(self, precip_type);
+    Precipitation_set_stone_size(self, stone_size);
+    Precipitation_set_surface(self, surface);
+    Precipitation_set_sample_rate(self, sample_rate);
+    Precipitation_set_rng(self, rng_new(5050));
+    Precipitation_set_dc_blocker(self, garjan_dcblocker_new(sample_rate));
+    Precipitation_set_sample_position(self, 0);
+    Precipitation_set_rate(self, rate);
+    Precipitation_set_amplitude(self, amplitude);
+    Precipitation_set_decay_samples(self, decay_samples);
+    Precipitation_set_intensity(self, F64_ONE);
+
+    var b = precipitation_build_naad(self);
+    if (garjan_is_err(b) == 1) { return b; }
+    return self;
+}
+
+# Sets intensity (0.0-1.0).
+fn precipitation_set_intensity(self, intensity) {
+    Precipitation_set_intensity(self, f64_clamp(intensity, 0, F64_ONE));
+    return 0;
+}
+
+# Generate one shaped noise sample (naad path: noise_gen -> shape_filter).
+#inline
+#must_use
+fn precipitation_generate_noise(self) {
+    var raw = noise_next_sample(Precipitation_noise_gen(self));
+    return filter_biquad_process_sample(Precipitation_shape_filter(self), raw);
+}
+
+# Fills `output` (a vec of f64) with precipitation audio (streaming). Ports
+# process_block: stochastic impacts, optional modal resonance, DC-block, then
+# advance position.
+fn precipitation_process_block(self, output) {
+    var num_samples = vec_len(output);
+    var dc = Precipitation_dc_blocker(self);
+    var intensity = Precipitation_intensity(self);
+
+    # Silent path: intensity < 0.001 -> zeros, but still advance the DC blocker.
+    var thresh = f64_div(f64_from(1), f64_from(1000));
+    if (f64_lt(intensity, thresh) == 1) {
+        var s = 0;
+        while (s < num_samples) {
+            vec_set(output, s, 0);
+            garjan_dcblocker_process(dc, 0);
+            s = s + 1;
+        }
+        Precipitation_set_sample_position(self, Precipitation_sample_position(self) + num_samples);
+        return 0;
+    }
+
+    # Zero the buffer.
+    var z = 0;
+    while (z < num_samples) {
+        vec_set(output, z, 0);
+        z = z + 1;
+    }
+
+    var rng = Precipitation_rng(self);
+    var sr = Precipitation_sample_rate(self);
+    var rate = Precipitation_rate(self);
+    var amplitude = Precipitation_amplitude(self);
+    var decay_samples = Precipitation_decay_samples(self);
+    var bank = Precipitation_modal_bank(self);
+
+    var effective_rate = f64_mul(rate, intensity);
+    var block_size = f64_to(f64_mul(sr, f64_div(f64_from(1), f64_from(100))));   # sr*0.01
+    if (block_size < 1) { block_size = 1; }
+    var events_per_block = f64_mul(effective_rate, f64_div(f64_from(1), f64_from(100)));
+
+    var block_start = 0;
+    while (block_start < num_samples) {
+        var block_end = block_start + block_size;
+        if (block_end > num_samples) { block_end = num_samples; }
+        var n_events = rng_poisson(rng, events_per_block);
+
+        var ev = 0;
+        while (ev < n_events) {
+            var width = f64_from(block_end - block_start);
+            var offset = f64_to(rng_next_f32_range(rng, 0, width));
+            var idx = block_start + offset;
+            if (idx < num_samples) {
+                var amp = f64_mul(f64_mul(amplitude, intensity),
+                                  rng_next_f32_range(rng, f64_div(f64_from(3), f64_from(10)), F64_ONE));
+                var this_decay = f64_to(f64_mul(rng_next_f32_range(rng, F64_HALF, f64_div(f64_from(15), f64_from(10))),
+                                                f64_from(decay_samples)));
+                var span = this_decay;
+                if (num_samples - idx < span) { span = num_samples - idx; }
+                var j = 0;
+                while (j < span) {
+                    var t = f64_div(f64_from(j), f64_from(this_decay));
+                    var env = f64_exp(f64_mul(f64_neg(f64_from(5)), t));
+                    var noise = precipitation_generate_noise(self);
+                    var sample = 0;
+                    if (bank != 0) {
+                        var exc = f64_mul(f64_mul(noise, env), amp);
+                        sample = modal_bank_process_sample(bank, exc);
+                    } else {
+                        sample = f64_mul(f64_mul(noise, env), amp);
+                    }
+                    vec_set(output, idx + j, f64_add(vec_get(output, idx + j), sample));
+                    j = j + 1;
+                }
+            }
+            ev = ev + 1;
+        }
+        block_start = block_start + block_size;
+    }
+
+    # DC-block the whole buffer, then advance the cursor.
+    var i = 0;
+    while (i < num_samples) {
+        vec_set(output, i, garjan_dcblocker_process(dc, vec_get(output, i)));
+        i = i + 1;
+    }
+    Precipitation_set_sample_position(self, Precipitation_sample_position(self) + num_samples);
+    return 0;
+}
+
+# Synthesize `duration` seconds of precipitation audio into a fresh vec.
+# Returns the vec pointer, or a negative code on invalid duration.
+#must_use
+fn precipitation_synthesize(self, duration) {
+    var e = garjan_validate_duration(duration);
+    if (garjan_is_err(e) == 1) { return e; }
+    var num = f64_to(f64_mul(Precipitation_sample_rate(self), duration));
+    var output = vec_new();
+    var i = 0;
+    while (i < num) {
+        vec_push(output, 0);
+        i = i + 1;
+    }
+    precipitation_process_block(self, output);
+    return output;
+}
+
+# ---- serde: snapshot live state -> PrecipitationParams -> JSON, and back. ----
+#must_use
+fn precipitation_to_json(self, sb) {
+    var p = alloc(sizeof(PrecipitationParams));
+    PrecipitationParams_set_precip_type(p, Precipitation_precip_type(self));
+    PrecipitationParams_set_stone_size(p, Precipitation_stone_size(self));
+    PrecipitationParams_set_surface(p, Precipitation_surface(self));
+    PrecipitationParams_set_sample_rate(p, Precipitation_sample_rate(self));
+    PrecipitationParams_set_sample_position(p, Precipitation_sample_position(self));
+    PrecipitationParams_set_rate(p, Precipitation_rate(self));
+    PrecipitationParams_set_amplitude(p, Precipitation_amplitude(self));
+    PrecipitationParams_set_decay_samples(p, Precipitation_decay_samples(self));
+    PrecipitationParams_set_intensity(p, Precipitation_intensity(self));
+    var rng = Precipitation_rng(self);
+    PrecipitationParams_set_rng_state(p, Rng_state(rng));
+    PrecipitationParams_set_rng_inc(p, Rng_inc(rng));
+    var dc = Precipitation_dc_blocker(self);
+    PrecipitationParams_set_dcb_x_prev(p, DcBlocker_x_prev(dc));
+    PrecipitationParams_set_dcb_y_prev(p, DcBlocker_y_prev(dc));
+    PrecipitationParams_set_dcb_r(p, DcBlocker_r(dc));
+    return PrecipitationParams_to_json(p, sb);
+}
+
+# Rebuild a Precipitation from JSON: restore scalars + rng + dc_blocker state,
+# then reconstruct the modal_bank + naad components fresh (matches Rust's
+# skip+reconstruct).
+#must_use
+fn precipitation_from_json_str(json) {
+    var p = PrecipitationParams_from_json_str(json);
+    var self = alloc(sizeof(Precipitation));
+    Precipitation_set_precip_type(self, PrecipitationParams_precip_type(p));
+    Precipitation_set_stone_size(self, PrecipitationParams_stone_size(p));
+    Precipitation_set_surface(self, PrecipitationParams_surface(p));
+    Precipitation_set_sample_rate(self, PrecipitationParams_sample_rate(p));
+    Precipitation_set_sample_position(self, PrecipitationParams_sample_position(p));
+    Precipitation_set_rate(self, PrecipitationParams_rate(p));
+    Precipitation_set_amplitude(self, PrecipitationParams_amplitude(p));
+    Precipitation_set_decay_samples(self, PrecipitationParams_decay_samples(p));
+    Precipitation_set_intensity(self, PrecipitationParams_intensity(p));
+
+    var rng = rng_new(0);
+    Rng_set_state(rng, PrecipitationParams_rng_state(p));
+    Rng_set_inc(rng, PrecipitationParams_rng_inc(p));
+    Precipitation_set_rng(self, rng);
+
+    var dc = garjan_dcblocker_new(PrecipitationParams_sample_rate(p));
+    DcBlocker_set_x_prev(dc, PrecipitationParams_dcb_x_prev(p));
+    DcBlocker_set_y_prev(dc, PrecipitationParams_dcb_y_prev(p));
+    DcBlocker_set_r(dc, PrecipitationParams_dcb_r(p));
+    Precipitation_set_dc_blocker(self, dc);
+
+    precipitation_build_naad(self);
+    return self;
+}

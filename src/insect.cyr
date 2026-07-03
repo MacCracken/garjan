@@ -1,0 +1,345 @@
+# insect.cyr -- insect sound synthesis: wing buzz, cricket chirp, cicada drone.
+#
+# Ports rust-old/src/insect.rs. The Cyrius port always uses the naad backend
+# (no feature flags), so it ports the #[cfg(feature="naad-backend")] path and
+# drops the fallback. f32 -> f64. Result<Self> -> pointer / negative GARJAN_*
+# code. The Rust #[serde(skip)]-equivalent naad components (noise_gen +
+# shape_filter) are reconstructed on deserialize; all scalar params + the rng,
+# dc_blocker, and the 8 precomputed swarm detunings ARE serialized (via the
+# flattened InsectParams below).
+#
+# Requires: error, logging, dsp, rng, creature foundations + the naad bundle
+# (noise_new/noise_next_sample, filter_biquad_new/filter_biquad_process_sample)
+# + stdlib math (F64_TAU, f64_clamp) and ganita.
+
+# ---- InsectParams: the serializable slice (exactly Rust's fields, with rng,
+# dc_blocker, and the [f32;8] swarm_detunings FLATTENED to scalar fields so
+# #derive(Serialize)'s single-pass from_json_str works). insect_type is an
+# int tag. Synced to/from the live Insect on (de)serialize. ----
+#derive(accessors)
+#derive(Serialize)
+struct InsectParams {
+    insect_type: i64;
+    sample_rate: f64;
+    sample_position: i64;
+    base_freq: f64;
+    mod_rate: f64;
+    chirp_rate: f64;
+    amplitude: f64;
+    intensity: f64;
+    swarm_count: i64;
+    det0: f64;
+    det1: f64;
+    det2: f64;
+    det3: f64;
+    det4: f64;
+    det5: f64;
+    det6: f64;
+    det7: f64;
+    rng_state: i64;
+    rng_inc: i64;
+    dcb_x_prev: f64;
+    dcb_y_prev: f64;
+    dcb_r: f64;
+}
+
+# ---- Insect: live synth = scalars + the 8 detunings + live rng/dc_blocker +
+# naad component ptrs. ----
+#derive(accessors)
+struct Insect {
+    insect_type;
+    sample_rate;
+    sample_position;
+    base_freq;
+    mod_rate;
+    chirp_rate;
+    amplitude;
+    intensity;
+    swarm_count;
+    det0;
+    det1;
+    det2;
+    det3;
+    det4;
+    det5;
+    det6;
+    det7;
+    rng;
+    dc_blocker;
+    noise_gen;
+    shape_filter;
+}
+
+# Read swarm detuning `voice` (0..7) from the live Insect.
+#must_use
+fn insect_detune(self, voice) {
+    if (voice == 0) { return Insect_det0(self); }
+    if (voice == 1) { return Insect_det1(self); }
+    if (voice == 2) { return Insect_det2(self); }
+    if (voice == 3) { return Insect_det3(self); }
+    if (voice == 4) { return Insect_det4(self); }
+    if (voice == 5) { return Insect_det5(self); }
+    if (voice == 6) { return Insect_det6(self); }
+    return Insect_det7(self);
+}
+
+# Build/refresh the naad components from sample_rate + base_freq. Shared by
+# insect_new and insect_from_json_str (mirrors the Rust skip+reconstruct).
+# Returns GARJAN_OK or a negative code if a naad constructor rejects params.
+fn insect_build_naad(self) {
+    var sr = Insect_sample_rate(self);
+    var base = Insect_base_freq(self);
+    # q = (base_freq / 200.0).clamp(1.0, 20.0)
+    var q = f64_clamp(f64_div(base, f64_from(200)), F64_ONE, f64_from(20));
+    var sf = filter_biquad_new(FILTER_BANDPASS, sr, base, q);
+    if (garjan_is_err(sf) == 1) { return garjan_map_naad_error(sf); }
+    Insect_set_shape_filter(self, sf);
+    Insect_set_noise_gen(self, noise_new(NOISE_WHITE, 9999));
+    return GARJAN_OK;
+}
+
+# Creates a new single insect synthesizer. Returns a pointer or a negative
+# code. Preserves the Rust rng call order: a fresh det_rng(12321) draws the 8
+# detunings BEFORE the main rng(9999) is created.
+#must_use
+fn insect_new(insect_type, sample_rate) {
+    var e = garjan_validate_sample_rate(sample_rate);
+    if (garjan_is_err(e) == 1) { return e; }
+
+    var cfg = creature_insect_config(insect_type);
+    var base_freq = InsectConfig_base_freq(cfg);
+    var mod_rate = InsectConfig_mod_rate(cfg);
+    var chirp_rate = InsectConfig_chirp_rate(cfg);
+    var amplitude = InsectConfig_amplitude(cfg);
+
+    # Pre-compute swarm detunings (det_rng seeded 12321), +/- 8% each.
+    var det_rng = rng_new(12321);
+    var lo = f64_neg(f64_div(f64_from(8), f64_from(100)));
+    var hi = f64_div(f64_from(8), f64_from(100));
+
+    var self = alloc(sizeof(Insect));
+    Insect_set_det0(self, rng_next_f32_range(det_rng, lo, hi));
+    Insect_set_det1(self, rng_next_f32_range(det_rng, lo, hi));
+    Insect_set_det2(self, rng_next_f32_range(det_rng, lo, hi));
+    Insect_set_det3(self, rng_next_f32_range(det_rng, lo, hi));
+    Insect_set_det4(self, rng_next_f32_range(det_rng, lo, hi));
+    Insect_set_det5(self, rng_next_f32_range(det_rng, lo, hi));
+    Insect_set_det6(self, rng_next_f32_range(det_rng, lo, hi));
+    Insect_set_det7(self, rng_next_f32_range(det_rng, lo, hi));
+
+    Insect_set_insect_type(self, insect_type);
+    Insect_set_sample_rate(self, sample_rate);
+    Insect_set_sample_position(self, 0);
+    Insect_set_base_freq(self, base_freq);
+    Insect_set_mod_rate(self, mod_rate);
+    Insect_set_chirp_rate(self, chirp_rate);
+    Insect_set_amplitude(self, amplitude);
+    Insect_set_intensity(self, F64_ONE);
+    Insect_set_swarm_count(self, 1);
+    Insect_set_rng(self, rng_new(9999));
+    Insect_set_dc_blocker(self, garjan_dcblocker_new(sample_rate));
+
+    var b = insect_build_naad(self);
+    if (garjan_is_err(b) == 1) { return b; }
+    return self;
+}
+
+# Creates a swarm of insects (1-8 overlapping instances with detuning).
+# Returns a pointer or a negative code.
+#must_use
+fn insect_new_swarm(insect_type, count, sample_rate) {
+    var self = insect_new(insect_type, sample_rate);
+    if (garjan_is_err(self) == 1) { return self; }
+    var c = count;
+    if (c < 1) { c = 1; }
+    if (c > 8) { c = 8; }
+    Insect_set_swarm_count(self, c);
+    return self;
+}
+
+# Sets the intensity (0.0 = silent, 1.0 = full volume).
+fn insect_set_intensity(self, intensity) {
+    Insect_set_intensity(self, f64_clamp(intensity, 0, F64_ONE));
+    return 0;
+}
+
+# Synthesizes one voice's contribution at time `t` and frequency `freq`.
+# Mirrors Rust synthesize_voice (naad path for CicadaDrone).
+#must_use
+fn insect_synthesize_voice(self, t, freq, voice) {
+    # phase_offset = voice as f32 * 0.37
+    var phase_offset = f64_mul(f64_from(voice), f64_div(f64_from(37), f64_from(100)));
+    var ty = Insect_insect_type(self);
+    var mod_rate = Insect_mod_rate(self);
+
+    if (ty == INSECT_WING_BUZZ) {
+        # carrier = sin(TAU*freq*t + phase_offset)
+        var wb_carrier = f64_sin(f64_add(f64_mul(F64_TAU, f64_mul(freq, t)), phase_offset));
+        # modulator = 0.5 + 0.5 * sin(TAU*mod_rate*t + phase_offset*2)
+        var wb_ph2 = f64_mul(phase_offset, F64_TWO);
+        var wb_ms = f64_sin(f64_add(f64_mul(F64_TAU, f64_mul(mod_rate, t)), wb_ph2));
+        var wb_mod = f64_add(F64_HALF, f64_mul(F64_HALF, wb_ms));
+        return f64_mul(wb_carrier, wb_mod);
+    } elif (ty == INSECT_CRICKET_CHIRP) {
+        # chirp_phase = (chirp_rate*t + phase_offset*0.1) % 1.0
+        var cc_arg = f64_add(f64_mul(Insect_chirp_rate(self), t),
+                             f64_mul(phase_offset, f64_div(F64_ONE, f64_from(10))));
+        var cc_phase = f64_fmod(cc_arg, F64_ONE);
+        if (f64_lt(cc_phase, f64_div(f64_from(4), f64_from(10))) == 1) {
+            var cc_pulse = f64_sin(f64_add(f64_mul(F64_TAU, f64_mul(mod_rate, t)), phase_offset));
+            var cc_carrier = f64_sin(f64_add(f64_mul(F64_TAU, f64_mul(freq, t)), phase_offset));
+            var cc_gate = 0;
+            if (f64_gt(cc_pulse, 0) == 1) { cc_gate = cc_pulse; }
+            return f64_mul(cc_carrier, cc_gate);
+        }
+        return 0;
+    } else {
+        # CicadaDrone: broadband rattle -- filtered noise with slow AM.
+        # modulator = 0.6 + 0.4 * sin(TAU*mod_rate*t + phase_offset)
+        var cd_six = f64_div(f64_from(6), f64_from(10));
+        var cd_four = f64_div(f64_from(4), f64_from(10));
+        var cd_ms = f64_sin(f64_add(f64_mul(F64_TAU, f64_mul(mod_rate, t)), phase_offset));
+        var cd_mod = f64_add(cd_six, f64_mul(cd_four, cd_ms));
+        var cd_noise = noise_next_sample(Insect_noise_gen(self));
+        var cd_filt = filter_biquad_process_sample(Insect_shape_filter(self), cd_noise);
+        return f64_mul(cd_filt, cd_mod);
+    }
+}
+
+# Fills `output` (a vec of f64) with insect audio (streaming). Ports
+# process_block: per-sample voice sum, amplitude/intensity/swarm scaling,
+# DC-block, then advance position. Below intensity 0.001 emits silence but
+# still advances the dc_blocker to keep its state faithful to the Rust.
+fn insect_process_block(self, output) {
+    var num = vec_len(output);
+    var dc = Insect_dc_blocker(self);
+
+    # Silent path (intensity < 0.001): zero output, pump dc_blocker with 0.
+    if (f64_lt(Insect_intensity(self), f64_div(F64_ONE, f64_from(1000))) == 1) {
+        var s = 0;
+        while (s < num) {
+            vec_set(output, s, 0);
+            garjan_dcblocker_process(dc, 0);
+            s = s + 1;
+        }
+        Insect_set_sample_position(self, Insect_sample_position(self) + num);
+        return 0;
+    }
+
+    var sr = Insect_sample_rate(self);
+    var base_freq = Insect_base_freq(self);
+    var amplitude = Insect_amplitude(self);
+    var intensity = Insect_intensity(self);
+    var swarm_count = Insect_swarm_count(self);
+    var pos = Insect_sample_position(self);
+    # inv_swarm = 1.0 / swarm_count
+    var inv_swarm = f64_div(F64_ONE, f64_from(swarm_count));
+
+    var i = 0;
+    while (i < num) {
+        # t = (sample_position + i) as f32 / sample_rate
+        var t = f64_div(f64_from(pos + i), sr);
+        var out = 0;
+        var voice = 0;
+        while (voice < swarm_count) {
+            # detune = 1.0 + swarm_detunings[voice]; freq = base_freq * detune
+            var detune = f64_add(F64_ONE, insect_detune(self, voice));
+            var freq = f64_mul(base_freq, detune);
+            out = f64_add(out, insect_synthesize_voice(self, t, freq, voice));
+            voice = voice + 1;
+        }
+        # sample = out * amplitude * intensity * inv_swarm
+        var scaled = f64_mul(f64_mul(f64_mul(out, amplitude), intensity), inv_swarm);
+        vec_set(output, i, garjan_dcblocker_process(dc, scaled));
+        i = i + 1;
+    }
+    Insect_set_sample_position(self, pos + num);
+    return 0;
+}
+
+# Synthesize `duration` seconds of insect audio into a fresh vec. Returns the
+# vec pointer, or a negative code on invalid duration.
+#must_use
+fn insect_synthesize(self, duration) {
+    var e = garjan_validate_duration(duration);
+    if (garjan_is_err(e) == 1) { return e; }
+    var num = f64_to(f64_mul(Insect_sample_rate(self), duration));
+    var output = vec_new();
+    var i = 0;
+    while (i < num) {
+        vec_push(output, 0);
+        i = i + 1;
+    }
+    insect_process_block(self, output);
+    return output;
+}
+
+# ---- serde: snapshot live state -> InsectParams -> JSON, and back. ----
+#must_use
+fn insect_to_json(self, sb) {
+    var p = alloc(sizeof(InsectParams));
+    InsectParams_set_insect_type(p, Insect_insect_type(self));
+    InsectParams_set_sample_rate(p, Insect_sample_rate(self));
+    InsectParams_set_sample_position(p, Insect_sample_position(self));
+    InsectParams_set_base_freq(p, Insect_base_freq(self));
+    InsectParams_set_mod_rate(p, Insect_mod_rate(self));
+    InsectParams_set_chirp_rate(p, Insect_chirp_rate(self));
+    InsectParams_set_amplitude(p, Insect_amplitude(self));
+    InsectParams_set_intensity(p, Insect_intensity(self));
+    InsectParams_set_swarm_count(p, Insect_swarm_count(self));
+    InsectParams_set_det0(p, Insect_det0(self));
+    InsectParams_set_det1(p, Insect_det1(self));
+    InsectParams_set_det2(p, Insect_det2(self));
+    InsectParams_set_det3(p, Insect_det3(self));
+    InsectParams_set_det4(p, Insect_det4(self));
+    InsectParams_set_det5(p, Insect_det5(self));
+    InsectParams_set_det6(p, Insect_det6(self));
+    InsectParams_set_det7(p, Insect_det7(self));
+    var rng = Insect_rng(self);
+    InsectParams_set_rng_state(p, Rng_state(rng));
+    InsectParams_set_rng_inc(p, Rng_inc(rng));
+    var dc = Insect_dc_blocker(self);
+    InsectParams_set_dcb_x_prev(p, DcBlocker_x_prev(dc));
+    InsectParams_set_dcb_y_prev(p, DcBlocker_y_prev(dc));
+    InsectParams_set_dcb_r(p, DcBlocker_r(dc));
+    return InsectParams_to_json(p, sb);
+}
+
+# Rebuild an Insect from JSON: restore scalars + the 8 detunings + rng +
+# dc_blocker state, then reconstruct the naad components fresh.
+#must_use
+fn insect_from_json_str(json) {
+    var p = InsectParams_from_json_str(json);
+    var self = alloc(sizeof(Insect));
+    Insect_set_insect_type(self, InsectParams_insect_type(p));
+    Insect_set_sample_rate(self, InsectParams_sample_rate(p));
+    Insect_set_sample_position(self, InsectParams_sample_position(p));
+    Insect_set_base_freq(self, InsectParams_base_freq(p));
+    Insect_set_mod_rate(self, InsectParams_mod_rate(p));
+    Insect_set_chirp_rate(self, InsectParams_chirp_rate(p));
+    Insect_set_amplitude(self, InsectParams_amplitude(p));
+    Insect_set_intensity(self, InsectParams_intensity(p));
+    Insect_set_swarm_count(self, InsectParams_swarm_count(p));
+    Insect_set_det0(self, InsectParams_det0(p));
+    Insect_set_det1(self, InsectParams_det1(p));
+    Insect_set_det2(self, InsectParams_det2(p));
+    Insect_set_det3(self, InsectParams_det3(p));
+    Insect_set_det4(self, InsectParams_det4(p));
+    Insect_set_det5(self, InsectParams_det5(p));
+    Insect_set_det6(self, InsectParams_det6(p));
+    Insect_set_det7(self, InsectParams_det7(p));
+
+    var rng = rng_new(0);
+    Rng_set_state(rng, InsectParams_rng_state(p));
+    Rng_set_inc(rng, InsectParams_rng_inc(p));
+    Insect_set_rng(self, rng);
+
+    var dc = garjan_dcblocker_new(InsectParams_sample_rate(p));
+    DcBlocker_set_x_prev(dc, InsectParams_dcb_x_prev(p));
+    DcBlocker_set_y_prev(dc, InsectParams_dcb_y_prev(p));
+    DcBlocker_set_r(dc, InsectParams_dcb_r(p));
+    Insect_set_dc_blocker(self, dc);
+
+    insect_build_naad(self);
+    return self;
+}

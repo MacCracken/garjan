@@ -1,0 +1,51 @@
+# dsp.tcyr -- parity tests for src/dsp.cyr (DcBlocker + validators + serde).
+
+include "src/error.cyr"
+include "src/logging.cyr"
+include "src/dsp.cyr"
+
+fn main() {
+    alloc_init();
+
+    # ---- validators ----
+    test_group("validators");
+    assert_eq(garjan_validate_sample_rate(f64_from(44100)), GARJAN_OK, "44100 sr ok");
+    assert(garjan_is_err(garjan_validate_sample_rate(0)) == 1, "0 sr invalid");
+    assert(garjan_is_err(garjan_validate_sample_rate(f64_neg(F64_ONE))) == 1, "-1 sr invalid");
+    assert(garjan_is_err(garjan_validate_sample_rate(GARJAN_POS_INF)) == 1, "inf sr invalid");
+    assert_eq(garjan_validate_duration(F64_ONE), GARJAN_OK, "1.0 dur ok");
+    assert(garjan_is_err(garjan_validate_duration(0)) == 1, "0 dur invalid");
+
+    # ---- DcBlocker: y[0] == x[0], output finite, DC gradually removed ----
+    test_group("dcblocker");
+    var db = garjan_dcblocker_new(f64_from(44100));
+    var y0 = garjan_dcblocker_process(db, F64_ONE);
+    assert(f64_lt(f64_abs(f64_sub(y0, F64_ONE)), GARJAN_EPSILON) == 1, "first output == input");
+    var i = 0;
+    var allfinite = 1;
+    var last = y0;
+    while (i < 8000) {
+        last = garjan_dcblocker_process(db, F64_ONE);
+        if (garjan_is_finite(last) == 0) { allfinite = 0; }
+        i = i + 1;
+    }
+    assert(allfinite == 1, "all DcBlocker outputs finite");
+    assert(f64_lt(last, F64_HALF) == 1, "DC offset removed (output decays under 0.5)");
+
+    # ---- serde roundtrip (DcBlocker) ----
+    test_group("dcblocker_serde");
+    var d = garjan_dcblocker_new(f64_from(48000));
+    var sb = str_builder_new();
+    DcBlocker_to_json(d, sb);
+    var j = str_data(str_builder_build(sb));
+    var d2 = DcBlocker_from_json_str(j);
+    var sb2 = str_builder_new();
+    DcBlocker_to_json(d2, sb2);
+    var j2 = str_data(str_builder_build(sb2));
+    assert(memeq(j, j2, strlen(j)) == 1, "DcBlocker json roundtrip idempotent");
+
+    return assert_summary();
+}
+
+var exit_code = main();
+syscall(60, exit_code);

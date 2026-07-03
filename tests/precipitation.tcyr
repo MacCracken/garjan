@@ -1,0 +1,79 @@
+# precipitation.tcyr -- parity tests for src/precipitation.cyr (naad synth + serde).
+include "src/error.cyr"
+include "src/logging.cyr"
+include "src/dsp.cyr"
+include "src/rng.cyr"
+include "src/lod.cyr"
+include "src/material.cyr"
+include "src/modal.cyr"
+include "src/contact.cyr"
+include "src/aero.cyr"
+include "src/creature.cyr"
+include "src/precipitation.cyr"
+
+fn main() {
+    alloc_init();
+
+    test_group("precipitation_new");
+    # Hail on metal -> resonant modal bank present.
+    var p = precipitation_new(PRECIP_HAIL, STONE_MEDIUM, TERRAIN_METAL, f64_from(44100));
+    assert(garjan_is_err(p) == 0, "precipitation_new ok");
+    assert(garjan_is_err(precipitation_new(PRECIP_HAIL, STONE_MEDIUM, TERRAIN_METAL, 0)) == 1, "precipitation_new rejects sr=0");
+    # Medium stone: rate 15, amplitude 0.4, decay_ms 10 -> decay_samples = 10*44100/1000 = 441.
+    assert(f64_lt(f64_abs(f64_sub(Precipitation_rate(p), f64_from(15))), GARJAN_EPSILON) == 1, "rate 15");
+    assert(f64_lt(f64_abs(f64_sub(Precipitation_amplitude(p), f64_div(f64_from(4), f64_from(10)))), GARJAN_EPSILON) == 1, "amplitude 0.4");
+    assert_eq(Precipitation_decay_samples(p), 441, "decay_samples 441");
+    assert(Precipitation_modal_bank(p) != 0, "hail on metal has modal bank");
+
+    # Snow on sand -> no modal bank (snow never builds one).
+    var snow = precipitation_new(PRECIP_SNOW, STONE_SMALL, TERRAIN_SAND, f64_from(44100));
+    assert(garjan_is_err(snow) == 0, "snow_new ok");
+    assert(Precipitation_modal_bank(snow) == 0, "snow has no modal bank");
+
+    test_group("synthesize");
+    var buf = precipitation_synthesize(p, f64_div(f64_from(1), f64_from(10)));   # 0.1s
+    assert(garjan_is_err(buf) == 0, "synthesize ok");
+    assert_eq(vec_len(buf), 4410, "0.1s @ 44100 = 4410 samples");
+    var i = 0;
+    var allfinite = 1;
+    var energy = 0;
+    while (i < vec_len(buf)) {
+        var sv = vec_get(buf, i);
+        if (garjan_is_finite(sv) == 0) { allfinite = 0; }
+        energy = f64_add(energy, f64_abs(sv));
+        i = i + 1;
+    }
+    assert(allfinite == 1, "all precip samples finite");
+    assert(f64_gt(energy, 0) == 1, "precip produces sound (nonzero energy)");
+    assert(garjan_is_err(precipitation_synthesize(p, 0)) == 1, "synthesize rejects duration=0");
+
+    test_group("intensity_silence");
+    var q = precipitation_new(PRECIP_SNOW, STONE_LARGE, TERRAIN_MUD, f64_from(44100));
+    precipitation_set_intensity(q, 0);
+    var qbuf = precipitation_synthesize(q, f64_div(f64_from(1), f64_from(100)));
+    var k = 0;
+    var qenergy = 0;
+    while (k < vec_len(qbuf)) {
+        qenergy = f64_add(qenergy, f64_abs(vec_get(qbuf, k)));
+        k = k + 1;
+    }
+    assert(f64_lt(qenergy, GARJAN_EPSILON) == 1, "zero intensity -> silence");
+
+    test_group("precipitation_serde");
+    var g = precipitation_new(PRECIP_SURFACE_RAIN, STONE_MEDIUM, TERRAIN_TILE, f64_from(48000));
+    # advance state so rng/dc_blocker are non-default
+    precipitation_synthesize(g, f64_div(f64_from(1), f64_from(100)));
+    var sb = str_builder_new();
+    precipitation_to_json(g, sb);
+    var j = str_data(str_builder_build(sb));
+    var g2 = precipitation_from_json_str(j);
+    var sb2 = str_builder_new();
+    precipitation_to_json(g2, sb2);
+    assert(memeq(j, str_data(str_builder_build(sb2)), strlen(j)) == 1, "precip params json roundtrip idempotent");
+    # restored synth resumes the SAME rng sequence
+    assert_eq(rng_next_u32(Precipitation_rng(g)), rng_next_u32(Precipitation_rng(g2)), "restored precip resumes rng");
+
+    return assert_summary();
+}
+var ec = main();
+syscall(60, ec);

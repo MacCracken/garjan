@@ -1,0 +1,84 @@
+# friction.tcyr -- parity tests for src/friction.cyr (naad stick-slip synth + serde).
+include "src/error.cyr"
+include "src/logging.cyr"
+include "src/dsp.cyr"
+include "src/rng.cyr"
+include "src/lod.cyr"
+include "src/material.cyr"
+include "src/modal.cyr"
+include "src/contact.cyr"
+include "src/aero.cyr"
+include "src/creature.cyr"
+include "src/friction.cyr"
+
+fn main() {
+    alloc_init();
+
+    test_group("friction_new");
+    var f = friction_new(FRICTION_SCRAPE, MATERIAL_METAL, f64_from(44100));
+    assert(garjan_is_err(f) == 0, "friction_new ok");
+    assert(garjan_is_err(friction_new(FRICTION_SCRAPE, MATERIAL_METAL, 0)) == 1, "friction_new rejects sr=0");
+    # Scrape: base_rate=200, stick_threshold=0.8, noise_mix=0.3
+    assert(f64_lt(f64_abs(f64_sub(Friction_base_rate(f), f64_from(200))), GARJAN_EPSILON) == 1, "scrape base_rate 200");
+    assert(f64_lt(f64_abs(f64_sub(Friction_stick_threshold(f), f64_div(f64_from(8), f64_from(10)))), GARJAN_EPSILON) == 1, "scrape stick_threshold 0.8");
+    # default velocity 0.0, pressure 0.5
+    assert(f64_lt(f64_abs(Friction_velocity(f)), GARJAN_EPSILON) == 1, "default velocity 0");
+    assert(f64_lt(f64_abs(f64_sub(Friction_pressure(f), F64_HALF)), GARJAN_EPSILON) == 1, "default pressure 0.5");
+
+    test_group("set_velocity_pressure");
+    friction_set_velocity(f, F64_TWO);   # clamps to 1.0
+    assert(f64_lt(f64_abs(f64_sub(Friction_velocity(f), F64_ONE)), GARJAN_EPSILON) == 1, "velocity clamps to 1");
+    friction_set_pressure(f, f64_from(7));   # clamps to 1.0
+    assert(f64_lt(f64_abs(f64_sub(Friction_pressure(f), F64_ONE)), GARJAN_EPSILON) == 1, "pressure clamps to 1");
+    friction_set_velocity(f, F64_HALF);
+    friction_set_pressure(f, F64_HALF);
+
+    test_group("synthesize");
+    var buf = friction_synthesize(f, f64_div(f64_from(1), f64_from(10)));   # 0.1s
+    assert(garjan_is_err(buf) == 0, "synthesize ok");
+    assert_eq(vec_len(buf), 4410, "0.1s @ 44100 = 4410 samples");
+    var i = 0;
+    var allfinite = 1;
+    var energy = 0;
+    while (i < vec_len(buf)) {
+        var s = vec_get(buf, i);
+        if (garjan_is_finite(s) == 0) { allfinite = 0; }
+        energy = f64_add(energy, f64_abs(s));
+        i = i + 1;
+    }
+    assert(allfinite == 1, "all friction samples finite");
+    assert(f64_gt(energy, 0) == 1, "friction produces sound (nonzero energy)");
+    assert(garjan_is_err(friction_synthesize(f, 0)) == 1, "synthesize rejects duration=0");
+
+    test_group("velocity_zero_silence");
+    var q = friction_new(FRICTION_GRIND, MATERIAL_WOOD, f64_from(44100));
+    # default velocity 0 -> output must be silent
+    var qbuf = friction_synthesize(q, f64_div(f64_from(1), f64_from(100)));
+    var qe = 0;
+    var qi = 0;
+    while (qi < vec_len(qbuf)) {
+        qe = f64_add(qe, f64_abs(vec_get(qbuf, qi)));
+        qi = qi + 1;
+    }
+    assert(f64_lt(qe, GARJAN_EPSILON) == 1, "zero velocity is silent");
+
+    test_group("friction_serde");
+    var g = friction_new(FRICTION_GRIND, MATERIAL_STONE, f64_from(48000));
+    friction_set_velocity(g, f64_div(f64_from(7), f64_from(10)));
+    friction_set_pressure(g, f64_div(f64_from(6), f64_from(10)));
+    # advance state so rng/dc_blocker/slip_phase are non-default
+    friction_synthesize(g, f64_div(f64_from(1), f64_from(100)));
+    var sb = str_builder_new();
+    friction_to_json(g, sb);
+    var j = str_data(str_builder_build(sb));
+    var g2 = friction_from_json_str(j);
+    var sb2 = str_builder_new();
+    friction_to_json(g2, sb2);
+    assert(memeq(j, str_data(str_builder_build(sb2)), strlen(j)) == 1, "friction params json roundtrip idempotent");
+    # restored synth resumes the SAME rng sequence
+    assert_eq(rng_next_u32(Friction_rng(g)), rng_next_u32(Friction_rng(g2)), "restored friction resumes rng");
+
+    return assert_summary();
+}
+var ec = main();
+syscall(60, ec);

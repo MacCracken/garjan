@@ -1,0 +1,348 @@
+# impact.cyr -- impact & contact sound synthesis: an excitation (half-sine or
+# noise burst + material transient) driven through a modal bank, DC-blocked.
+#
+# Ports rust-old/src/impact.rs. The Cyrius port always uses the naad backend
+# (no feature flags), so it ports the naad-backend transient path (naad white
+# noise through a bandpass resonance filter) and drops the rng fallback.
+# f32 -> f64. Result<Self> -> pointer / negative GARJAN_* code.
+#
+# The Rust `#[serde(skip)]`-equivalent live components -- modal_bank, exciter,
+# transient_noise, resonance_filter, excitation_buf -- are NOT serialized; they
+# are reconstructed on deserialize (in impact_build_naad) from the serialized
+# material + properties + sample_rate. rng + dc_blocker state ARE serialized
+# (flattened into ImpactParams). Requires: error, logging, dsp, rng, material,
+# modal foundations + the naad bundle (noise_new/noise_next_sample,
+# filter_biquad_new/filter_biquad_process_sample).
+
+# ---- ImpactType (enum) -> module-prefixed int constants (declaration order). ----
+var IMPACT_TAP     = 0;
+var IMPACT_STRIKE  = 1;
+var IMPACT_CRASH   = 2;
+var IMPACT_SHATTER = 3;
+
+# Force multiplier for an impact type (Rust ImpactType::force).
+#must_use
+fn impact_type_force(t) {
+    if (t == IMPACT_TAP)    { return f64_div(f64_from(2), f64_from(10)); }
+    if (t == IMPACT_STRIKE) { return F64_HALF; }
+    if (t == IMPACT_CRASH)  { return F64_ONE; }
+    return f64_div(f64_from(8), f64_from(10));   # Shatter
+}
+
+# Excitation type tag for an impact type (Rust ImpactType::excitation_config).
+#must_use
+fn impact_type_exc_type(t) {
+    if (t == IMPACT_TAP) { return EXCITATION_HALF_SINE; }
+    return EXCITATION_NOISE_BURST;   # Strike / Crash / Shatter
+}
+
+# Excitation duration in samples for an impact type (Rust excitation_config).
+#must_use
+fn impact_type_exc_duration(t, sample_rate) {
+    if (t == IMPACT_TAP) {
+        return f64_to(f64_mul(sample_rate, f64_div(f64_from(2), f64_from(1000))));   # sr*0.002
+    }
+    if (t == IMPACT_STRIKE) {
+        return f64_to(f64_mul(sample_rate, f64_div(f64_from(3), f64_from(1000))));   # sr*0.003
+    }
+    # Crash / Shatter: sr*0.001
+    return f64_to(f64_mul(sample_rate, f64_div(f64_from(1), f64_from(1000))));
+}
+
+# ---- ImpactParams: the serializable slice. Rust serialized `material` and
+# `props` (== material.properties()) plus rng + dc_blocker + sample_position.
+# We flatten material + props scalars + rng + dc_blocker so #derive(Serialize)'s
+# single-pass from_json_str roundtrips exactly. ----
+#derive(accessors)
+#derive(Serialize)
+struct ImpactParams {
+    material: i64;
+    prop_resonance: f64;
+    prop_bandwidth: f64;
+    prop_decay: f64;
+    prop_brightness: f64;
+    prop_transient: f64;
+    sample_rate: f64;
+    sample_position: i64;
+    rng_state: i64;
+    rng_inc: i64;
+    dcb_x_prev: f64;
+    dcb_y_prev: f64;
+    dcb_r: f64;
+}
+
+# ---- Impact: live synth = scalars + props ptr + live rng/dc_blocker + modal
+# bank + naad component ptrs + excitation buffer vec. ----
+#derive(accessors)
+struct Impact {
+    material;
+    props;
+    sample_rate;
+    rng;
+    dc_blocker;
+    sample_position;
+    modal_bank;
+    excitation_buf;
+    transient_noise;
+    resonance_filter;
+}
+
+# Build/refresh the reconstructable components (modal bank, resonance filter,
+# transient noise, excitation buffer) from the material props + sample_rate.
+# Shared by impact_new and impact_from_json_str. Returns GARJAN_OK or a
+# negative code if a naad constructor / modal bank rejects its params.
+fn impact_build_naad(self) {
+    var sr = Impact_sample_rate(self);
+    var material = Impact_material(self);
+    var props = Impact_props(self);
+
+    # Modal bank from the material's mode config + props.
+    var mode_cfg = material_mode_config(material);
+    var mode_specs = generate_modes(props, MaterialModeConfig_pattern(mode_cfg),
+                                    MaterialModeConfig_mode_count(mode_cfg),
+                                    MaterialModeConfig_damping_factor(mode_cfg));
+    var modal_bank = modal_bank_new(mode_specs, sr);
+    if (garjan_is_err(modal_bank) == 1) { return modal_bank; }
+    Impact_set_modal_bank(self, modal_bank);
+
+    # Resonance filter: bandpass at props.resonance, q = clamp(resonance/max(bandwidth,1), 0.1, 20).
+    var resonance = MaterialProperties_resonance(props);
+    var bandwidth = MaterialProperties_bandwidth(props);
+    var q = f64_clamp(f64_div(resonance, f64_max(bandwidth, F64_ONE)),
+                      f64_div(f64_from(1), f64_from(10)), f64_from(20));
+    var rf = filter_biquad_new(FILTER_BANDPASS, sr, resonance, q);
+    if (garjan_is_err(rf) == 1) { return garjan_map_naad_error(rf); }
+    Impact_set_resonance_filter(self, rf);
+
+    # Transient noise: white, seed 5381 (matches Rust NoiseGenerator::new(White, 5381)).
+    Impact_set_transient_noise(self, noise_new(NOISE_WHITE, 5381));
+
+    # Pre-allocate excitation buffer for max impact duration: ((decay*2 + 0.05) * sr).
+    var pdecay = MaterialProperties_decay(props);
+    var max_samples = f64_to(f64_mul(f64_add(f64_mul(pdecay, F64_TWO), f64_div(f64_from(5), f64_from(100))), sr));
+    if (max_samples < 0) { max_samples = 0; }
+    var ebuf = vec_new();
+    var i = 0;
+    while (i < max_samples) {
+        vec_push(ebuf, 0);
+        i = i + 1;
+    }
+    Impact_set_excitation_buf(self, ebuf);
+    return GARJAN_OK;
+}
+
+# Creates a new impact synthesizer for the given material. Returns a pointer
+# or a negative code.
+#must_use
+fn impact_new(material, sample_rate) {
+    var e = garjan_validate_sample_rate(sample_rate);
+    if (garjan_is_err(e) == 1) { return e; }
+
+    var self = alloc(sizeof(Impact));
+    Impact_set_material(self, material);
+    Impact_set_props(self, material_properties(material));
+    Impact_set_sample_rate(self, sample_rate);
+    Impact_set_rng(self, rng_new(5381));
+    Impact_set_dc_blocker(self, garjan_dcblocker_new(sample_rate));
+    Impact_set_sample_position(self, 0);
+    var b = impact_build_naad(self);
+    if (garjan_is_err(b) == 1) { return b; }
+    return self;
+}
+
+# Creates an impact synthesizer for a material interaction. The `surface`
+# material provides the resonant modes; `striker` is reserved for future use.
+# Currently equivalent to impact_new(surface, sample_rate).
+#must_use
+fn impact_new_interaction(striker, surface, sample_rate) {
+    return impact_new(surface, sample_rate);
+}
+
+# Returns the material.
+#inline
+#must_use
+fn impact_material(self) {
+    return Impact_material(self);
+}
+
+# Core generator: fill `output` (a vec of f64) with impact audio for the given
+# impact type at the given velocity. Ports generate_impact (naad-backend path).
+# Does not reset state; advances sample_position by output length.
+fn impact_generate(self, impact_type, velocity, output) {
+    var num_samples = vec_len(output);
+    var sr = Impact_sample_rate(self);
+    var props = Impact_props(self);
+    var rng = Impact_rng(self);
+    var ebuf = Impact_excitation_buf(self);
+
+    # Grow the excitation buffer if the block is unexpectedly large.
+    while (vec_len(ebuf) < num_samples) {
+        vec_push(ebuf, 0);
+    }
+    # Zero the first num_samples entries.
+    var z = 0;
+    while (z < num_samples) {
+        vec_set(ebuf, z, 0);
+        z = z + 1;
+    }
+
+    # Primary excitation: build an exciter from the impact type + velocity.
+    var exc_type = impact_type_exc_type(impact_type);
+    var exc_dur = impact_type_exc_duration(impact_type, sr);
+    var exciter = exciter_new(exc_type, exc_dur, velocity);
+    exciter_trigger(exciter);
+
+    var transient_noise = Impact_transient_noise(self);
+    var resonance_filter = Impact_resonance_filter(self);
+    var transient_amp = MaterialProperties_transient(props);
+    var transient_len = f64_to(f64_mul(sr, f64_div(f64_from(5), f64_from(1000))));   # sr*0.005
+    var sample_position = Impact_sample_position(self);
+
+    var i = 0;
+    while (i < num_samples) {
+        vec_set(ebuf, i, exciter_next_sample(exciter));
+        var abs_pos = sample_position + i;
+        if (abs_pos < transient_len) {
+            var env = f64_sub(F64_ONE, f64_div(f64_from(abs_pos), f64_from(transient_len)));
+            var noise = noise_next_sample(transient_noise);
+            var contrib = f64_mul(f64_mul(f64_mul(filter_biquad_process_sample(resonance_filter, noise), env),
+                                          transient_amp), velocity);
+            vec_set(ebuf, i, f64_add(vec_get(ebuf, i), contrib));
+        }
+        i = i + 1;
+    }
+
+    # Shatter: add debris impulses into the excitation buffer.
+    if (impact_type == IMPACT_SHATTER) {
+        var debris_window = f64_to(f64_mul(sr, f64_div(f64_from(2), f64_from(10))));   # sr*0.2
+        var n_debris = 3 + rng_poisson(rng, f64_from(5));
+        var lo_offset = f64_mul(sr, f64_div(f64_from(1), f64_from(100)));              # sr*0.01
+        var d = 0;
+        while (d < n_debris) {
+            var offset = f64_to(rng_next_f32_range(rng, lo_offset, f64_from(debris_window)));
+            if (offset >= num_samples) {
+                d = d + 1;
+                continue;
+            }
+            var debris_amp = f64_mul(velocity, rng_next_f32_range(rng, f64_div(f64_from(1), f64_from(10)),
+                                                                 f64_div(f64_from(4), f64_from(10))));
+            var debris_dur = f64_to(rng_next_f32_range(rng, f64_from(3), f64_from(15)));
+            var span = debris_dur;
+            if (num_samples - offset < span) { span = num_samples - offset; }
+            var j = 0;
+            while (j < span) {
+                var denv = f64_sub(F64_ONE, f64_div(f64_from(j), f64_from(debris_dur)));
+                var dn = rng_next_f32(rng);
+                vec_set(ebuf, offset + j, f64_add(vec_get(ebuf, offset + j), f64_mul(f64_mul(debris_amp, denv), dn)));
+                j = j + 1;
+            }
+            d = d + 1;
+        }
+    }
+
+    # Process excitation through the modal bank. process_block reads min(len)
+    # samples; ebuf may be longer than num_samples, so pass a num_samples view
+    # is not needed -- modal_bank_process_block clamps to min(len(exc),len(out)).
+    var modal_bank = Impact_modal_bank(self);
+    modal_bank_process_block(modal_bank, ebuf, output);
+
+    # DC blocking, then advance the sample cursor.
+    var dc = Impact_dc_blocker(self);
+    var k = 0;
+    while (k < num_samples) {
+        vec_set(output, k, garjan_dcblocker_process(dc, vec_get(output, k)));
+        k = k + 1;
+    }
+    Impact_set_sample_position(self, sample_position + num_samples);
+    return 0;
+}
+
+# Fills output buffer with impact audio for the given impact type (streaming).
+# Does not reset internal state (Rust process_block).
+fn impact_process_block(self, impact_type, output) {
+    return impact_generate(self, impact_type, impact_type_force(impact_type), output);
+}
+
+# Synthesize an impact sound with explicit velocity control into a fresh vec.
+# velocity is clamped to [0,1]. Resets sample_position + modal bank first.
+# Returns the vec pointer.
+#must_use
+fn impact_synthesize_velocity(self, impact_type, velocity) {
+    var vel = f64_clamp(velocity, 0, F64_ONE);
+    var props = Impact_props(self);
+    var pdecay = MaterialProperties_decay(props);
+    # duration = decay*2 + 0.05
+    var duration = f64_add(f64_mul(pdecay, F64_TWO), f64_div(f64_from(5), f64_from(100)));
+    var num_samples = f64_to(f64_mul(duration, Impact_sample_rate(self)));
+
+    var output = vec_new();
+    var i = 0;
+    while (i < num_samples) {
+        vec_push(output, 0);
+        i = i + 1;
+    }
+    Impact_set_sample_position(self, 0);
+    modal_bank_reset(Impact_modal_bank(self));
+    impact_generate(self, impact_type, vel, output);
+    return output;
+}
+
+# Synthesize an impact sound at the impact type's default force. Returns the
+# vec pointer.
+#must_use
+fn impact_synthesize(self, impact_type) {
+    return impact_synthesize_velocity(self, impact_type, impact_type_force(impact_type));
+}
+
+# ---- serde: snapshot live state -> ImpactParams -> JSON, and back. ----
+#must_use
+fn impact_to_json(self, sb) {
+    var p = alloc(sizeof(ImpactParams));
+    ImpactParams_set_material(p, Impact_material(self));
+    var props = Impact_props(self);
+    ImpactParams_set_prop_resonance(p, MaterialProperties_resonance(props));
+    ImpactParams_set_prop_bandwidth(p, MaterialProperties_bandwidth(props));
+    ImpactParams_set_prop_decay(p, MaterialProperties_decay(props));
+    ImpactParams_set_prop_brightness(p, MaterialProperties_brightness(props));
+    ImpactParams_set_prop_transient(p, MaterialProperties_transient(props));
+    ImpactParams_set_sample_rate(p, Impact_sample_rate(self));
+    ImpactParams_set_sample_position(p, Impact_sample_position(self));
+    var rng = Impact_rng(self);
+    ImpactParams_set_rng_state(p, Rng_state(rng));
+    ImpactParams_set_rng_inc(p, Rng_inc(rng));
+    var dc = Impact_dc_blocker(self);
+    ImpactParams_set_dcb_x_prev(p, DcBlocker_x_prev(dc));
+    ImpactParams_set_dcb_y_prev(p, DcBlocker_y_prev(dc));
+    ImpactParams_set_dcb_r(p, DcBlocker_r(dc));
+    return ImpactParams_to_json(p, sb);
+}
+
+# Rebuild an Impact from JSON: restore material + props + rng + dc_blocker
+# state, then reconstruct the modal bank / naad components fresh.
+#must_use
+fn impact_from_json_str(json) {
+    var p = ImpactParams_from_json_str(json);
+    var self = alloc(sizeof(Impact));
+    Impact_set_material(self, ImpactParams_material(p));
+
+    var props = material_properties_new(ImpactParams_prop_resonance(p), ImpactParams_prop_bandwidth(p),
+                                        ImpactParams_prop_decay(p), ImpactParams_prop_brightness(p),
+                                        ImpactParams_prop_transient(p));
+    Impact_set_props(self, props);
+    Impact_set_sample_rate(self, ImpactParams_sample_rate(p));
+    Impact_set_sample_position(self, ImpactParams_sample_position(p));
+
+    var rng = rng_new(0);
+    Rng_set_state(rng, ImpactParams_rng_state(p));
+    Rng_set_inc(rng, ImpactParams_rng_inc(p));
+    Impact_set_rng(self, rng);
+
+    var dc = garjan_dcblocker_new(ImpactParams_sample_rate(p));
+    DcBlocker_set_x_prev(dc, ImpactParams_dcb_x_prev(p));
+    DcBlocker_set_y_prev(dc, ImpactParams_dcb_y_prev(p));
+    DcBlocker_set_r(dc, ImpactParams_dcb_r(p));
+    Impact_set_dc_blocker(self, dc);
+
+    impact_build_naad(self);
+    return self;
+}

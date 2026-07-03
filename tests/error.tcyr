@@ -1,0 +1,28 @@
+# error.tcyr -- parity tests for src/error.cyr (the L0 base).
+# Stdlib (alloc/math/assert) auto-included via cyrius.cyml.
+
+include "src/error.cyr"
+
+fn main() {
+    alloc_init();
+
+    test_group("error_codes");
+    assert_eq(GARJAN_OK, 0, "OK is 0");
+    assert(garjan_is_err(GARJAN_OK) == 0, "OK is not an error");
+    assert(garjan_is_err(GARJAN_ERR_INVALID_PARAMETER) == 1, "InvalidParameter is an error");
+    assert(garjan_is_err(GARJAN_ERR_SYNTHESIS_FAILED) == 1, "SynthesisFailed is an error");
+    assert(garjan_is_err(GARJAN_ERR_COMPUTATION) == 1, "Computation is an error");
+
+    test_group("is_finite");
+    assert(garjan_is_finite(F64_ONE) == 1, "1.0 is finite");
+    assert(garjan_is_finite(0) == 1, "0.0 is finite");
+    assert(garjan_is_finite(f64_neg(F64_TAU)) == 1, "-tau is finite");
+    assert(garjan_is_finite(GARJAN_POS_INF) == 0, "+inf is not finite");
+    assert(garjan_is_finite(GARJAN_NEG_INF) == 0, "-inf is not finite");
+    assert(garjan_is_finite(0x7FF8000000000000) == 0, "NaN is not finite");
+
+    return assert_summary();
+}
+
+var exit_code = main();
+syscall(60, exit_code);

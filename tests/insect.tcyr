@@ -1,0 +1,85 @@
+# insect.tcyr -- parity tests for src/insect.cyr (naad synth + serde).
+include "src/error.cyr"
+include "src/logging.cyr"
+include "src/dsp.cyr"
+include "src/rng.cyr"
+include "src/lod.cyr"
+include "src/material.cyr"
+include "src/modal.cyr"
+include "src/contact.cyr"
+include "src/aero.cyr"
+include "src/creature.cyr"
+include "src/insect.cyr"
+
+fn main() {
+    alloc_init();
+
+    test_group("insect_new");
+    var f = insect_new(INSECT_CICADA_DRONE, f64_from(44100));
+    assert(garjan_is_err(f) == 0, "insect_new ok");
+    assert(garjan_is_err(insect_new(INSECT_CICADA_DRONE, 0)) == 1, "insect_new rejects sr=0");
+    # cicada base_freq = 6000, amplitude = 0.25
+    assert(f64_lt(f64_abs(f64_sub(Insect_base_freq(f), f64_from(6000))), GARJAN_EPSILON) == 1, "cicada base 6000");
+    assert_eq(Insect_swarm_count(f), 1, "single insect swarm_count 1");
+
+    test_group("insect_new_swarm");
+    var sw = insect_new_swarm(INSECT_WING_BUZZ, 12, f64_from(44100));
+    assert(garjan_is_err(sw) == 0, "insect_new_swarm ok");
+    assert_eq(Insect_swarm_count(sw), 8, "swarm count clamped to 8");
+    var sw0 = insect_new_swarm(INSECT_WING_BUZZ, 0, f64_from(44100));
+    assert_eq(Insect_swarm_count(sw0), 1, "swarm count clamped up to 1");
+
+    test_group("synthesize");
+    var buf = insect_synthesize(f, f64_div(f64_from(1), f64_from(10)));   # 0.1s
+    assert(garjan_is_err(buf) == 0, "synthesize ok");
+    assert_eq(vec_len(buf), 4410, "0.1s @ 44100 = 4410 samples");
+    var i = 0;
+    var allfinite = 1;
+    var energy = 0;
+    while (i < vec_len(buf)) {
+        var s = vec_get(buf, i);
+        if (garjan_is_finite(s) == 0) { allfinite = 0; }
+        energy = f64_add(energy, f64_abs(s));
+        i = i + 1;
+    }
+    assert(allfinite == 1, "all insect samples finite");
+    assert(f64_gt(energy, 0) == 1, "insect produces sound (nonzero energy)");
+    assert(garjan_is_err(insect_synthesize(f, 0)) == 1, "synthesize rejects duration=0");
+
+    test_group("wingbuzz_synthesize");
+    var wb = insect_new(INSECT_WING_BUZZ, f64_from(44100));
+    var wbuf = insect_synthesize(wb, f64_div(f64_from(1), f64_from(20)));  # 0.05s
+    assert(garjan_is_err(wbuf) == 0, "wingbuzz synthesize ok");
+    var wi = 0;
+    var wfin = 1;
+    var wen = 0;
+    while (wi < vec_len(wbuf)) {
+        var ws = vec_get(wbuf, wi);
+        if (garjan_is_finite(ws) == 0) { wfin = 0; }
+        wen = f64_add(wen, f64_abs(ws));
+        wi = wi + 1;
+    }
+    assert(wfin == 1, "all wingbuzz samples finite");
+    assert(f64_gt(wen, 0) == 1, "wingbuzz produces sound");
+
+    test_group("insect_serde");
+    var g = insect_new_swarm(INSECT_CICADA_DRONE, 3, f64_from(48000));
+    # advance state so rng/dc_blocker/noise/filter are non-default
+    insect_synthesize(g, f64_div(f64_from(1), f64_from(100)));
+    var sb = str_builder_new();
+    insect_to_json(g, sb);
+    var j = str_data(str_builder_build(sb));
+    var g2 = insect_from_json_str(j);
+    var sb2 = str_builder_new();
+    insect_to_json(g2, sb2);
+    assert(memeq(j, str_data(str_builder_build(sb2)), strlen(j)) == 1, "insect params json roundtrip idempotent");
+    # restored synth resumes the SAME rng sequence
+    assert_eq(rng_next_u32(Insect_rng(g)), rng_next_u32(Insect_rng(g2)), "restored insect resumes rng");
+    # restored swarm_count + detuning preserved
+    assert_eq(Insect_swarm_count(g2), 3, "restored swarm_count 3");
+    assert(f64_lt(f64_abs(f64_sub(Insect_det0(g), Insect_det0(g2))), GARJAN_EPSILON) == 1, "restored det0 preserved");
+
+    return assert_summary();
+}
+var ec = main();
+syscall(60, ec);

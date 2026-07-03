@@ -1,0 +1,21 @@
+# creature.tcyr -- parity tests for src/creature.cyr.
+include "src/error.cyr"
+include "src/creature.cyr"
+
+fn main() {
+    alloc_init();
+    test_group("insect_config");
+    var w = creature_insect_config(INSECT_WING_BUZZ);
+    assert(f64_lt(f64_abs(f64_sub(InsectConfig_base_freq(w), f64_from(200))), GARJAN_EPSILON) == 1, "wingbuzz base 200");
+    assert(f64_lt(f64_abs(f64_sub(InsectConfig_amplitude(w), f64_div(f64_from(3), f64_from(10)))), GARJAN_EPSILON) == 1, "wingbuzz amp 0.3");
+    var ci = creature_insect_config(INSECT_CICADA_DRONE);
+    assert(f64_lt(f64_abs(f64_sub(InsectConfig_base_freq(ci), f64_from(6000))), GARJAN_EPSILON) == 1, "cicada base 6000");
+
+    test_group("bubble_config");
+    var b = creature_bubble_config(BUBBLE_BOILING);
+    assert(f64_lt(f64_abs(f64_sub(BubbleConfig_event_rate(b), f64_from(30))), GARJAN_EPSILON) == 1, "boiling rate 30");
+    assert(f64_lt(f64_abs(f64_sub(BubbleConfig_decay(b), f64_div(f64_from(1), f64_from(100)))), GARJAN_EPSILON) == 1, "boiling decay 0.01");
+    return assert_summary();
+}
+var ec = main();
+syscall(60, ec);

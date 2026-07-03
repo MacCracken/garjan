@@ -1,0 +1,87 @@
+# dsp.cyr -- shared DSP utilities: DC blocker + parameter validators.
+#
+# Ports rust-old/src/dsp.rs (DcBlocker + validate_duration/validate_sample_rate
+# + map_naad_error). f32 -> f64 throughout. The Rust validators emitted a
+# tracing::warn! behind the `logging` feature; the Cyrius port wires that for
+# real via src/logging.cyr (garjan_log_warn). Result<()> -> GARJAN_OK / negative
+# code. Requires: error.cyr (codes + garjan_is_finite), logging.cyr (warn/error).
+
+# ================================================================
+# DcBlocker -- one-pole highpass removing DC offset:
+#   y[n] = x[n] - x[n-1] + R * y[n-1],  R ~ 10 Hz cutoff at any sample rate.
+# Fields are TYPED for #derive(Serialize) (untyped f64 would serialize as its
+# raw bit pattern and fail to roundtrip).
+# ================================================================
+#derive(accessors)
+#derive(Serialize)
+struct DcBlocker {
+    x_prev: f64;
+    y_prev: f64;
+    r: f64;
+}
+
+# R = clamp(1 - TAU*10/sample_rate, 0.9, 0.9999).
+#must_use
+fn garjan_dcblocker_new(sample_rate) {
+    var raw = f64_sub(F64_ONE, f64_div(f64_mul(F64_TAU, f64_from(10)), sample_rate));
+    var r = f64_clamp(raw, 0x3FECCCCCCCCCCCCD, 0x3FEFFF2E48E8A71E);   # 0.9 .. 0.9999
+    var self = alloc(sizeof(DcBlocker));
+    DcBlocker_set_x_prev(self, 0);
+    DcBlocker_set_y_prev(self, 0);
+    DcBlocker_set_r(self, r);
+    return self;
+}
+
+# Process one sample, removing DC offset.
+#inline
+fn garjan_dcblocker_process(self, x) {
+    var y = f64_add(f64_sub(x, DcBlocker_x_prev(self)), f64_mul(DcBlocker_r(self), DcBlocker_y_prev(self)));
+    DcBlocker_set_x_prev(self, x);
+    DcBlocker_set_y_prev(self, y);
+    return y;
+}
+
+# ================================================================
+# Validators -- GARJAN_OK if positive and finite, else log + ERR code.
+# Port validate_duration / validate_sample_rate (Result<()> -> code).
+# ================================================================
+#must_use
+fn garjan_validate_duration(duration) {
+    if (f64_le(duration, 0) == 1) {
+        garjan_log_warn("garjan: invalid duration (must be positive and finite)");
+        return GARJAN_ERR_INVALID_PARAMETER;
+    }
+    if (garjan_is_finite(duration) == 0) {
+        garjan_log_warn("garjan: invalid duration (must be positive and finite)");
+        return GARJAN_ERR_INVALID_PARAMETER;
+    }
+    return GARJAN_OK;
+}
+
+#must_use
+fn garjan_validate_sample_rate(sample_rate) {
+    if (f64_le(sample_rate, 0) == 1) {
+        garjan_log_warn("garjan: invalid sample_rate (must be positive and finite)");
+        return GARJAN_ERR_INVALID_PARAMETER;
+    }
+    if (garjan_is_finite(sample_rate) == 0) {
+        garjan_log_warn("garjan: invalid sample_rate (must be positive and finite)");
+        return GARJAN_ERR_INVALID_PARAMETER;
+    }
+    return GARJAN_OK;
+}
+
+# ================================================================
+# map_naad_error -- log a naad backend init failure and map it to a garjan
+# error code. Ports dsp::map_naad_error. Call after a naad constructor:
+#   var f = filter_biquad_new(...);
+#   if (garjan_is_err(f) == 1) { return garjan_map_naad_error(f); }
+# ================================================================
+#must_use
+fn garjan_map_naad_error(code) {
+    if (garjan_is_err(code) == 1) {
+        garjan_log_error("garjan: naad backend component init failed");
+        return GARJAN_ERR_SYNTHESIS_FAILED;
+    }
+    return GARJAN_OK;
+}

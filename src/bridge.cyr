@@ -1,0 +1,163 @@
+# bridge.cyr -- science-crate bridges: convert physical simulation outputs to
+# garjan synthesizer parameters. Pure functions over primitives (no deps on the
+# science crates). Ports rust-old/src/bridge.rs. f32 -> f64. Option<RainIntensity>
+# -> RAIN_INTENSITY_* const or BRIDGE_NO_RAIN (-1). All fns are bridge_-prefixed
+# to avoid any collision with goonj's acoustics helpers. Requires: weather.cyr
+# (RAIN_INTENSITY_*), aero.cyr (WHOOSH_*).
+
+var BRIDGE_NO_RAIN = (0 - 1);   # Option<RainIntensity>::None
+var BRIDGE_F32_MAX = 0x47EFFFFFE0000000;   # f32::MAX (~3.4e38) as f64: "no thunder" distance
+
+# ---- Weather bridges (badal) ----
+
+# Rain rate (mm/hr) -> RainIntensity, or BRIDGE_NO_RAIN if <= 0.
+#must_use
+fn bridge_rain_intensity_from_rate(rate_mm_hr) {
+    if (f64_le(rate_mm_hr, 0) == 1) { return BRIDGE_NO_RAIN; }
+    if (f64_lt(rate_mm_hr, f64_div(f64_from(25), f64_from(10))) == 1) { return RAIN_INTENSITY_LIGHT; }      # < 2.5
+    if (f64_lt(rate_mm_hr, f64_div(f64_from(75), f64_from(10))) == 1) { return RAIN_INTENSITY_MODERATE; }   # < 7.5
+    if (f64_lt(rate_mm_hr, f64_from(50)) == 1) { return RAIN_INTENSITY_HEAVY; }
+    return RAIN_INTENSITY_TORRENTIAL;
+}
+
+# Snow-liquid ratio -> amplitude scale = 1 / max(ratio, 1).
+#must_use
+fn bridge_snow_amplitude_scale(snow_liquid_ratio) {
+    return f64_div(F64_ONE, f64_max(snow_liquid_ratio, F64_ONE));
+}
+
+# Wind speed m/s -> raw value for Wind::new (just max with 0).
+#must_use
+fn bridge_wind_speed_raw(speed_ms) {
+    return f64_max(speed_ms, 0);
+}
+
+# Wind speed m/s -> normalized 0..1 (20 m/s => 1.0).
+#must_use
+fn bridge_wind_speed_normalized(speed_ms) {
+    return f64_clamp(f64_div(speed_ms, f64_from(20)), 0, F64_ONE);
+}
+
+# Beaufort number (0-12) -> normalized 0..1.
+#must_use
+fn bridge_wind_from_beaufort(beaufort) {
+    return f64_clamp(f64_div(f64_from(beaufort), f64_from(12)), 0, F64_ONE);
+}
+
+# Thermal wind shear (m/s per km) -> gustiness 0..1.
+#must_use
+fn bridge_gustiness_from_shear(shear_ms_per_km) {
+    return f64_clamp(f64_div(shear_ms_per_km, f64_from(20)), 0, F64_ONE);
+}
+
+# Atmospheric stability -> gustiness modifier (unstable +0.3, stable -0.2).
+#must_use
+fn bridge_gustiness_stability_modifier(unstable) {
+    if (unstable == 1) { return f64_div(f64_from(3), f64_from(10)); }
+    return f64_neg(f64_div(f64_from(2), f64_from(10)));
+}
+
+# Severe-weather threat level (0-5) -> (thunder_distance_m, wind_speed_ms,
+# rain_intensity). Fills the three out-pointers; rain = BRIDGE_NO_RAIN for None.
+fn bridge_weather_from_threat_level(level, out_dist, out_wind, out_rain) {
+    if (level <= 1) {
+        store64(out_dist, BRIDGE_F32_MAX);
+        store64(out_wind, f64_from(5));
+        store64(out_rain, BRIDGE_NO_RAIN);
+    } elif (level == 2) {
+        store64(out_dist, f64_from(3000));
+        store64(out_wind, f64_from(8));
+        store64(out_rain, RAIN_INTENSITY_MODERATE);
+    } elif (level == 3) {
+        store64(out_dist, f64_from(1500));
+        store64(out_wind, f64_from(14));
+        store64(out_rain, RAIN_INTENSITY_HEAVY);
+    } elif (level == 4) {
+        store64(out_dist, f64_from(500));
+        store64(out_wind, f64_from(22));
+        store64(out_rain, RAIN_INTENSITY_TORRENTIAL);
+    } else {
+        store64(out_dist, f64_from(100));
+        store64(out_wind, f64_from(30));
+        store64(out_rain, RAIN_INTENSITY_TORRENTIAL);
+    }
+    return 0;
+}
+
+# ---- Thunder bridges (goonj) ----
+
+# Thunder distance from flash delay + temperature: t * (331.3 + 0.606*T_celsius).
+#must_use
+fn bridge_thunder_distance_from_flash(time_since_flash_s, temperature_celsius) {
+    var c = f64_add(f64_div(f64_from(3313), f64_from(10)),
+                    f64_mul(f64_div(f64_from(606), f64_from(1000)), temperature_celsius));
+    return f64_mul(time_since_flash_s, c);
+}
+
+# Distance-dependent LP cutoff for thunder rumble: clamp(5000/(1+dist*0.002), 60, 5000).
+#must_use
+fn bridge_thunder_distance_cutoff(distance_m) {
+    var denom = f64_add(F64_ONE, f64_mul(distance_m, f64_div(f64_from(2), f64_from(1000))));
+    return f64_clamp(f64_div(f64_from(5000), denom), f64_from(60), f64_from(5000));
+}
+
+# SPL drop with distance -> linear gain factor.
+#must_use
+fn bridge_gain_from_distance(distance_ref, distance) {
+    if (f64_le(distance, distance_ref) == 1) { return F64_ONE; }
+    return f64_div(distance_ref, distance);
+}
+
+# ---- Fire bridges (ushma) ----
+
+# Flame temperature (K) -> fire intensity 0..1: clamp((T-500)/2500, 0, 1).
+#must_use
+fn bridge_fire_intensity_from_temperature(flame_temp_k) {
+    return f64_clamp(f64_div(f64_sub(flame_temp_k, f64_from(500)), f64_from(2500)), 0, F64_ONE);
+}
+
+# Convective flux (W) -> intensity 0..1: clamp(W/50000, 0, 1).
+#must_use
+fn bridge_fire_intensity_from_convection(watts) {
+    return f64_clamp(f64_div(watts, f64_from(50000)), 0, F64_ONE);
+}
+
+# Blended fire intensity: clamp(0.6*thermal + 0.4*convective, 0, 1).
+#must_use
+fn bridge_fire_intensity_blended(flame_temp_k, convection_watts) {
+    var thermal = bridge_fire_intensity_from_temperature(flame_temp_k);
+    var convective = bridge_fire_intensity_from_convection(convection_watts);
+    var blend = f64_add(f64_mul(f64_div(f64_from(6), f64_from(10)), thermal),
+                        f64_mul(f64_div(f64_from(4), f64_from(10)), convective));
+    return f64_clamp(blend, 0, F64_ONE);
+}
+
+# ---- Foliage bridges (vanaspati) ----
+
+# Seasonal growth modifier -> foliage contact intensity (clamp 0..1).
+#must_use
+fn bridge_foliage_contact_from_growth(growth_modifier) {
+    return f64_clamp(growth_modifier, 0, F64_ONE);
+}
+
+# Shannon diversity index -> foliage contact intensity: clamp(H/2, 0, 1).
+#must_use
+fn bridge_foliage_contact_from_diversity(shannon_h) {
+    return f64_clamp(f64_div(shannon_h, f64_from(2)), 0, F64_ONE);
+}
+
+# True (1) if the season is bare (growth < 0.1) -> use BranchSnap over LeafRustle.
+#must_use
+fn bridge_is_bare_season(growth_modifier) {
+    if (f64_lt(growth_modifier, f64_div(f64_from(1), f64_from(10))) == 1) { return 1; }
+    return 0;
+}
+
+# ---- Whoosh bridges (pavan) ----
+
+# Reynolds number -> WhooshType: turbulent (>500k) = Vehicle, else Projectile.
+#must_use
+fn bridge_whoosh_type_from_reynolds(reynolds) {
+    if (f64_gt(reynolds, f64_from(500000)) == 1) { return WHOOSH_VEHICLE; }
+    return WHOOSH_PROJECTILE;
+}

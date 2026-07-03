@@ -1,0 +1,21 @@
+# lod.tcyr -- parity tests for src/lod.cyr.
+include "src/error.cyr"
+include "src/lod.cyr"
+
+fn main() {
+    alloc_init();
+    test_group("lod_factors");
+    assert(f64_lt(f64_abs(f64_sub(lod_mode_factor(QUALITY_FULL), F64_ONE)), GARJAN_EPSILON) == 1, "full=1.0");
+    assert(f64_lt(f64_abs(f64_sub(lod_mode_factor(QUALITY_REDUCED), F64_HALF)), GARJAN_EPSILON) == 1, "reduced=0.5");
+    assert(f64_lt(f64_abs(f64_sub(lod_event_factor(QUALITY_MINIMAL), f64_div(F64_ONE, f64_from(4)))), GARJAN_EPSILON) == 1, "minimal=0.25");
+
+    test_group("lod_scaling");
+    assert_eq(lod_scale_modes(QUALITY_FULL, 12), 12, "full 12->12");
+    assert_eq(lod_scale_modes(QUALITY_REDUCED, 12), 6, "reduced 12->6");
+    assert_eq(lod_scale_modes(QUALITY_MINIMAL, 12), 3, "minimal 12->3");
+    assert_eq(lod_scale_modes(QUALITY_MINIMAL, 1), 1, "min floor of 1");
+    assert_eq(lod_scale_modes(QUALITY_MINIMAL, 2), 1, "minimal 2->max(0,1)=1");
+    return assert_summary();
+}
+var ec = main();
+syscall(60, ec);

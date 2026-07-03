@@ -1,0 +1,64 @@
+# error.cyr -- garjan error codes + shared finite/tolerance base helpers.
+# The L0 base module: included FIRST by every build/test entry. Module files
+# do not `include` each other -- the entry orders them.
+#
+# Ports rust-old/src/error.rs (the `GarjanError` enum + `Result<T>` alias)
+# plus the finite-test helper the whole crate leans on. Rust carried a
+# String payload per error variant; the Cyrius port uses integer codes --
+# fns return GARJAN_OK (0) on success or a negative code on failure, and
+# constructors return a heap pointer on success or a negative code. Human
+# strings come from garjan_err_name().
+#
+# All public symbols are GARJAN_/garjan_-prefixed so they never collide with
+# the naad/hisab/goonj/sakshi bundles garjan links against (Cyrius resolves
+# duplicate top-level defs "last-wins", so prefixing is mandatory here).
+
+# ================================================================
+# Error codes (was `enum GarjanError`). One per Rust variant.
+# ================================================================
+var GARJAN_OK                    = 0;
+var GARJAN_ERR_INVALID_PARAMETER = (0 - 1);   # a synthesis parameter out of range
+var GARJAN_ERR_SYNTHESIS_FAILED  = (0 - 2);   # a synthesis operation failed
+var GARJAN_ERR_COMPUTATION       = (0 - 3);   # a numeric computation went invalid
+
+# ================================================================
+# Shared f64 tolerances / sentinels (IEEE-754 bit patterns). The Rust
+# source was f32; the Cyrius port is f64 throughout (naad/hisab are
+# f64-only). GARJAN_EPSILON preserves f32::EPSILON (2^-23), the guard
+# threshold the Rust code used, promoted cleanly to f64.
+# ================================================================
+var GARJAN_EPSILON     = 0x3E80000000000000;   # f32::EPSILON = 2^-23 ~ 1.192e-7
+var GARJAN_POS_INF     = 0x7FF0000000000000;   # +inf
+var GARJAN_NEG_INF     = 0xFFF0000000000000;   # -inf
+var GARJAN_F32_MIN_POS = 0x3810000000000000;   # f32::MIN_POSITIVE ~ 1.175e-38
+
+# 1 if `code` is an error (negative), 0 otherwise.
+#must_use
+fn garjan_is_err(code) {
+    if (code < 0) { return 1; }
+    return 0;
+}
+
+# Static name for an error code (diagnostics / logging).
+#must_use
+fn garjan_err_name(code) {
+    if (code == GARJAN_OK) { return "ok"; }
+    if (code == GARJAN_ERR_INVALID_PARAMETER) { return "invalid parameter"; }
+    if (code == GARJAN_ERR_SYNTHESIS_FAILED) { return "synthesis failed"; }
+    if (code == GARJAN_ERR_COMPUTATION) { return "computation error"; }
+    return "unknown error";
+}
+
+# Finite test: 1 iff x is neither +/-inf nor NaN. abs(x) < +inf holds for
+# every finite x, fails for infinities (inf < inf is false) and NaN (any
+# NaN comparison is false). Mirrors Rust `f32::is_finite`.
+#must_use
+fn garjan_is_finite(x) {
+    return f64_lt(f64_abs(x), GARJAN_POS_INF);
+}
+
+# Exact fraction num/den as f64 (readable constant idiom for cold-path config).
+#must_use
+fn garjan_frac(num, den) {
+    return f64_div(f64_from(num), f64_from(den));
+}

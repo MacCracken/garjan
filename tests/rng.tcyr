@@ -1,0 +1,65 @@
+# rng.tcyr -- PCG32 parity + range tests for src/rng.cyr.
+# Reference next_u32 values computed from the exact Rust construction.
+
+include "src/error.cyr"
+include "src/rng.cyr"
+
+fn main() {
+    alloc_init();
+
+    # ---- exact PCG32 parity (matches rust-old/src/rng.rs bit-for-bit) ----
+    test_group("pcg32_parity");
+    var r = rng_new(42);
+    assert_eq(rng_next_u32(r), 1085446021, "seed=42 draw 1");
+    assert_eq(rng_next_u32(r), 176895750,  "seed=42 draw 2");
+    assert_eq(rng_next_u32(r), 789123591,  "seed=42 draw 3");
+    var r2 = rng_new(31337);
+    assert_eq(rng_next_u32(r2), 1679889340, "seed=31337 draw 1");
+
+    # ---- determinism: same seed -> same sequence ----
+    test_group("determinism");
+    var a = rng_new(7);
+    var b = rng_new(7);
+    assert_eq(rng_next_u32(a), rng_next_u32(b), "same seed same draw");
+
+    # ---- float ranges ----
+    test_group("ranges");
+    var g = rng_new(99);
+    var i = 0;
+    var ok_signed = 1;
+    var ok_unit = 1;
+    while (i < 2000) {
+        var s = rng_next_f32(g);
+        if (f64_lt(s, f64_neg(F64_ONE)) == 1) { ok_signed = 0; }
+        if (f64_gt(s, F64_ONE) == 1) { ok_signed = 0; }
+        var u = rng_next_f32_unsigned(g);
+        if (f64_lt(u, 0) == 1) { ok_unit = 0; }
+        if (f64_ge(u, F64_ONE) == 1) { ok_unit = 0; }
+        i = i + 1;
+    }
+    assert(ok_signed == 1, "next_f32 in [-1,1]");
+    assert(ok_unit == 1, "next_f32_unsigned in [0,1)");
+
+    # poisson clamps and returns a count
+    var pk = rng_poisson(g, f64_from(3));
+    assert(pk >= 0, "poisson returns non-negative count");
+
+    # ---- serde roundtrip ----
+    test_group("rng_serde");
+    var s1 = rng_new(12345);
+    rng_next_u32(s1);
+    var sb = str_builder_new();
+    Rng_to_json(s1, sb);
+    var j = str_data(str_builder_build(sb));
+    var s2 = Rng_from_json_str(j);
+    var sb2 = str_builder_new();
+    Rng_to_json(s2, sb2);
+    assert(memeq(j, str_data(str_builder_build(sb2)), strlen(j)) == 1, "Rng json roundtrip");
+    # deserialized rng continues the SAME sequence
+    assert_eq(rng_next_u32(s1), rng_next_u32(s2), "roundtripped rng resumes sequence");
+
+    return assert_summary();
+}
+
+var exit_code = main();
+syscall(60, exit_code);

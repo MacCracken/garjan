@@ -1,0 +1,312 @@
+# surf.cyr -- surf zone synthesis: breaking waves with approach, crash, wash.
+#
+# Ports rust-old/src/surf.rs. Models ocean surf as a cyclic process: a wave
+# approaches (rumble builds), breaks (broadband crash), and washes back
+# (receding hiss). The Cyrius port always uses the naad backend (no feature
+# flags), so it ports the #[cfg(feature="naad-backend")] path and drops the
+# fallback. f32 -> f64. Result<Self> -> pointer / negative GARJAN_* code. The
+# Rust #[serde(skip)]-equivalent naad components (crash/wash/rumble noise +
+# filters) are reconstructed on deserialize; intensity, sample_rate,
+# sample_position, wave_period_samples, break_amp, wash_amp, volume,
+# wave_phase, rng, and dc_blocker are serialized (via the flattened SurfParams
+# below).
+# Requires: error, logging, dsp, rng foundations + the naad bundle
+# (noise_new/noise_next_sample, filter_biquad_new/filter_biquad_process_sample).
+
+# ---- SurfIntensity (enum) -> module-prefixed int constants (declaration order). ----
+var SURF_CALM     = 0;
+var SURF_MODERATE = 1;
+var SURF_HEAVY    = 2;
+var SURF_STORM    = 3;
+
+# ---- SurfParams: the serializable slice (Rust's non-skipped fields, with
+# intensity as an int tag and rng + dc_blocker FLATTENED to scalars so
+# #derive(Serialize)'s single-pass from_json_str works). Synced to/from the
+# live Surf on (de)serialize. ----
+#derive(accessors)
+#derive(Serialize)
+struct SurfParams {
+    intensity: i64;
+    sample_rate: f64;
+    sample_position: i64;
+    wave_period_samples: i64;
+    break_amp: f64;
+    wash_amp: f64;
+    volume: f64;
+    wave_phase: f64;
+    rng_state: i64;
+    rng_inc: i64;
+    dcb_x_prev: f64;
+    dcb_y_prev: f64;
+    dcb_r: f64;
+}
+
+# ---- Surf: live synth = scalars + live rng/dc_blocker + naad component ptrs. ----
+#derive(accessors)
+struct Surf {
+    intensity;
+    sample_rate;
+    sample_position;
+    wave_period_samples;
+    break_amp;
+    wash_amp;
+    volume;
+    wave_phase;
+    rng;
+    dc_blocker;
+    crash_noise;
+    crash_filter;
+    wash_noise;
+    wash_filter;
+    rumble_noise;
+    rumble_filter;
+}
+
+# Build/refresh the naad components (crash/wash/rumble noise + filters) from
+# sample_rate. Shared by surf_new and surf_from_json_str. Returns GARJAN_OK or
+# a negative code if a naad constructor rejects its params. Mirrors the Rust
+# fixed noise seeds + filter configs (crash: BandPass 2000/0.8; wash: LowPass
+# 3000/0.5; rumble: LowPass 200/0.5).
+fn surf_build_naad(self) {
+    var sr = Surf_sample_rate(self);
+
+    var cf = filter_biquad_new(FILTER_BANDPASS, sr, f64_from(2000), f64_div(f64_from(8), f64_from(10)));
+    if (garjan_is_err(cf) == 1) { return garjan_map_naad_error(cf); }
+    var wf = filter_biquad_new(FILTER_LOWPASS, sr, f64_from(3000), F64_HALF);
+    if (garjan_is_err(wf) == 1) { return garjan_map_naad_error(wf); }
+    var rf = filter_biquad_new(FILTER_LOWPASS, sr, f64_from(200), F64_HALF);
+    if (garjan_is_err(rf) == 1) { return garjan_map_naad_error(rf); }
+
+    Surf_set_crash_noise(self, noise_new(NOISE_WHITE, 8080));
+    Surf_set_crash_filter(self, cf);
+    Surf_set_wash_noise(self, noise_new(NOISE_PINK, 8081));
+    Surf_set_wash_filter(self, wf);
+    Surf_set_rumble_noise(self, noise_new(NOISE_BROWN, 8082));
+    Surf_set_rumble_filter(self, rf);
+    return GARJAN_OK;
+}
+
+# Resolve SurfIntensity -> wave_period_s config value. (period, break_amp,
+# wash_amp) split across the three surf_config_* helpers below.
+#must_use
+fn surf_config_period(intensity) {
+    if (intensity == SURF_CALM) { return f64_from(8); }
+    if (intensity == SURF_MODERATE) { return f64_from(6); }
+    if (intensity == SURF_HEAVY) { return f64_div(f64_from(9), F64_TWO); }
+    return f64_from(3);
+}
+
+#must_use
+fn surf_config_break_amp(intensity) {
+    if (intensity == SURF_CALM) { return f64_div(f64_from(15), f64_from(100)); }
+    if (intensity == SURF_MODERATE) { return f64_div(f64_from(35), f64_from(100)); }
+    if (intensity == SURF_HEAVY) { return f64_div(f64_from(55), f64_from(100)); }
+    return f64_div(f64_from(75), f64_from(100));
+}
+
+#must_use
+fn surf_config_wash_amp(intensity) {
+    if (intensity == SURF_CALM) { return f64_div(f64_from(8), f64_from(100)); }
+    if (intensity == SURF_MODERATE) { return f64_div(f64_from(2), f64_from(10)); }
+    if (intensity == SURF_HEAVY) { return f64_div(f64_from(35), f64_from(100)); }
+    return F64_HALF;
+}
+
+# Creates a new surf zone synthesizer. Returns a pointer or a negative code.
+#must_use
+fn surf_new(intensity, sample_rate) {
+    var e = garjan_validate_sample_rate(sample_rate);
+    if (garjan_is_err(e) == 1) { return e; }
+
+    var period = surf_config_period(intensity);
+    var break_amp = surf_config_break_amp(intensity);
+    var wash_amp = surf_config_wash_amp(intensity);
+    # wave_period_samples = (period * sample_rate) as usize
+    var wave_period_samples = f64_to(f64_mul(period, sample_rate));
+
+    var self = alloc(sizeof(Surf));
+    Surf_set_intensity(self, intensity);
+    Surf_set_sample_rate(self, sample_rate);
+    Surf_set_sample_position(self, 0);
+    Surf_set_wave_period_samples(self, wave_period_samples);
+    Surf_set_break_amp(self, break_amp);
+    Surf_set_wash_amp(self, wash_amp);
+    Surf_set_volume(self, F64_ONE);
+    Surf_set_wave_phase(self, 0);
+    Surf_set_rng(self, rng_new(8080));
+    Surf_set_dc_blocker(self, garjan_dcblocker_new(sample_rate));
+    var b = surf_build_naad(self);
+    if (garjan_is_err(b) == 1) { return b; }
+    return self;
+}
+
+# Sets the volume (0.0 = silent, 1.0 = full). Clamps to [0, 1].
+fn surf_set_volume(self, volume) {
+    Surf_set_volume(self, f64_clamp(volume, 0, F64_ONE));
+    return 0;
+}
+
+# Fills `output` (a vec of f64) with surf audio (streaming). Ports
+# process_block: per-sample wave phase advance + phase-dependent envelopes,
+# three naad noise layers, volume, then DC-block, then advance position.
+fn surf_process_block(self, output) {
+    var num = vec_len(output);
+    var volume = Surf_volume(self);
+    var dc = Surf_dc_blocker(self);
+
+    # Silent fast-path: volume < 0.001. Still ticks the DC blocker per sample
+    # (Rust does dc_blocker.process(0.0) in the loop) to keep state parity.
+    if (f64_lt(volume, f64_div(F64_ONE, f64_from(1000))) == 1) {
+        var si = 0;
+        while (si < num) {
+            vec_set(output, si, 0);
+            garjan_dcblocker_process(dc, 0);
+            si = si + 1;
+        }
+        Surf_set_sample_position(self, Surf_sample_position(self) + num);
+        return 0;
+    }
+
+    var rng = Surf_rng(self);
+    var crash_noise = Surf_crash_noise(self);
+    var crash_filter = Surf_crash_filter(self);
+    var wash_noise = Surf_wash_noise(self);
+    var wash_filter = Surf_wash_filter(self);
+    var rumble_noise = Surf_rumble_noise(self);
+    var rumble_filter = Surf_rumble_filter(self);
+    var break_amp = Surf_break_amp(self);
+    var wash_amp = Surf_wash_amp(self);
+
+    var period = f64_from(Surf_wave_period_samples(self));
+    var wave_phase = Surf_wave_phase(self);
+
+    var i = 0;
+    while (i < num) {
+        # Advance wave phase by 1/period.
+        wave_phase = f64_add(wave_phase, f64_div(F64_ONE, period));
+        if (f64_ge(wave_phase, F64_ONE) == 1) {
+            wave_phase = f64_sub(wave_phase, F64_ONE);
+            # New jitter per wave cycle: 1.0 + rng.next_f32_range(-0.1, 0.1)
+            var jitter = f64_add(F64_ONE, rng_next_f32_range(rng, f64_neg(f64_div(F64_ONE, f64_from(10))),
+                                                             f64_div(F64_ONE, f64_from(10))));
+            period = f64_mul(f64_from(Surf_wave_period_samples(self)), jitter);
+        }
+
+        var p = wave_phase;
+
+        # Approach rumble: builds 0.0..0.3, decays 0.3..0.5, else 0.
+        var rumble_env = 0;
+        if (f64_lt(p, f64_div(f64_from(3), f64_from(10))) == 1) {
+            rumble_env = f64_div(p, f64_div(f64_from(3), f64_from(10)));
+        } elif (f64_lt(p, F64_HALF) == 1) {
+            rumble_env = f64_sub(F64_ONE, f64_div(f64_sub(p, f64_div(f64_from(3), f64_from(10))),
+                                                  f64_div(f64_from(2), f64_from(10))));
+        }
+
+        # Break crash: peaks at 0.35, sin^2 window over (0.25, 0.55), else 0.
+        var crash_env = 0;
+        if (f64_gt(p, f64_div(f64_from(25), f64_from(100))) == 1) {
+            if (f64_lt(p, f64_div(f64_from(55), f64_from(100))) == 1) {
+                var ct = f64_div(f64_sub(p, f64_div(f64_from(25), f64_from(100))), f64_div(f64_from(3), f64_from(10)));
+                var cs = f64_sin(f64_mul(F64_PI, ct));
+                crash_env = f64_mul(cs, cs);
+            }
+        }
+
+        # Wash: builds after crash, exp(-3*t) over 0.45..1.0, else 0.
+        var wash_env = 0;
+        if (f64_gt(p, f64_div(f64_from(45), f64_from(100))) == 1) {
+            var wt = f64_div(f64_sub(p, f64_div(f64_from(45), f64_from(100))), f64_div(f64_from(55), f64_from(100)));
+            wash_env = f64_exp(f64_mul(f64_neg(f64_from(3)), wt));
+        }
+
+        # Noise layers (naad backend). rumble scaled by *0.5 extra.
+        var rn = noise_next_sample(rumble_noise);
+        var rumble = f64_mul(f64_mul(f64_mul(filter_biquad_process_sample(rumble_filter, rn), rumble_env), break_amp),
+                             F64_HALF);
+        var cn = noise_next_sample(crash_noise);
+        var crash = f64_mul(f64_mul(filter_biquad_process_sample(crash_filter, cn), crash_env), break_amp);
+        var wn = noise_next_sample(wash_noise);
+        var wash = f64_mul(f64_mul(filter_biquad_process_sample(wash_filter, wn), wash_env), wash_amp);
+        var sample = f64_add(f64_add(rumble, crash), wash);
+
+        sample = f64_mul(sample, volume);
+        sample = garjan_dcblocker_process(dc, sample);
+        vec_set(output, i, sample);
+        i = i + 1;
+    }
+
+    # Persist the advanced phase; advance the sample cursor.
+    Surf_set_wave_phase(self, wave_phase);
+    Surf_set_sample_position(self, Surf_sample_position(self) + num);
+    return 0;
+}
+
+# Synthesize `duration` seconds of surf audio into a fresh vec. Returns the vec
+# pointer, or a negative code on invalid duration.
+#must_use
+fn surf_synthesize(self, duration) {
+    var e = garjan_validate_duration(duration);
+    if (garjan_is_err(e) == 1) { return e; }
+    var num = f64_to(f64_mul(Surf_sample_rate(self), duration));
+    var output = vec_new();
+    var i = 0;
+    while (i < num) {
+        vec_push(output, 0);
+        i = i + 1;
+    }
+    surf_process_block(self, output);
+    return output;
+}
+
+# ---- serde: snapshot live state -> SurfParams -> JSON, and back. ----
+#must_use
+fn surf_to_json(self, sb) {
+    var p = alloc(sizeof(SurfParams));
+    SurfParams_set_intensity(p, Surf_intensity(self));
+    SurfParams_set_sample_rate(p, Surf_sample_rate(self));
+    SurfParams_set_sample_position(p, Surf_sample_position(self));
+    SurfParams_set_wave_period_samples(p, Surf_wave_period_samples(self));
+    SurfParams_set_break_amp(p, Surf_break_amp(self));
+    SurfParams_set_wash_amp(p, Surf_wash_amp(self));
+    SurfParams_set_volume(p, Surf_volume(self));
+    SurfParams_set_wave_phase(p, Surf_wave_phase(self));
+    var rng = Surf_rng(self);
+    SurfParams_set_rng_state(p, Rng_state(rng));
+    SurfParams_set_rng_inc(p, Rng_inc(rng));
+    var dc = Surf_dc_blocker(self);
+    SurfParams_set_dcb_x_prev(p, DcBlocker_x_prev(dc));
+    SurfParams_set_dcb_y_prev(p, DcBlocker_y_prev(dc));
+    SurfParams_set_dcb_r(p, DcBlocker_r(dc));
+    return SurfParams_to_json(p, sb);
+}
+
+# Rebuild a Surf from JSON: restore scalars + rng + dc_blocker state, then
+# reconstruct the naad components fresh (matches Rust's skip+reconstruct).
+#must_use
+fn surf_from_json_str(json) {
+    var p = SurfParams_from_json_str(json);
+    var self = alloc(sizeof(Surf));
+    Surf_set_intensity(self, SurfParams_intensity(p));
+    Surf_set_sample_rate(self, SurfParams_sample_rate(p));
+    Surf_set_sample_position(self, SurfParams_sample_position(p));
+    Surf_set_wave_period_samples(self, SurfParams_wave_period_samples(p));
+    Surf_set_break_amp(self, SurfParams_break_amp(p));
+    Surf_set_wash_amp(self, SurfParams_wash_amp(p));
+    Surf_set_volume(self, SurfParams_volume(p));
+    Surf_set_wave_phase(self, SurfParams_wave_phase(p));
+
+    var rng = rng_new(0);
+    Rng_set_state(rng, SurfParams_rng_state(p));
+    Rng_set_inc(rng, SurfParams_rng_inc(p));
+    Surf_set_rng(self, rng);
+
+    var dc = garjan_dcblocker_new(SurfParams_sample_rate(p));
+    DcBlocker_set_x_prev(dc, SurfParams_dcb_x_prev(p));
+    DcBlocker_set_y_prev(dc, SurfParams_dcb_y_prev(p));
+    DcBlocker_set_r(dc, SurfParams_dcb_r(p));
+    Surf_set_dc_blocker(self, dc);
+
+    surf_build_naad(self);
+    return self;
+}

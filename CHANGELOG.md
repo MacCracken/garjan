@@ -5,6 +5,46 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] — Cyrius port
+
+Full port of the crate from Rust to the **Cyrius** language (AGNOS ecosystem
+migration). The original Rust sources are preserved under `rust-old/`; the
+Cyrius port lives in `src/*.cyr` with per-module parity suites in `tests/*.tcyr`.
+Build with `cyrius build src/main.cyr build/garjan`; test with `cyrius test`.
+
+### Ported
+- **32 modules, 6,186 lines of Rust → Cyrius.** Foundations (error, dsp, rng,
+  lod, material, modal, contact, aero, creature, voice) + all 19 synthesizers
+  (fire, weather [thunder/rain/wind], water, precipitation, bubble, impact,
+  footstep, friction, creak, rolling, foliage, whoosh, whistle, cloth, insect,
+  wingflap, underwater, surf, texture) + `builder` + `bridge`.
+- **`f32` → `f64` throughout** (naad/hisab are f64-only); all float ops are
+  explicit calls (`f64_add`/`f64_mul`/…). Enums → module-prefixed int constants.
+- **PCG32 RNG ported bit-exactly** — verified against the Rust sequence, so all
+  stochastic synthesis is deterministic across the port.
+- **`Result<T>` → integer error codes** (`GARJAN_OK` / negative `GARJAN_ERR_*`);
+  constructors return a heap pointer or a negative code.
+
+### Wired (deliberately kept, unlike the naad port which dropped them)
+- **Logging via [sakshi](https://github.com/MacCracken/sakshi)** — `src/logging.cyr`
+  wraps `sakshi_warn`/`info`/`debug`/`error`/`fatal`; the `dsp` validators emit
+  through it (the Rust `tracing::warn!` sites). Always compiled, runtime-gated by
+  `sakshi_set_level`.
+- **Serde via `#derive(Serialize)`** (Cyrius 6.3.44) — full `to_json`/`from_json`
+  roundtrip on every enum, param/config struct, all 19 synthesizers (through a
+  flattened `*Params` slice with naad components reconstructed on deserialize,
+  mirroring Rust's `#[serde(skip)]`), the builders, and `VoicePool` (hand-rolled
+  vec-of-`VoiceSlot` codec). `ModalBank`/`Exciter` are reconstructable DSP
+  components, rebuilt from their inputs rather than serialized.
+
+### Dependencies
+- naad 2.1.0, hisab 2.6.7, goonj 2.0.0, sakshi 2.4.3 (git-pinned in `cyrius.cyml`).
+  garjan consumes naad's noise/filter/LFO surface from the monolithic dist bundle.
+
+### Deferred
+- `integration/soorat.rs` (visualization data, feature-gated `soorat-compat`,
+  no Cyrius consumer yet) remains in `rust-old/`; port it once soorat lands.
+
 ## [1.1.0]
 
 ### Added

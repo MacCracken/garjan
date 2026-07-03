@@ -1,0 +1,61 @@
+# surf.tcyr -- parity tests for src/surf.cyr (naad synth + serde).
+include "src/error.cyr"
+include "src/logging.cyr"
+include "src/dsp.cyr"
+include "src/rng.cyr"
+include "src/lod.cyr"
+include "src/material.cyr"
+include "src/modal.cyr"
+include "src/contact.cyr"
+include "src/aero.cyr"
+include "src/creature.cyr"
+include "src/surf.cyr"
+
+fn main() {
+    alloc_init();
+
+    test_group("surf_new");
+    var s = surf_new(SURF_MODERATE, f64_from(44100));
+    assert(garjan_is_err(s) == 0, "surf_new ok");
+    assert(garjan_is_err(surf_new(SURF_MODERATE, 0)) == 1, "surf_new rejects sr=0");
+    # Moderate config: break_amp = 0.35, wash_amp = 0.2, period = 6s.
+    assert(f64_lt(f64_abs(f64_sub(Surf_break_amp(s), f64_div(f64_from(35), f64_from(100)))), GARJAN_EPSILON) == 1, "break_amp 0.35");
+    assert(f64_lt(f64_abs(f64_sub(Surf_wash_amp(s), f64_div(f64_from(2), f64_from(10)))), GARJAN_EPSILON) == 1, "wash_amp 0.2");
+    # wave_period_samples = 6 * 44100 = 264600.
+    assert_eq(Surf_wave_period_samples(s), 264600, "wave_period_samples 264600");
+
+    test_group("synthesize");
+    var buf = surf_synthesize(s, f64_div(f64_from(1), f64_from(10)));   # 0.1s
+    assert(garjan_is_err(buf) == 0, "synthesize ok");
+    assert_eq(vec_len(buf), 4410, "0.1s @ 44100 = 4410 samples");
+    var i = 0;
+    var allfinite = 1;
+    var energy = 0;
+    while (i < vec_len(buf)) {
+        var sm = vec_get(buf, i);
+        if (garjan_is_finite(sm) == 0) { allfinite = 0; }
+        energy = f64_add(energy, f64_abs(sm));
+        i = i + 1;
+    }
+    assert(allfinite == 1, "all surf samples finite");
+    assert(f64_gt(energy, 0) == 1, "surf produces sound (nonzero energy)");
+    assert(garjan_is_err(surf_synthesize(s, 0)) == 1, "synthesize rejects duration=0");
+
+    test_group("surf_serde");
+    var g = surf_new(SURF_HEAVY, f64_from(48000));
+    # advance state so rng/dc_blocker/wave_phase are non-default
+    surf_synthesize(g, f64_div(f64_from(1), f64_from(100)));
+    var sb = str_builder_new();
+    surf_to_json(g, sb);
+    var j = str_data(str_builder_build(sb));
+    var g2 = surf_from_json_str(j);
+    var sb2 = str_builder_new();
+    surf_to_json(g2, sb2);
+    assert(memeq(j, str_data(str_builder_build(sb2)), strlen(j)) == 1, "surf params json roundtrip idempotent");
+    # restored synth resumes the SAME rng sequence
+    assert_eq(rng_next_u32(Surf_rng(g)), rng_next_u32(Surf_rng(g2)), "restored surf resumes rng");
+
+    return assert_summary();
+}
+var ec = main();
+syscall(60, ec);

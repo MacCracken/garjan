@@ -1,0 +1,52 @@
+# bridge.tcyr -- parity tests for src/bridge.cyr.
+include "src/error.cyr"
+include "src/logging.cyr"
+include "src/dsp.cyr"
+include "src/rng.cyr"
+include "src/aero.cyr"
+include "src/weather.cyr"
+include "src/bridge.cyr"
+
+fn approx(a, b) { return f64_lt(f64_abs(f64_sub(a, b)), f64_div(f64_from(1), f64_from(1000))); }
+
+fn main() {
+    alloc_init();
+
+    test_group("rain_intensity_from_rate");
+    assert_eq(bridge_rain_intensity_from_rate(0), BRIDGE_NO_RAIN, "0 -> none");
+    assert_eq(bridge_rain_intensity_from_rate(F64_ONE), RAIN_INTENSITY_LIGHT, "1.0 -> light");
+    assert_eq(bridge_rain_intensity_from_rate(f64_from(5)), RAIN_INTENSITY_MODERATE, "5 -> moderate");
+    assert_eq(bridge_rain_intensity_from_rate(f64_from(10)), RAIN_INTENSITY_HEAVY, "10 -> heavy");
+    assert_eq(bridge_rain_intensity_from_rate(f64_from(100)), RAIN_INTENSITY_TORRENTIAL, "100 -> torrential");
+
+    test_group("wind");
+    assert(approx(bridge_wind_from_beaufort(12), F64_ONE) == 1, "beaufort 12 -> 1.0");
+    assert(approx(bridge_wind_from_beaufort(6), F64_HALF) == 1, "beaufort 6 -> 0.5");
+    assert(approx(bridge_wind_speed_normalized(f64_from(20)), F64_ONE) == 1, "20m/s -> 1.0");
+
+    test_group("thunder_fire");
+    # 3 * (331.3 + 0.606*20) = 3 * 343.42 = 1030.26
+    assert(approx(bridge_thunder_distance_from_flash(f64_from(3), f64_from(20)), f64_div(f64_from(103026), f64_from(100))) == 1, "flash->distance");
+    # (1200-500)/2500 = 0.28
+    assert(approx(bridge_fire_intensity_from_temperature(f64_from(1200)), f64_div(f64_from(28), f64_from(100))) == 1, "1200K -> 0.28");
+
+    test_group("whoosh_and_season");
+    assert_eq(bridge_whoosh_type_from_reynolds(f64_from(600000)), WHOOSH_VEHICLE, "turbulent -> vehicle");
+    assert_eq(bridge_whoosh_type_from_reynolds(f64_from(100)), WHOOSH_PROJECTILE, "laminar -> projectile");
+    assert_eq(bridge_is_bare_season(f64_div(f64_from(5), f64_from(100))), 1, "0.05 -> bare");
+    assert_eq(bridge_is_bare_season(F64_HALF), 0, "0.5 -> not bare");
+
+    test_group("threat_level");
+    var d = 0; var w = 0; var r = 0;
+    bridge_weather_from_threat_level(3, &d, &w, &r);
+    assert(approx(d, f64_from(1500)) == 1, "level3 dist 1500");
+    assert(approx(w, f64_from(14)) == 1, "level3 wind 14");
+    assert_eq(r, RAIN_INTENSITY_HEAVY, "level3 rain heavy");
+    var d0 = 0; var w0 = 0; var r0 = 0;
+    bridge_weather_from_threat_level(0, &d0, &w0, &r0);
+    assert_eq(r0, BRIDGE_NO_RAIN, "level0 no rain");
+
+    return assert_summary();
+}
+var ec = main();
+syscall(60, ec);

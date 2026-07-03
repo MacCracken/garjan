@@ -1,1 +1,27 @@
-/target
+# Cyrius build output (regenerated per-build; never committed)
+build/
+
+# Claude Code state + transient workflow worktrees
+.claude/
+
+# Core dumps
+*.core
+
+# Rust-era reference tree (rust-old/) build + lock artifacts.
+# Unanchored so they also match rust-old/target, rust-old/Cargo.lock, etc.
+# after `cyrius port` relocated the Rust project.
+target/
+Cargo.lock
+**/*.rs.bk
+*.pdb
+
+# Coverage / data dumps
+coverage/
+*.csv
+
+# Editors / OS / env
+.env
+.DS_Store
+*.swp
+*.swo
+*~

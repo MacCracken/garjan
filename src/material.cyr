@@ -1,0 +1,99 @@
+# material.cyr -- surface material acoustic properties.
+#
+# Ports rust-old/src/material.rs (Material enum + MaterialProperties +
+# MaterialModeConfig + mode_config/properties). f32 -> f64. Structs are typed
+# for #derive(Serialize). `pattern` is a MODE_PATTERN_* int (from modal.cyr).
+# Requires: modal.cyr (MODE_PATTERN_* constants). Constants use f64_from /
+# f64_div for readability.
+
+# ---- Material ----
+var MATERIAL_METAL   = 0;
+var MATERIAL_WOOD    = 1;
+var MATERIAL_STONE   = 2;
+var MATERIAL_EARTH   = 3;
+var MATERIAL_GLASS   = 4;
+var MATERIAL_FABRIC  = 5;
+var MATERIAL_LEAF    = 6;
+var MATERIAL_WATER   = 7;
+var MATERIAL_PLASTIC = 8;
+var MATERIAL_CERAMIC = 9;
+
+# ---- MaterialProperties (resonance Hz, bandwidth Hz, decay s, brightness 0-1, transient 0-1) ----
+#derive(accessors)
+#derive(Serialize)
+struct MaterialProperties {
+    resonance: f64;
+    bandwidth: f64;
+    decay: f64;
+    brightness: f64;
+    transient: f64;
+}
+
+#must_use
+fn material_properties_new(resonance, bandwidth, decay, brightness, transient) {
+    var p = alloc(sizeof(MaterialProperties));
+    MaterialProperties_set_resonance(p, resonance);
+    MaterialProperties_set_bandwidth(p, bandwidth);
+    MaterialProperties_set_decay(p, decay);
+    MaterialProperties_set_brightness(p, brightness);
+    MaterialProperties_set_transient(p, transient);
+    return p;
+}
+
+# ---- MaterialModeConfig (pattern MODE_PATTERN_*, mode_count, damping_factor) ----
+#derive(accessors)
+#derive(Serialize)
+struct MaterialModeConfig {
+    pattern: i64;
+    mode_count: i64;
+    damping_factor: f64;
+}
+
+#must_use
+fn material_mode_config_new(pattern, mode_count, damping_factor) {
+    var c = alloc(sizeof(MaterialModeConfig));
+    MaterialModeConfig_set_pattern(c, pattern);
+    MaterialModeConfig_set_mode_count(c, mode_count);
+    MaterialModeConfig_set_damping_factor(c, damping_factor);
+    return c;
+}
+
+# Modal synthesis configuration for a material.
+#must_use
+fn material_mode_config(m) {
+    if (m == MATERIAL_METAL)   { return material_mode_config_new(MODE_PATTERN_PLATE,        12, garjan_frac(5, 100)); }
+    if (m == MATERIAL_WOOD)    { return material_mode_config_new(MODE_PATTERN_BEAM,          8, garjan_frac(8, 10));  }
+    if (m == MATERIAL_STONE)   { return material_mode_config_new(MODE_PATTERN_PLATE,         6, f64_from(3));         }
+    if (m == MATERIAL_EARTH)   { return material_mode_config_new(MODE_PATTERN_DAMPED,        4, f64_from(10));        }
+    if (m == MATERIAL_GLASS)   { return material_mode_config_new(MODE_PATTERN_PLATE,        10, garjan_frac(1, 10));  }
+    if (m == MATERIAL_FABRIC)  { return material_mode_config_new(MODE_PATTERN_DAMPED,        3, f64_from(15));        }
+    if (m == MATERIAL_LEAF)    { return material_mode_config_new(MODE_PATTERN_BEAM,          5, f64_from(5));         }
+    if (m == MATERIAL_WATER)   { return material_mode_config_new(MODE_PATTERN_HARMONIC,      6, f64_from(2));         }
+    if (m == MATERIAL_PLASTIC) { return material_mode_config_new(MODE_PATTERN_STIFF_STRING,  6, garjan_frac(15, 10)); }
+    return material_mode_config_new(MODE_PATTERN_PLATE, 8, garjan_frac(3, 10));   # Ceramic
+}
+
+# Default acoustic properties for a material.
+#must_use
+fn material_properties(m) {
+    if (m == MATERIAL_METAL)   { return material_properties_new(f64_from(2500), f64_from(200),  garjan_frac(15, 10),
+                                                                garjan_frac(9, 10),   garjan_frac(7, 10)); }
+    if (m == MATERIAL_WOOD)    { return material_properties_new(f64_from(800),  f64_from(400),  garjan_frac(3, 10),
+                                                                garjan_frac(5, 10),   garjan_frac(6, 10)); }
+    if (m == MATERIAL_STONE)   { return material_properties_new(f64_from(3000), f64_from(800),  garjan_frac(5, 100),
+                                                                garjan_frac(8, 10),   garjan_frac(9, 10)); }
+    if (m == MATERIAL_EARTH)   { return material_properties_new(f64_from(200),  f64_from(300),  garjan_frac(2, 100),
+                                                                garjan_frac(1, 10),   garjan_frac(4, 10)); }
+    if (m == MATERIAL_GLASS)   { return material_properties_new(f64_from(4000), f64_from(150),  garjan_frac(8, 10),
+                                                                garjan_frac(95, 100), F64_ONE); }
+    if (m == MATERIAL_FABRIC)  { return material_properties_new(f64_from(300),  f64_from(500),  garjan_frac(1, 100),
+                                                                garjan_frac(1, 10),   garjan_frac(2, 10)); }
+    if (m == MATERIAL_LEAF)    { return material_properties_new(f64_from(1500), f64_from(1000), garjan_frac(2, 100),
+                                                                garjan_frac(6, 10),   garjan_frac(5, 10)); }
+    if (m == MATERIAL_WATER)   { return material_properties_new(f64_from(600),  f64_from(400),  garjan_frac(1, 10),
+                                                                garjan_frac(4, 10),   garjan_frac(3, 10)); }
+    if (m == MATERIAL_PLASTIC) { return material_properties_new(f64_from(1800), f64_from(600),  garjan_frac(15, 100),
+                                                                garjan_frac(5, 10),   garjan_frac(6, 10)); }
+    return material_properties_new(f64_from(1200), f64_from(300), garjan_frac(4, 10), garjan_frac(7, 10),
+                                   garjan_frac(7, 10));   # Ceramic
+}

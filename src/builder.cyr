@@ -1,0 +1,110 @@
+# builder.cyr -- fluent builders for the multi-parameter synthesizers.
+#
+# Ports rust-old/src/builder.rs (PrecipitationBuilder, FootstepBuilder,
+# FrictionBuilder). Fluent setters mutate self and return the pointer. build()
+# calls the synth constructor and returns its pointer or a negative code.
+# Builders are all-scalar/enum -> #derive(Serialize). Requires: precipitation,
+# footstep, friction synths + contact (TERRAIN_*/MOVEMENT_*/FRICTION_*) +
+# material (MATERIAL_*).
+
+# ---- PrecipitationBuilder ----
+#derive(accessors)
+#derive(Serialize)
+struct PrecipitationBuilder {
+    sample_rate: f64;
+    precip_type: i64;
+    stone_size: i64;
+    surface: i64;
+}
+
+# Defaults: Hail, Medium, Gravel.
+#must_use
+fn precipitation_builder_new(sample_rate) {
+    var b = alloc(sizeof(PrecipitationBuilder));
+    PrecipitationBuilder_set_sample_rate(b, sample_rate);
+    PrecipitationBuilder_set_precip_type(b, PRECIP_HAIL);
+    PrecipitationBuilder_set_stone_size(b, STONE_MEDIUM);
+    PrecipitationBuilder_set_surface(b, TERRAIN_GRAVEL);
+    return b;
+}
+
+#must_use
+fn precipitation_builder_precip_type(b, t) { PrecipitationBuilder_set_precip_type(b, t); return b; }
+#must_use
+fn precipitation_builder_stone_size(b, s) { PrecipitationBuilder_set_stone_size(b, s); return b; }
+#must_use
+fn precipitation_builder_surface(b, t) { PrecipitationBuilder_set_surface(b, t); return b; }
+
+# Build the Precipitation synth (pointer or negative code).
+#must_use
+fn precipitation_builder_build(b) {
+    return precipitation_new(
+        PrecipitationBuilder_precip_type(b),
+        PrecipitationBuilder_stone_size(b),
+        PrecipitationBuilder_surface(b),
+        PrecipitationBuilder_sample_rate(b));
+}
+
+# ---- FootstepBuilder ----
+#derive(accessors)
+#derive(Serialize)
+struct FootstepBuilder {
+    sample_rate: f64;
+    terrain: i64;
+    movement: i64;
+}
+
+# Defaults: Gravel, Walk.
+#must_use
+fn footstep_builder_new(sample_rate) {
+    var b = alloc(sizeof(FootstepBuilder));
+    FootstepBuilder_set_sample_rate(b, sample_rate);
+    FootstepBuilder_set_terrain(b, TERRAIN_GRAVEL);
+    FootstepBuilder_set_movement(b, MOVEMENT_WALK);
+    return b;
+}
+
+#must_use
+fn footstep_builder_terrain(b, t) { FootstepBuilder_set_terrain(b, t); return b; }
+#must_use
+fn footstep_builder_movement(b, m) { FootstepBuilder_set_movement(b, m); return b; }
+
+#must_use
+fn footstep_builder_build(b) {
+    return footstep_new(
+        FootstepBuilder_terrain(b),
+        FootstepBuilder_movement(b),
+        FootstepBuilder_sample_rate(b));
+}
+
+# ---- FrictionBuilder ----
+#derive(accessors)
+#derive(Serialize)
+struct FrictionBuilder {
+    sample_rate: f64;
+    friction_type: i64;
+    surface: i64;
+}
+
+# Defaults: Scrape, Wood.
+#must_use
+fn friction_builder_new(sample_rate) {
+    var b = alloc(sizeof(FrictionBuilder));
+    FrictionBuilder_set_sample_rate(b, sample_rate);
+    FrictionBuilder_set_friction_type(b, FRICTION_SCRAPE);
+    FrictionBuilder_set_surface(b, MATERIAL_WOOD);
+    return b;
+}
+
+#must_use
+fn friction_builder_friction_type(b, t) { FrictionBuilder_set_friction_type(b, t); return b; }
+#must_use
+fn friction_builder_surface(b, m) { FrictionBuilder_set_surface(b, m); return b; }
+
+#must_use
+fn friction_builder_build(b) {
+    return friction_new(
+        FrictionBuilder_friction_type(b),
+        FrictionBuilder_surface(b),
+        FrictionBuilder_sample_rate(b));
+}

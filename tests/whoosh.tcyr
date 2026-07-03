@@ -1,0 +1,68 @@
+# whoosh.tcyr -- parity tests for src/whoosh.cyr (naad synth + serde).
+include "src/error.cyr"
+include "src/logging.cyr"
+include "src/dsp.cyr"
+include "src/rng.cyr"
+include "src/lod.cyr"
+include "src/material.cyr"
+include "src/modal.cyr"
+include "src/contact.cyr"
+include "src/aero.cyr"
+include "src/creature.cyr"
+include "src/whoosh.cyr"
+
+fn main() {
+    alloc_init();
+
+    test_group("whoosh_new");
+    var w = whoosh_new(WHOOSH_SWING, f64_from(44100));
+    assert(garjan_is_err(w) == 0, "whoosh_new ok");
+    assert(garjan_is_err(whoosh_new(WHOOSH_SWING, 0)) == 1, "whoosh_new rejects sr=0");
+    # SWING config: duration 0.3, brightness 0.7, low_freq 0.2.
+    # envelope_samples = 0.3 * 44100 = 13230
+    assert_eq(Whoosh_envelope_samples(w), 13230, "envelope_samples 13230");
+    assert(f64_lt(f64_abs(f64_sub(Whoosh_brightness(w), f64_div(f64_from(7), f64_from(10)))), GARJAN_EPSILON) == 1, "brightness 0.7");
+    # default speed = 0.5
+    assert(f64_lt(f64_abs(f64_sub(Whoosh_speed(w), F64_HALF)), GARJAN_EPSILON) == 1, "default speed 0.5");
+
+    test_group("synthesize");
+    var buf = whoosh_synthesize(w, f64_div(f64_from(1), f64_from(10)));   # 0.1s
+    assert(garjan_is_err(buf) == 0, "synthesize ok");
+    assert_eq(vec_len(buf), 4410, "0.1s @ 44100 = 4410 samples");
+    var i = 0;
+    var allfinite = 1;
+    var energy = 0;
+    while (i < vec_len(buf)) {
+        var s = vec_get(buf, i);
+        if (garjan_is_finite(s) == 0) { allfinite = 0; }
+        energy = f64_add(energy, f64_abs(s));
+        i = i + 1;
+    }
+    assert(allfinite == 1, "all whoosh samples finite");
+    assert(f64_gt(energy, 0) == 1, "whoosh produces sound (nonzero energy)");
+    assert(garjan_is_err(whoosh_synthesize(w, 0)) == 1, "synthesize rejects duration=0");
+
+    test_group("whoosh_set_speed");
+    whoosh_set_speed(w, f64_from(5));
+    assert(f64_lt(f64_abs(f64_sub(Whoosh_speed(w), F64_ONE)), GARJAN_EPSILON) == 1, "set_speed clamps to 1.0");
+    whoosh_set_speed(w, f64_neg(F64_ONE));
+    assert(f64_lt(f64_abs(Whoosh_speed(w)), GARJAN_EPSILON) == 1, "set_speed clamps to 0.0");
+
+    test_group("whoosh_serde");
+    var g = whoosh_new(WHOOSH_PROJECTILE, f64_from(48000));
+    # advance state so rng/dc_blocker/active/trigger_position are non-default
+    whoosh_synthesize(g, f64_div(f64_from(1), f64_from(100)));
+    var sb = str_builder_new();
+    whoosh_to_json(g, sb);
+    var j = str_data(str_builder_build(sb));
+    var g2 = whoosh_from_json_str(j);
+    var sb2 = str_builder_new();
+    whoosh_to_json(g2, sb2);
+    assert(memeq(j, str_data(str_builder_build(sb2)), strlen(j)) == 1, "whoosh params json roundtrip idempotent");
+    # restored synth resumes the SAME rng sequence
+    assert_eq(rng_next_u32(Whoosh_rng(g)), rng_next_u32(Whoosh_rng(g2)), "restored whoosh resumes rng");
+
+    return assert_summary();
+}
+var ec = main();
+syscall(60, ec);

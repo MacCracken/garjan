@@ -1,0 +1,222 @@
+# whistle.cyr -- wind whistle synthesis: air through gaps, pipes, bottles, wires.
+#
+# Ports rust-old/src/whistle.rs. Models the tonal sound of wind passing through
+# or over openings; each WhistleSource has a characteristic resonant frequency
+# and bandwidth. Wind speed controls amplitude and adds slight pitch modulation.
+#
+# The Cyrius port always uses the naad backend (no feature flags), so it ports
+# process_block's naad path and drops the sine-oscillator fallback. f32 -> f64.
+# Result<Self> -> pointer / negative GARJAN_* code. The Rust naad components
+# (noise_gen / resonance_filter / pitch_lfo) are reconstructed on deserialize;
+# rng + dc_blocker state ARE serialized (via the flattened WhistleParams below).
+# Requires: error, logging, dsp, rng, aero foundations + the naad bundle
+# (noise_new/noise_next_sample, filter_svf_new/filter_svf_set_params/
+# filter_svf_process_sample + SvfOutput_band_pass, modulation_lfo_new/
+# modulation_lfo_next_value).
+
+# ---- WhistleParams: the serializable slice (exactly Rust's non-naad fields,
+# with rng + dc_blocker FLATTENED so #derive(Serialize)'s single-pass
+# from_json_str works). Synced to/from the live Whistle on (de)serialize.
+# `source` is a WHISTLE_* int tag. ----
+#derive(accessors)
+#derive(Serialize)
+struct WhistleParams {
+    source: i64;
+    sample_rate: f64;
+    sample_position: i64;
+    base_freq: f64;
+    bandwidth: f64;
+    noise_mix: f64;
+    wind_speed: f64;
+    rng_state: i64;
+    rng_inc: i64;
+    dcb_x_prev: f64;
+    dcb_y_prev: f64;
+    dcb_r: f64;
+}
+
+# ---- Whistle: live synth = scalars + live rng/dc_blocker + naad component ptrs. ----
+#derive(accessors)
+struct Whistle {
+    source;
+    sample_rate;
+    sample_position;
+    base_freq;
+    bandwidth;
+    noise_mix;
+    wind_speed;
+    rng;
+    dc_blocker;
+    noise_gen;
+    resonance_filter;
+    pitch_lfo;
+}
+
+# Build/refresh the naad components from sample_rate + source params. Shared by
+# whistle_new and whistle_from_json_str. Returns GARJAN_OK or a negative code
+# if a naad constructor rejects its params. The resonance filter Q mirrors the
+# Rust: (base_freq / bandwidth.max(1.0)).clamp(0.5, 50.0).
+fn whistle_build_naad(self) {
+    var sr = Whistle_sample_rate(self);
+    var base_freq = Whistle_base_freq(self);
+    var bandwidth = Whistle_bandwidth(self);
+
+    var q = f64_clamp(f64_div(base_freq, f64_max(bandwidth, F64_ONE)), F64_HALF, f64_from(50));
+    var rf = filter_svf_new(base_freq, q, sr);
+    if (garjan_is_err(rf) == 1) { return garjan_map_naad_error(rf); }
+
+    # pitch LFO: sine, 3.0 Hz.
+    var lfo = modulation_lfo_new(MODULATION_LFO_SINE, f64_from(3), sr);
+    if (garjan_is_err(lfo) == 1) { return garjan_map_naad_error(lfo); }
+
+    Whistle_set_resonance_filter(self, rf);
+    Whistle_set_pitch_lfo(self, lfo);
+    Whistle_set_noise_gen(self, noise_new(NOISE_WHITE, 2222));
+    return GARJAN_OK;
+}
+
+# Creates a new wind whistle synthesizer. Returns a pointer or a negative code.
+#must_use
+fn whistle_new(source, sample_rate) {
+    var e = garjan_validate_sample_rate(sample_rate);
+    if (garjan_is_err(e) == 1) { return e; }
+
+    var cfg = aero_whistle_config(source);
+
+    var self = alloc(sizeof(Whistle));
+    Whistle_set_source(self, source);
+    Whistle_set_sample_rate(self, sample_rate);
+    Whistle_set_sample_position(self, 0);
+    Whistle_set_base_freq(self, WhistleConfig_base_freq(cfg));
+    Whistle_set_bandwidth(self, WhistleConfig_bandwidth(cfg));
+    Whistle_set_noise_mix(self, WhistleConfig_noise_mix(cfg));
+    Whistle_set_wind_speed(self, 0);
+    Whistle_set_rng(self, rng_new(2222));
+    Whistle_set_dc_blocker(self, garjan_dcblocker_new(sample_rate));
+    var b = whistle_build_naad(self);
+    if (garjan_is_err(b) == 1) { return b; }
+    return self;
+}
+
+# Sets the wind speed (0.0 = calm/silent, 1.0 = strong). Clamped to [0,1].
+fn whistle_set_wind_speed(self, speed) {
+    Whistle_set_wind_speed(self, f64_clamp(speed, 0, F64_ONE));
+    return 0;
+}
+
+# Fills `output` (a vec of f64) with whistle audio (streaming). Ports
+# process_block's naad path: per-sample LFO wobble -> retune the SVF ->
+# band-pass filtered white noise blended with broadband noise -> DC-block.
+fn whistle_process_block(self, output) {
+    var num = vec_len(output);
+    var noise_gen = Whistle_noise_gen(self);
+    var resonance_filter = Whistle_resonance_filter(self);
+    var pitch_lfo = Whistle_pitch_lfo(self);
+    var dc = Whistle_dc_blocker(self);
+    var base_freq = Whistle_base_freq(self);
+    var bandwidth = Whistle_bandwidth(self);
+    var noise_mix = Whistle_noise_mix(self);
+    var wind_speed = Whistle_wind_speed(self);
+    var sr = Whistle_sample_rate(self);
+
+    # Constant per-block scalars.
+    var wobble_scale = f64_div(f64_from(5), f64_from(100));   # 0.05
+    var broad_scale = f64_div(f64_from(1), f64_from(10));     # 0.1
+    var res_scale = f64_div(f64_from(4), f64_from(10));       # 0.4
+    var freq_lo = f64_from(20);
+    var freq_hi = f64_mul(sr, f64_div(f64_from(45), f64_from(100)));   # sr*0.45
+    var q = f64_clamp(f64_div(base_freq, f64_max(bandwidth, F64_ONE)), F64_HALF, f64_from(50));
+    var silence_threshold = f64_div(f64_from(1), f64_from(1000));      # 0.001
+
+    var i = 0;
+    while (i < num) {
+        if (f64_lt(wind_speed, silence_threshold) == 1) {
+            vec_set(output, i, 0);
+            garjan_dcblocker_process(dc, 0);
+        } else {
+            var wobble = f64_mul(f64_mul(modulation_lfo_next_value(pitch_lfo), wind_speed), wobble_scale);
+            var modulated_freq = f64_mul(base_freq, f64_add(F64_ONE, wobble));
+            var clamped_freq = f64_clamp(modulated_freq, freq_lo, freq_hi);
+            filter_svf_set_params(resonance_filter, clamped_freq, q);
+
+            var noise = noise_next_sample(noise_gen);
+            var svf_out = filter_svf_process_sample(resonance_filter, noise);
+            var resonant = SvfOutput_band_pass(svf_out);
+
+            var broad_noise = f64_mul(f64_mul(f64_mul(noise, noise_mix), wind_speed), broad_scale);
+            var sample = f64_add(f64_mul(f64_mul(resonant, wind_speed), res_scale), broad_noise);
+            vec_set(output, i, garjan_dcblocker_process(dc, sample));
+        }
+        i = i + 1;
+    }
+
+    Whistle_set_sample_position(self, Whistle_sample_position(self) + num);
+    return 0;
+}
+
+# Synthesize `duration` seconds of whistle audio into a fresh vec. Returns the
+# vec pointer, or a negative code on invalid duration.
+#must_use
+fn whistle_synthesize(self, duration) {
+    var e = garjan_validate_duration(duration);
+    if (garjan_is_err(e) == 1) { return e; }
+    var num = f64_to(f64_mul(Whistle_sample_rate(self), duration));
+    var output = vec_new();
+    var i = 0;
+    while (i < num) {
+        vec_push(output, 0);
+        i = i + 1;
+    }
+    whistle_process_block(self, output);
+    return output;
+}
+
+# ---- serde: snapshot live state -> WhistleParams -> JSON, and back. ----
+#must_use
+fn whistle_to_json(self, sb) {
+    var p = alloc(sizeof(WhistleParams));
+    WhistleParams_set_source(p, Whistle_source(self));
+    WhistleParams_set_sample_rate(p, Whistle_sample_rate(self));
+    WhistleParams_set_sample_position(p, Whistle_sample_position(self));
+    WhistleParams_set_base_freq(p, Whistle_base_freq(self));
+    WhistleParams_set_bandwidth(p, Whistle_bandwidth(self));
+    WhistleParams_set_noise_mix(p, Whistle_noise_mix(self));
+    WhistleParams_set_wind_speed(p, Whistle_wind_speed(self));
+    var rng = Whistle_rng(self);
+    WhistleParams_set_rng_state(p, Rng_state(rng));
+    WhistleParams_set_rng_inc(p, Rng_inc(rng));
+    var dc = Whistle_dc_blocker(self);
+    WhistleParams_set_dcb_x_prev(p, DcBlocker_x_prev(dc));
+    WhistleParams_set_dcb_y_prev(p, DcBlocker_y_prev(dc));
+    WhistleParams_set_dcb_r(p, DcBlocker_r(dc));
+    return WhistleParams_to_json(p, sb);
+}
+
+# Rebuild a Whistle from JSON: restore scalars + rng + dc_blocker state, then
+# reconstruct the naad components fresh (matches Rust's cfg+reconstruct).
+#must_use
+fn whistle_from_json_str(json) {
+    var p = WhistleParams_from_json_str(json);
+    var self = alloc(sizeof(Whistle));
+    Whistle_set_source(self, WhistleParams_source(p));
+    Whistle_set_sample_rate(self, WhistleParams_sample_rate(p));
+    Whistle_set_sample_position(self, WhistleParams_sample_position(p));
+    Whistle_set_base_freq(self, WhistleParams_base_freq(p));
+    Whistle_set_bandwidth(self, WhistleParams_bandwidth(p));
+    Whistle_set_noise_mix(self, WhistleParams_noise_mix(p));
+    Whistle_set_wind_speed(self, WhistleParams_wind_speed(p));
+
+    var rng = rng_new(0);
+    Rng_set_state(rng, WhistleParams_rng_state(p));
+    Rng_set_inc(rng, WhistleParams_rng_inc(p));
+    Whistle_set_rng(self, rng);
+
+    var dc = garjan_dcblocker_new(WhistleParams_sample_rate(p));
+    DcBlocker_set_x_prev(dc, WhistleParams_dcb_x_prev(p));
+    DcBlocker_set_y_prev(dc, WhistleParams_dcb_y_prev(p));
+    DcBlocker_set_r(dc, WhistleParams_dcb_r(p));
+    Whistle_set_dc_blocker(self, dc);
+
+    whistle_build_naad(self);
+    return self;
+}

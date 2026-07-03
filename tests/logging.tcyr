@@ -1,0 +1,16 @@
+# logging.tcyr -- smoke for src/logging.cyr (sakshi wiring).
+
+include "src/logging.cyr"
+
+fn main() {
+    alloc_init();
+    test_group("logging_smoke");
+    # Just prove the sakshi wrappers link and run without crashing.
+    garjan_log_info("garjan logging: info line");
+    garjan_log_warn("garjan logging: warn line");
+    assert(1, "logging wrappers linked and ran");
+    return assert_summary();
+}
+
+var exit_code = main();
+syscall(60, exit_code);

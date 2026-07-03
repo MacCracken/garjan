@@ -1,0 +1,327 @@
+# footstep.cyr -- footstep synthesis: terrain-aware step sequences.
+#
+# Ports rust-old/src/footstep.rs. Each step combines a terrain noise layer
+# (crunch/squish/clack) with optional modal resonance from the surface
+# material. The Cyrius port always uses the naad backend (no feature flags):
+# it ports the `#[cfg(feature="naad-backend")]` noise_gen + shape_filter path
+# and drops the rng-fallback generate_noise. f32 -> f64. Result<Self> ->
+# pointer / negative GARJAN_* code.
+#
+# serde: the Rust `#[serde(skip)]`-equivalent naad components (noise_gen,
+# shape_filter) plus the reconstructable Exciter / ModalBank are rebuilt on
+# deserialize via footstep_build_naad; rng + dc_blocker + all step-timing
+# scalars ARE serialized (via the flattened FootstepParams below). The main
+# Footstep.rng (seed 8888) is only consumed by fire_step's jitter draw, so
+# preserving its state preserves the step sequence.
+#
+# Requires: error, logging, dsp, rng, material, modal, contact foundations +
+# the naad bundle (noise_new/noise_next_sample,
+# filter_biquad_new/filter_biquad_process_sample).
+
+# ---- FootstepParams: the serializable slice (Rust's non-component fields,
+# with rng + dc_blocker FLATTENED so #derive(Serialize)'s single-pass
+# from_json_str works). Enum-valued fields (terrain/movement) are i64.
+# step_pending / noise_highpass are 0/1 ints. ----
+#derive(accessors)
+#derive(Serialize)
+struct FootstepParams {
+    terrain: i64;
+    movement: i64;
+    sample_rate: f64;
+    sample_position: i64;
+    base_step_interval: i64;
+    step_interval_samples: i64;
+    samples_since_last_step: i64;
+    step_force: f64;
+    step_pending: i64;
+    noise_filter_freq: f64;
+    noise_amplitude: f64;
+    noise_highpass: i64;
+    rng_state: i64;
+    rng_inc: i64;
+    dcb_x_prev: f64;
+    dcb_y_prev: f64;
+    dcb_r: f64;
+}
+
+# ---- Footstep: live synth = scalars + live rng/dc_blocker + Exciter +
+# ModalBank (0 when the terrain has no resonant material) + naad component
+# ptrs. ----
+#derive(accessors)
+struct Footstep {
+    terrain;
+    movement;
+    sample_rate;
+    rng;
+    dc_blocker;
+    sample_position;
+    base_step_interval;
+    step_interval_samples;
+    samples_since_last_step;
+    step_force;
+    step_pending;
+    modal_bank;
+    exciter;
+    noise_filter_freq;
+    noise_amplitude;
+    noise_highpass;
+    noise_gen;
+    shape_filter;
+}
+
+# Build/refresh the naad components (noise_gen + shape_filter) plus the
+# reconstructable Exciter and ModalBank from the current scalars. Shared by
+# footstep_new and footstep_from_json_str. Returns GARJAN_OK or a negative
+# code if a naad constructor rejects its params.
+fn footstep_build_naad(self) {
+    var sr = Footstep_sample_rate(self);
+    var terrain = Footstep_terrain(self);
+    var movement = Footstep_movement(self);
+
+    # Exciter: HalfSine for Sneak, NoiseBurst otherwise. duration = exc_dur*sr.
+    var mc = movement_config(movement);
+    var exc_dur = MovementConfig_excitation_duration(mc);
+    var exc_samples = f64_to(f64_mul(exc_dur, sr));
+    var force = MovementConfig_force(mc);
+    var exc_type = EXCITATION_NOISE_BURST;
+    if (movement == MOVEMENT_SNEAK) { exc_type = EXCITATION_HALF_SINE; }
+    Footstep_set_exciter(self, exciter_new(exc_type, exc_samples, force));
+
+    # Modal bank from the terrain's resonant material (0 = none).
+    var mat = terrain_resonant_material(terrain);
+    if (mat == CONTACT_NO_MATERIAL) {
+        Footstep_set_modal_bank(self, 0);
+    } else {
+        var props = material_properties(mat);
+        var mode_cfg = material_mode_config(mat);
+        var specs = generate_modes(props, MaterialModeConfig_pattern(mode_cfg),
+                                   MaterialModeConfig_mode_count(mode_cfg),
+                                   MaterialModeConfig_damping_factor(mode_cfg));
+        var bank = modal_bank_new(specs, sr);
+        if (garjan_is_err(bank) == 1) { return garjan_map_naad_error(bank); }
+        Footstep_set_modal_bank(self, bank);
+    }
+
+    # Noise generator: white/pink/brown per terrain config (seed 8888).
+    var noise_cfg = terrain_noise_config(terrain);
+    Footstep_set_noise_gen(self, noise_new(TerrainNoiseConfig_noise_type(noise_cfg), 8888));
+
+    # Shape filter: highpass or lowpass per config.
+    var ft = FILTER_LOWPASS;
+    if (TerrainNoiseConfig_highpass(noise_cfg) == 1) { ft = FILTER_HIGHPASS; }
+    var sf = filter_biquad_new(ft, sr, TerrainNoiseConfig_filter_freq(noise_cfg),
+                               TerrainNoiseConfig_filter_q(noise_cfg));
+    if (garjan_is_err(sf) == 1) { return garjan_map_naad_error(sf); }
+    Footstep_set_shape_filter(self, sf);
+    return GARJAN_OK;
+}
+
+# Creates a new footstep synthesizer. Returns a pointer or a negative code.
+#must_use
+fn footstep_new(terrain, movement, sample_rate) {
+    var e = garjan_validate_sample_rate(sample_rate);
+    if (garjan_is_err(e) == 1) { return e; }
+
+    var mc = movement_config(movement);
+    var interval = MovementConfig_step_interval(mc);
+    var force = MovementConfig_force(mc);
+    var step_interval_samples = 0;
+    if (f64_gt(interval, 0) == 1) {
+        step_interval_samples = f64_to(f64_mul(interval, sample_rate));
+    }
+
+    var noise_cfg = terrain_noise_config(terrain);
+
+    var self = alloc(sizeof(Footstep));
+    Footstep_set_terrain(self, terrain);
+    Footstep_set_movement(self, movement);
+    Footstep_set_sample_rate(self, sample_rate);
+    Footstep_set_rng(self, rng_new(8888));
+    Footstep_set_dc_blocker(self, garjan_dcblocker_new(sample_rate));
+    Footstep_set_sample_position(self, 0);
+    Footstep_set_base_step_interval(self, step_interval_samples);
+    Footstep_set_step_interval_samples(self, step_interval_samples);
+    # samples_since_last_step = step_interval_samples (trigger immediately)
+    Footstep_set_samples_since_last_step(self, step_interval_samples);
+    Footstep_set_step_force(self, force);
+    var pending = 0;
+    if (movement == MOVEMENT_JUMP_LAND) { pending = 1; }
+    Footstep_set_step_pending(self, pending);
+    Footstep_set_noise_filter_freq(self, TerrainNoiseConfig_filter_freq(noise_cfg));
+    Footstep_set_noise_amplitude(self, TerrainNoiseConfig_amplitude(noise_cfg));
+    Footstep_set_noise_highpass(self, TerrainNoiseConfig_highpass(noise_cfg));
+
+    var b = footstep_build_naad(self);
+    if (garjan_is_err(b) == 1) { return b; }
+    return self;
+}
+
+# Manually triggers a single footstep event (sets step_pending).
+fn footstep_trigger_step(self) {
+    Footstep_set_step_pending(self, 1);
+    return 0;
+}
+
+# fire_step: reset step counter, clear pending, trigger exciter, reset modal
+# bank, and apply jitter from base interval (prevents cumulative drift).
+fn footstep_fire_step(self) {
+    Footstep_set_samples_since_last_step(self, 0);
+    Footstep_set_step_pending(self, 0);
+    exciter_trigger(Footstep_exciter(self));
+    var bank = Footstep_modal_bank(self);
+    if (bank != 0) { modal_bank_reset(bank); }
+    var base = Footstep_base_step_interval(self);
+    if (base > 0) {
+        # jitter = 1.0 + rng.next_f32_range(-0.05, 0.05)
+        var span = f64_div(f64_from(5), f64_from(100));
+        var jitter = f64_add(F64_ONE, rng_next_f32_range(Footstep_rng(self), f64_neg(span), span));
+        Footstep_set_step_interval_samples(self, f64_to(f64_mul(f64_from(base), jitter)));
+    }
+    return 0;
+}
+
+# generate_noise: one raw noise sample through the shape filter (naad path).
+#inline
+#must_use
+fn footstep_generate_noise(self) {
+    var raw = noise_next_sample(Footstep_noise_gen(self));
+    return filter_biquad_process_sample(Footstep_shape_filter(self), raw);
+}
+
+# Fills `output` (a vec of f64) with footstep audio (streaming). Ports
+# process_block: per-sample step trigger check, excitation, noise-envelope
+# layer, modal resonance, mix, DC-block, advance position.
+fn footstep_process_block(self, output) {
+    var num = vec_len(output);
+    var exciter = Footstep_exciter(self);
+    var dc = Footstep_dc_blocker(self);
+    var sr = Footstep_sample_rate(self);
+    var step_force = Footstep_step_force(self);
+    var noise_amp = Footstep_noise_amplitude(self);
+
+    # noise-window length = (sample_rate * 0.03) as usize.
+    var window_f = f64_mul(sr, f64_div(f64_from(3), f64_from(100)));
+    var window = f64_to(window_f);
+    var neg5 = f64_neg(f64_from(5));
+    var mod03 = f64_div(f64_from(3), f64_from(10));
+
+    var i = 0;
+    while (i < num) {
+        # Check if a step should trigger.
+        var step_interval = Footstep_step_interval_samples(self);
+        var since = Footstep_samples_since_last_step(self);
+        var fire = 0;
+        if (Footstep_step_pending(self) == 1) {
+            fire = 1;
+        } elif (step_interval > 0) {
+            if (since >= step_interval) { fire = 1; }
+        }
+        if (fire == 1) { footstep_fire_step(self); }
+
+        # Generate excitation.
+        var exc = exciter_next_sample(exciter);
+
+        # Noise layer (terrain character): exp(-5*t) envelope over 0.03s window.
+        var cur_since = Footstep_samples_since_last_step(self);
+        var noise_env = 0;
+        if (cur_since < window) {
+            var t = f64_div(f64_from(cur_since), window_f);
+            noise_env = f64_exp(f64_mul(neg5, t));
+        }
+        var noise = f64_mul(f64_mul(footstep_generate_noise(self), noise_env), step_force);
+
+        # Modal resonance (or exc*0.5 when no resonant material).
+        var bank = Footstep_modal_bank(self);
+        var resonant = 0;
+        if (bank != 0) {
+            resonant = modal_bank_process_sample(bank, f64_add(exc, f64_mul(noise, mod03)));
+        } else {
+            resonant = f64_mul(exc, F64_HALF);
+        }
+
+        var s = f64_add(resonant, f64_mul(noise, noise_amp));
+        vec_set(output, i, garjan_dcblocker_process(dc, s));
+
+        Footstep_set_samples_since_last_step(self, cur_since + 1);
+        i = i + 1;
+    }
+    Footstep_set_sample_position(self, Footstep_sample_position(self) + num);
+    return 0;
+}
+
+# Synthesize `duration` seconds of footstep audio into a fresh vec. Returns
+# the vec pointer, or a negative code on invalid duration.
+#must_use
+fn footstep_synthesize(self, duration) {
+    var e = garjan_validate_duration(duration);
+    if (garjan_is_err(e) == 1) { return e; }
+    var num = f64_to(f64_mul(Footstep_sample_rate(self), duration));
+    var output = vec_new();
+    var i = 0;
+    while (i < num) {
+        vec_push(output, 0);
+        i = i + 1;
+    }
+    footstep_process_block(self, output);
+    return output;
+}
+
+# ---- serde: snapshot live state -> FootstepParams -> JSON, and back. ----
+#must_use
+fn footstep_to_json(self, sb) {
+    var p = alloc(sizeof(FootstepParams));
+    FootstepParams_set_terrain(p, Footstep_terrain(self));
+    FootstepParams_set_movement(p, Footstep_movement(self));
+    FootstepParams_set_sample_rate(p, Footstep_sample_rate(self));
+    FootstepParams_set_sample_position(p, Footstep_sample_position(self));
+    FootstepParams_set_base_step_interval(p, Footstep_base_step_interval(self));
+    FootstepParams_set_step_interval_samples(p, Footstep_step_interval_samples(self));
+    FootstepParams_set_samples_since_last_step(p, Footstep_samples_since_last_step(self));
+    FootstepParams_set_step_force(p, Footstep_step_force(self));
+    FootstepParams_set_step_pending(p, Footstep_step_pending(self));
+    FootstepParams_set_noise_filter_freq(p, Footstep_noise_filter_freq(self));
+    FootstepParams_set_noise_amplitude(p, Footstep_noise_amplitude(self));
+    FootstepParams_set_noise_highpass(p, Footstep_noise_highpass(self));
+    var rng = Footstep_rng(self);
+    FootstepParams_set_rng_state(p, Rng_state(rng));
+    FootstepParams_set_rng_inc(p, Rng_inc(rng));
+    var dc = Footstep_dc_blocker(self);
+    FootstepParams_set_dcb_x_prev(p, DcBlocker_x_prev(dc));
+    FootstepParams_set_dcb_y_prev(p, DcBlocker_y_prev(dc));
+    FootstepParams_set_dcb_r(p, DcBlocker_r(dc));
+    return FootstepParams_to_json(p, sb);
+}
+
+# Rebuild a Footstep from JSON: restore scalars + rng + dc_blocker state, then
+# reconstruct the Exciter / ModalBank / naad components fresh.
+#must_use
+fn footstep_from_json_str(json) {
+    var p = FootstepParams_from_json_str(json);
+    var self = alloc(sizeof(Footstep));
+    Footstep_set_terrain(self, FootstepParams_terrain(p));
+    Footstep_set_movement(self, FootstepParams_movement(p));
+    Footstep_set_sample_rate(self, FootstepParams_sample_rate(p));
+    Footstep_set_sample_position(self, FootstepParams_sample_position(p));
+    Footstep_set_base_step_interval(self, FootstepParams_base_step_interval(p));
+    Footstep_set_step_interval_samples(self, FootstepParams_step_interval_samples(p));
+    Footstep_set_samples_since_last_step(self, FootstepParams_samples_since_last_step(p));
+    Footstep_set_step_force(self, FootstepParams_step_force(p));
+    Footstep_set_step_pending(self, FootstepParams_step_pending(p));
+    Footstep_set_noise_filter_freq(self, FootstepParams_noise_filter_freq(p));
+    Footstep_set_noise_amplitude(self, FootstepParams_noise_amplitude(p));
+    Footstep_set_noise_highpass(self, FootstepParams_noise_highpass(p));
+
+    var rng = rng_new(0);
+    Rng_set_state(rng, FootstepParams_rng_state(p));
+    Rng_set_inc(rng, FootstepParams_rng_inc(p));
+    Footstep_set_rng(self, rng);
+
+    var dc = garjan_dcblocker_new(FootstepParams_sample_rate(p));
+    DcBlocker_set_x_prev(dc, FootstepParams_dcb_x_prev(p));
+    DcBlocker_set_y_prev(dc, FootstepParams_dcb_y_prev(p));
+    DcBlocker_set_r(dc, FootstepParams_dcb_r(p));
+    Footstep_set_dc_blocker(self, dc);
+
+    footstep_build_naad(self);
+    return self;
+}

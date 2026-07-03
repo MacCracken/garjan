@@ -1,0 +1,292 @@
+# cloth.cyr -- cloth flapping synthesis: flags, capes, sails, tarps.
+#
+# Ports rust-old/src/cloth.rs. Models fabric flapping as a stochastic impulse
+# train at a wind-dependent rate; each flap is a short noise burst shaped by
+# the cloth material's spectral character (a bandpass), optionally fed through
+# a modal bank for heavy cloth (Sail). The Cyrius port always uses the naad
+# backend (no feature flags), so generate_noise() = noise_next_sample through
+# shape_filter (the non-naad rng.next_f32 fallback is dropped). f32 -> f64.
+# Result<Self> -> pointer / negative GARJAN_* code.
+#
+# The Rust `#[serde(skip)]` naad components (noise_gen, shape_filter) plus the
+# Option<ModalBank> are all reconstructable from cloth_type + sample_rate, so
+# they are NOT serialized; they are rebuilt in cloth_build_naad on deserialize.
+# rng + dc_blocker state ARE serialized (via the flattened ClothParams below).
+# Requires: error, logging, dsp, rng, material, modal, aero foundations + the
+# naad bundle (noise_new/noise_next_sample, filter_biquad_new/process_sample).
+
+# ---- ClothParams: the serializable slice (Rust's non-skipped fields, with
+# rng + dc_blocker FLATTENED to scalars so #derive(Serialize)'s single-pass
+# from_json_str works). cloth_type is a CLOTH_* int. Synced to/from the live
+# Cloth on (de)serialize. ----
+#derive(accessors)
+#derive(Serialize)
+struct ClothParams {
+    cloth_type: i64;
+    sample_rate: f64;
+    sample_position: i64;
+    base_flap_rate: f64;
+    amplitude: f64;
+    wind_speed: f64;
+    rng_state: i64;
+    rng_inc: i64;
+    dcb_x_prev: f64;
+    dcb_y_prev: f64;
+    dcb_r: f64;
+}
+
+# ---- Cloth: live synth = scalars + live rng/dc_blocker + optional modal_bank
+# + naad component ptrs. modal_bank is 0 when use_modal is false. ----
+#derive(accessors)
+struct Cloth {
+    cloth_type;
+    sample_rate;
+    sample_position;
+    base_flap_rate;
+    amplitude;
+    wind_speed;
+    filter_freq;
+    use_modal;
+    rng;
+    dc_blocker;
+    modal_bank;
+    noise_gen;
+    shape_filter;
+}
+
+# Build/refresh the reconstructable components (modal bank + naad noise/filter)
+# from cloth_type + sample_rate. Shared by cloth_new and cloth_from_json_str.
+# Returns GARJAN_OK, or a negative code if a constructor rejects its params.
+fn cloth_build_naad(self) {
+    var sr = Cloth_sample_rate(self);
+    var use_modal = Cloth_use_modal(self);
+
+    # Modal resonance for heavy cloth (Sail): Fabric material, generate_modes.
+    var bank = 0;
+    if (use_modal == 1) {
+        var props = material_properties(MATERIAL_FABRIC);
+        var mode_cfg = material_mode_config(MATERIAL_FABRIC);
+        var specs = generate_modes(props, MaterialModeConfig_pattern(mode_cfg),
+                                   MaterialModeConfig_mode_count(mode_cfg),
+                                   MaterialModeConfig_damping_factor(mode_cfg));
+        bank = modal_bank_new(specs, sr);
+        if (garjan_is_err(bank) == 1) { return bank; }
+    }
+    Cloth_set_modal_bank(self, bank);
+
+    # naad: white noise generator + bandpass shape filter (Q = 1.5).
+    Cloth_set_noise_gen(self, noise_new(NOISE_WHITE, 6666));
+    var sf = filter_biquad_new(FILTER_BANDPASS, sr, Cloth_filter_freq(self), f64_div(f64_from(15), f64_from(10)));
+    if (garjan_is_err(sf) == 1) { return garjan_map_naad_error(sf); }
+    Cloth_set_shape_filter(self, sf);
+    return GARJAN_OK;
+}
+
+# Creates a new cloth flapping synthesizer. Returns a pointer or negative code.
+#must_use
+fn cloth_new(cloth_type, sample_rate) {
+    var e = garjan_validate_sample_rate(sample_rate);
+    if (garjan_is_err(e) == 1) { return e; }
+    var config = aero_cloth_config(cloth_type);
+    var base_flap_rate = ClothConfig_flap_rate(config);
+    var amplitude = ClothConfig_amplitude(config);
+    var filter_freq = ClothConfig_filter_freq(config);
+    var use_modal = ClothConfig_use_modal(config);
+
+    var self = alloc(sizeof(Cloth));
+    Cloth_set_cloth_type(self, cloth_type);
+    Cloth_set_sample_rate(self, sample_rate);
+    Cloth_set_sample_position(self, 0);
+    Cloth_set_base_flap_rate(self, base_flap_rate);
+    Cloth_set_amplitude(self, amplitude);
+    Cloth_set_wind_speed(self, 0);
+    Cloth_set_filter_freq(self, filter_freq);
+    Cloth_set_use_modal(self, use_modal);
+    Cloth_set_rng(self, rng_new(6666));
+    Cloth_set_dc_blocker(self, garjan_dcblocker_new(sample_rate));
+    var b = cloth_build_naad(self);
+    if (garjan_is_err(b) == 1) { return b; }
+    return self;
+}
+
+# Sets the wind speed (0.0 = still, 1.0 = strong wind).
+fn cloth_set_wind_speed(self, speed) {
+    Cloth_set_wind_speed(self, f64_clamp(speed, 0, F64_ONE));
+    return 0;
+}
+
+# One shaped noise sample: white noise through the bandpass shape filter.
+#inline
+#must_use
+fn cloth_generate_noise(self) {
+    var raw = noise_next_sample(Cloth_noise_gen(self));
+    return filter_biquad_process_sample(Cloth_shape_filter(self), raw);
+}
+
+# Fills `output` (a vec of f64) with cloth flapping audio (streaming). Ports
+# process_block: below the wind threshold it emits silence (still ticking the
+# DC blocker), otherwise it schedules flap events via a Poisson process.
+fn cloth_process_block(self, output) {
+    var num = vec_len(output);
+    var dc = Cloth_dc_blocker(self);
+    var wind = Cloth_wind_speed(self);
+
+    # Below threshold: silence, but keep the DC blocker's state advancing.
+    var threshold = f64_div(f64_from(1), f64_from(1000));   # 0.001
+    if (f64_lt(wind, threshold) == 1) {
+        var s = 0;
+        while (s < num) {
+            vec_set(output, s, 0);
+            garjan_dcblocker_process(dc, 0);
+            s = s + 1;
+        }
+        Cloth_set_sample_position(self, Cloth_sample_position(self) + num);
+        return 0;
+    }
+
+    var rng = Cloth_rng(self);
+    var amplitude = Cloth_amplitude(self);
+    var sr = Cloth_sample_rate(self);
+    var modal_bank = Cloth_modal_bank(self);
+
+    var flap_rate = f64_mul(Cloth_base_flap_rate(self), wind);
+    var block_size = f64_to(f64_mul(sr, f64_div(f64_from(1), f64_from(100))));   # sr*0.01
+    var flaps_per_block = f64_mul(flap_rate, f64_div(f64_from(1), f64_from(100)));
+
+    # Initialize output to zero.
+    var z = 0;
+    while (z < num) {
+        vec_set(output, z, 0);
+        z = z + 1;
+    }
+
+    var step = block_size;
+    if (step < 1) { step = 1; }
+
+    var block_start = 0;
+    while (block_start < num) {
+        var block_end = block_start + block_size;
+        if (block_end > num) { block_end = num; }
+        var n_flaps = rng_poisson(rng, flaps_per_block);
+        var c = 0;
+        while (c < n_flaps) {
+            var width = f64_from(block_end - block_start);
+            var offset = f64_to(rng_next_f32_range(rng, 0, width));
+            var idx = block_start + offset;
+            if (idx < num) {
+                # Each flap: noise burst with fast attack, medium decay.
+                var flap_amp = f64_mul(amplitude, f64_mul(wind, rng_next_f32_range(rng, F64_HALF, F64_ONE)));
+                var flap_dur = f64_to(f64_mul(sr, rng_next_f32_range(rng,
+                                                                     f64_div(f64_from(5), f64_from(1000)),
+                                                                     f64_div(f64_from(2), f64_from(100)))));
+                var span = flap_dur;
+                if (num - idx < span) { span = num - idx; }
+                var j = 0;
+                while (j < span) {
+                    var t = f64_div(f64_from(j), f64_from(flap_dur));
+                    # Fast attack (t < 0.1 -> t/0.1), longer decay (exp(-5*(t-0.1))).
+                    var attack_end = f64_div(f64_from(1), f64_from(10));   # 0.1
+                    var env = 0;
+                    if (f64_lt(t, attack_end) == 1) {
+                        env = f64_div(t, attack_end);
+                    } else {
+                        env = f64_exp(f64_mul(f64_neg(f64_from(5)), f64_sub(t, attack_end)));
+                    }
+                    var noise = cloth_generate_noise(self);
+                    var exc = f64_mul(noise, f64_mul(env, flap_amp));
+                    # Feed through modal bank for heavy cloth (Sail).
+                    var out = exc;
+                    if (modal_bank != 0) {
+                        out = f64_add(modal_bank_process_sample(modal_bank, exc),
+                                      f64_mul(exc, f64_div(f64_from(3), f64_from(10))));
+                    }
+                    vec_set(output, idx + j, f64_add(vec_get(output, idx + j), out));
+                    j = j + 1;
+                }
+            }
+            c = c + 1;
+        }
+        block_start = block_start + step;
+    }
+
+    # DC blocking, then advance the sample cursor.
+    var i = 0;
+    while (i < num) {
+        vec_set(output, i, garjan_dcblocker_process(dc, vec_get(output, i)));
+        i = i + 1;
+    }
+    Cloth_set_sample_position(self, Cloth_sample_position(self) + num);
+    return 0;
+}
+
+# Synthesize `duration` seconds of cloth audio into a fresh vec. Returns the
+# vec pointer, or a negative code on invalid duration.
+#must_use
+fn cloth_synthesize(self, duration) {
+    var e = garjan_validate_duration(duration);
+    if (garjan_is_err(e) == 1) { return e; }
+    var num = f64_to(f64_mul(Cloth_sample_rate(self), duration));
+    var output = vec_new();
+    var i = 0;
+    while (i < num) {
+        vec_push(output, 0);
+        i = i + 1;
+    }
+    cloth_process_block(self, output);
+    return output;
+}
+
+# ---- serde: snapshot live state -> ClothParams -> JSON, and back. ----
+#must_use
+fn cloth_to_json(self, sb) {
+    var p = alloc(sizeof(ClothParams));
+    ClothParams_set_cloth_type(p, Cloth_cloth_type(self));
+    ClothParams_set_sample_rate(p, Cloth_sample_rate(self));
+    ClothParams_set_sample_position(p, Cloth_sample_position(self));
+    ClothParams_set_base_flap_rate(p, Cloth_base_flap_rate(self));
+    ClothParams_set_amplitude(p, Cloth_amplitude(self));
+    ClothParams_set_wind_speed(p, Cloth_wind_speed(self));
+    var rng = Cloth_rng(self);
+    ClothParams_set_rng_state(p, Rng_state(rng));
+    ClothParams_set_rng_inc(p, Rng_inc(rng));
+    var dc = Cloth_dc_blocker(self);
+    ClothParams_set_dcb_x_prev(p, DcBlocker_x_prev(dc));
+    ClothParams_set_dcb_y_prev(p, DcBlocker_y_prev(dc));
+    ClothParams_set_dcb_r(p, DcBlocker_r(dc));
+    return ClothParams_to_json(p, sb);
+}
+
+# Rebuild a Cloth from JSON: restore scalars + rng + dc_blocker state, then
+# reconstruct the modal bank + naad components fresh (matches Rust's
+# skip+reconstruct). filter_freq / use_modal are re-derived from cloth_type.
+#must_use
+fn cloth_from_json_str(json) {
+    var p = ClothParams_from_json_str(json);
+    var self = alloc(sizeof(Cloth));
+    var cloth_type = ClothParams_cloth_type(p);
+    Cloth_set_cloth_type(self, cloth_type);
+    Cloth_set_sample_rate(self, ClothParams_sample_rate(p));
+    Cloth_set_sample_position(self, ClothParams_sample_position(p));
+    Cloth_set_base_flap_rate(self, ClothParams_base_flap_rate(p));
+    Cloth_set_amplitude(self, ClothParams_amplitude(p));
+    Cloth_set_wind_speed(self, ClothParams_wind_speed(p));
+
+    # Re-derive filter_freq + use_modal from the cloth_type config.
+    var config = aero_cloth_config(cloth_type);
+    Cloth_set_filter_freq(self, ClothConfig_filter_freq(config));
+    Cloth_set_use_modal(self, ClothConfig_use_modal(config));
+
+    var rng = rng_new(0);
+    Rng_set_state(rng, ClothParams_rng_state(p));
+    Rng_set_inc(rng, ClothParams_rng_inc(p));
+    Cloth_set_rng(self, rng);
+
+    var dc = garjan_dcblocker_new(ClothParams_sample_rate(p));
+    DcBlocker_set_x_prev(dc, ClothParams_dcb_x_prev(p));
+    DcBlocker_set_y_prev(dc, ClothParams_dcb_y_prev(p));
+    DcBlocker_set_r(dc, ClothParams_dcb_r(p));
+    Cloth_set_dc_blocker(self, dc);
+
+    cloth_build_naad(self);
+    return self;
+}

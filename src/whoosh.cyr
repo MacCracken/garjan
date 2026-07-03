@@ -1,0 +1,249 @@
+# whoosh.cyr -- whoosh synthesis: object pass-by / swing (aerodynamic noise).
+#
+# Ports rust-old/src/whoosh.rs. The Cyrius port always uses the naad backend
+# (no feature flags), so it ports the #[cfg(feature="naad-backend")] path
+# (pink NoiseGenerator + two biquads) and drops the rng-only fallback in
+# generate_noise_hi/lo. f32 -> f64. Result<Self> -> pointer / negative
+# GARJAN_* code. The Rust naad components are #[cfg]-gated and rebuilt on
+# deserialize; the scalar params + rng + dc_blocker state ARE serialized via
+# the flattened WhooshParams below.
+# Requires: error, logging, dsp, rng foundations + aero.cyr (aero_whoosh_config,
+# WHOOSH_*) + the naad bundle (noise_new/noise_next_sample,
+# filter_biquad_new/filter_biquad_process_sample).
+
+# ---- WhooshParams: the serializable slice (exactly Rust's fields, minus the
+# reconstructable naad components, with rng + dc_blocker FLATTENED so
+# #derive(Serialize)'s single-pass from_json_str works). ----
+#derive(accessors)
+#derive(Serialize)
+struct WhooshParams {
+    whoosh_type: i64;
+    sample_rate: f64;
+    sample_position: i64;
+    envelope_samples: i64;
+    brightness: f64;
+    low_content: f64;
+    active: i64;
+    trigger_position: i64;
+    speed: f64;
+    rng_state: i64;
+    rng_inc: i64;
+    dcb_x_prev: f64;
+    dcb_y_prev: f64;
+    dcb_r: f64;
+}
+
+# ---- Whoosh: live synth = scalars + live rng/dc_blocker + naad component ptrs. ----
+#derive(accessors)
+struct Whoosh {
+    whoosh_type;
+    sample_rate;
+    sample_position;
+    envelope_samples;
+    brightness;
+    low_content;
+    active;
+    trigger_position;
+    speed;
+    rng;
+    dc_blocker;
+    noise_gen;
+    hi_filter;
+    lo_filter;
+}
+
+# Build/refresh the naad components from sample_rate + brightness/low_content.
+# Shared by whoosh_new and whoosh_from_json_str. Returns GARJAN_OK or a
+# negative code if a naad constructor rejects its params.
+fn whoosh_build_naad(self) {
+    var sr = Whoosh_sample_rate(self);
+    var brightness = Whoosh_brightness(self);
+    var low_content = Whoosh_low_content(self);
+
+    # hi_filter: highpass, freq = clamp(brightness*4000, 200, 8000), q = 0.7
+    var hi_freq = f64_clamp(f64_mul(brightness, f64_from(4000)), f64_from(200), f64_from(8000));
+    var hi_q = f64_div(f64_from(7), f64_from(10));
+    var hf = filter_biquad_new(FILTER_HIGHPASS, sr, hi_freq, hi_q);
+    if (garjan_is_err(hf) == 1) { return garjan_map_naad_error(hf); }
+
+    # lo_filter: lowpass, freq = clamp(300 + low_content*500, 100, 1000), q = 0.5
+    var lo_freq = f64_clamp(f64_add(f64_from(300), f64_mul(low_content, f64_from(500))), f64_from(100), f64_from(1000));
+    var lf = filter_biquad_new(FILTER_LOWPASS, sr, lo_freq, F64_HALF);
+    if (garjan_is_err(lf) == 1) { return garjan_map_naad_error(lf); }
+
+    Whoosh_set_hi_filter(self, hf);
+    Whoosh_set_lo_filter(self, lf);
+    Whoosh_set_noise_gen(self, noise_new(NOISE_PINK, 1111));
+    return GARJAN_OK;
+}
+
+# Creates a new whoosh synthesizer. Returns a pointer or a negative code.
+#must_use
+fn whoosh_new(whoosh_type, sample_rate) {
+    var e = garjan_validate_sample_rate(sample_rate);
+    if (garjan_is_err(e) == 1) { return e; }
+
+    var cfg = aero_whoosh_config(whoosh_type);
+    var env_dur = WhooshConfig_duration(cfg);
+    var brightness = WhooshConfig_brightness(cfg);
+    var low_content = WhooshConfig_low_freq(cfg);
+    var envelope_samples = f64_to(f64_mul(env_dur, sample_rate));
+
+    var self = alloc(sizeof(Whoosh));
+    Whoosh_set_whoosh_type(self, whoosh_type);
+    Whoosh_set_sample_rate(self, sample_rate);
+    Whoosh_set_sample_position(self, 0);
+    Whoosh_set_envelope_samples(self, envelope_samples);
+    Whoosh_set_brightness(self, brightness);
+    Whoosh_set_low_content(self, low_content);
+    Whoosh_set_active(self, 0);
+    Whoosh_set_trigger_position(self, 0);
+    # speed default = 0.5
+    Whoosh_set_speed(self, F64_HALF);
+    Whoosh_set_rng(self, rng_new(1111));
+    Whoosh_set_dc_blocker(self, garjan_dcblocker_new(sample_rate));
+
+    var b = whoosh_build_naad(self);
+    if (garjan_is_err(b) == 1) { return b; }
+    return self;
+}
+
+# Sets the speed (0.0-1.0). Higher speed = brighter and shorter.
+fn whoosh_set_speed(self, speed) {
+    Whoosh_set_speed(self, f64_clamp(speed, 0, F64_ONE));
+    return 0;
+}
+
+# Triggers a whoosh event.
+fn whoosh_trigger(self) {
+    Whoosh_set_active(self, 1);
+    Whoosh_set_trigger_position(self, 0);
+    return 0;
+}
+
+# Fills `output` (a vec of f64) with whoosh audio (streaming). Ports
+# process_block: hump-shaped sin^2 envelope over an effective length scaled
+# by speed, hi (pink->highpass) + lo (pink->lowpass) layers, DC-blocked.
+fn whoosh_process_block(self, output) {
+    var num = vec_len(output);
+    var noise_gen = Whoosh_noise_gen(self);
+    var hi_filter = Whoosh_hi_filter(self);
+    var lo_filter = Whoosh_lo_filter(self);
+    var dc = Whoosh_dc_blocker(self);
+    var brightness = Whoosh_brightness(self);
+    var low_content = Whoosh_low_content(self);
+    var speed = Whoosh_speed(self);
+
+    # speed_scale = 0.5 + speed*0.5; effective_len = (envelope_samples / speed_scale) as usize
+    var speed_scale = f64_add(F64_HALF, f64_mul(speed, F64_HALF));
+    var effective_len = f64_to(f64_div(f64_from(Whoosh_envelope_samples(self)), speed_scale));
+    var denom = effective_len;
+    if (denom < 1) { denom = 1; }
+
+    var i = 0;
+    while (i < num) {
+        if (Whoosh_active(self) == 0) {
+            vec_set(output, i, 0);
+            garjan_dcblocker_process(dc, 0);
+        } else {
+            var t = f64_div(f64_from(Whoosh_trigger_position(self)), f64_from(denom));
+            var env = 0;
+            if (f64_lt(t, F64_ONE) == 1) {
+                var s = f64_sin(f64_mul(F64_PI, t));
+                env = f64_mul(s, s);
+            } else {
+                Whoosh_set_active(self, 0);
+                env = 0;
+            }
+
+            # High-frequency whoosh layer: pink noise -> highpass, *env*brightness.
+            var hraw = noise_next_sample(noise_gen);
+            var hi = f64_mul(f64_mul(filter_biquad_process_sample(hi_filter, hraw), env), brightness);
+
+            # Low-frequency rumble layer: pink noise -> lowpass, *env*low_content.
+            var lraw = noise_next_sample(noise_gen);
+            var lo = f64_mul(f64_mul(filter_biquad_process_sample(lo_filter, lraw), env), low_content);
+
+            var mixed = f64_mul(f64_add(hi, lo), speed);
+            vec_set(output, i, garjan_dcblocker_process(dc, mixed));
+
+            Whoosh_set_trigger_position(self, Whoosh_trigger_position(self) + 1);
+        }
+        i = i + 1;
+    }
+    Whoosh_set_sample_position(self, Whoosh_sample_position(self) + num);
+    return 0;
+}
+
+# Synthesize a single whoosh event of `duration` seconds into a fresh vec.
+# Ports synthesize: validate, alloc zeros, trigger, process_block. Returns
+# the vec pointer, or a negative code on invalid duration.
+#must_use
+fn whoosh_synthesize(self, duration) {
+    var e = garjan_validate_duration(duration);
+    if (garjan_is_err(e) == 1) { return e; }
+    var num = f64_to(f64_mul(Whoosh_sample_rate(self), duration));
+    var output = vec_new();
+    var i = 0;
+    while (i < num) {
+        vec_push(output, 0);
+        i = i + 1;
+    }
+    whoosh_trigger(self);
+    whoosh_process_block(self, output);
+    return output;
+}
+
+# ---- serde: snapshot live state -> WhooshParams -> JSON, and back. ----
+#must_use
+fn whoosh_to_json(self, sb) {
+    var p = alloc(sizeof(WhooshParams));
+    WhooshParams_set_whoosh_type(p, Whoosh_whoosh_type(self));
+    WhooshParams_set_sample_rate(p, Whoosh_sample_rate(self));
+    WhooshParams_set_sample_position(p, Whoosh_sample_position(self));
+    WhooshParams_set_envelope_samples(p, Whoosh_envelope_samples(self));
+    WhooshParams_set_brightness(p, Whoosh_brightness(self));
+    WhooshParams_set_low_content(p, Whoosh_low_content(self));
+    WhooshParams_set_active(p, Whoosh_active(self));
+    WhooshParams_set_trigger_position(p, Whoosh_trigger_position(self));
+    WhooshParams_set_speed(p, Whoosh_speed(self));
+    var rng = Whoosh_rng(self);
+    WhooshParams_set_rng_state(p, Rng_state(rng));
+    WhooshParams_set_rng_inc(p, Rng_inc(rng));
+    var dc = Whoosh_dc_blocker(self);
+    WhooshParams_set_dcb_x_prev(p, DcBlocker_x_prev(dc));
+    WhooshParams_set_dcb_y_prev(p, DcBlocker_y_prev(dc));
+    WhooshParams_set_dcb_r(p, DcBlocker_r(dc));
+    return WhooshParams_to_json(p, sb);
+}
+
+# Rebuild a Whoosh from JSON: restore scalars + rng + dc_blocker state, then
+# reconstruct the naad components fresh (matches Rust's cfg+reconstruct).
+#must_use
+fn whoosh_from_json_str(json) {
+    var p = WhooshParams_from_json_str(json);
+    var self = alloc(sizeof(Whoosh));
+    Whoosh_set_whoosh_type(self, WhooshParams_whoosh_type(p));
+    Whoosh_set_sample_rate(self, WhooshParams_sample_rate(p));
+    Whoosh_set_sample_position(self, WhooshParams_sample_position(p));
+    Whoosh_set_envelope_samples(self, WhooshParams_envelope_samples(p));
+    Whoosh_set_brightness(self, WhooshParams_brightness(p));
+    Whoosh_set_low_content(self, WhooshParams_low_content(p));
+    Whoosh_set_active(self, WhooshParams_active(p));
+    Whoosh_set_trigger_position(self, WhooshParams_trigger_position(p));
+    Whoosh_set_speed(self, WhooshParams_speed(p));
+
+    var rng = rng_new(0);
+    Rng_set_state(rng, WhooshParams_rng_state(p));
+    Rng_set_inc(rng, WhooshParams_rng_inc(p));
+    Whoosh_set_rng(self, rng);
+
+    var dc = garjan_dcblocker_new(WhooshParams_sample_rate(p));
+    DcBlocker_set_x_prev(dc, WhooshParams_dcb_x_prev(p));
+    DcBlocker_set_y_prev(dc, WhooshParams_dcb_y_prev(p));
+    DcBlocker_set_r(dc, WhooshParams_dcb_r(p));
+    Whoosh_set_dc_blocker(self, dc);
+
+    whoosh_build_naad(self);
+    return self;
+}

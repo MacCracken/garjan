@@ -1,0 +1,74 @@
+# whistle.tcyr -- parity tests for src/whistle.cyr (naad synth + serde).
+include "src/error.cyr"
+include "src/logging.cyr"
+include "src/dsp.cyr"
+include "src/rng.cyr"
+include "src/lod.cyr"
+include "src/material.cyr"
+include "src/modal.cyr"
+include "src/contact.cyr"
+include "src/aero.cyr"
+include "src/creature.cyr"
+include "src/whistle.cyr"
+
+fn main() {
+    alloc_init();
+
+    test_group("whistle_new");
+    var w = whistle_new(WHISTLE_GAP, f64_from(44100));
+    assert(garjan_is_err(w) == 0, "whistle_new ok");
+    assert(garjan_is_err(whistle_new(WHISTLE_GAP, 0)) == 1, "whistle_new rejects sr=0");
+    # WHISTLE_GAP config: base_freq=2000, bandwidth=200, noise_mix=0.3.
+    assert(f64_lt(f64_abs(f64_sub(Whistle_base_freq(w), f64_from(2000))), GARJAN_EPSILON) == 1, "base_freq 2000");
+    assert(f64_lt(f64_abs(f64_sub(Whistle_bandwidth(w), f64_from(200))), GARJAN_EPSILON) == 1, "bandwidth 200");
+
+    test_group("synthesize");
+    # Wind speed must be nonzero or the synth is silent by design.
+    whistle_set_wind_speed(w, F64_ONE);
+    var buf = whistle_synthesize(w, f64_div(f64_from(1), f64_from(10)));   # 0.1s
+    assert(garjan_is_err(buf) == 0, "synthesize ok");
+    assert_eq(vec_len(buf), 4410, "0.1s @ 44100 = 4410 samples");
+    var i = 0;
+    var allfinite = 1;
+    var energy = 0;
+    while (i < vec_len(buf)) {
+        var s = vec_get(buf, i);
+        if (garjan_is_finite(s) == 0) { allfinite = 0; }
+        energy = f64_add(energy, f64_abs(s));
+        i = i + 1;
+    }
+    assert(allfinite == 1, "all whistle samples finite");
+    assert(f64_gt(energy, 0) == 1, "whistle produces sound (nonzero energy)");
+    assert(garjan_is_err(whistle_synthesize(w, 0)) == 1, "synthesize rejects duration=0");
+
+    test_group("silence_when_calm");
+    # wind_speed below 0.001 -> the whole buffer is silent.
+    var cw = whistle_new(WHISTLE_PIPE, f64_from(48000));
+    var cbuf = whistle_synthesize(cw, f64_div(f64_from(1), f64_from(100)));   # 0.01s
+    var ci = 0;
+    var calm_energy = 0;
+    while (ci < vec_len(cbuf)) {
+        calm_energy = f64_add(calm_energy, f64_abs(vec_get(cbuf, ci)));
+        ci = ci + 1;
+    }
+    assert(f64_lt(calm_energy, GARJAN_EPSILON) == 1, "calm whistle is silent");
+
+    test_group("whistle_serde");
+    var g = whistle_new(WHISTLE_WIRE, f64_from(48000));
+    whistle_set_wind_speed(g, f64_div(f64_from(7), f64_from(10)));
+    # advance state so rng/dc_blocker/lfo are non-default
+    whistle_synthesize(g, f64_div(f64_from(1), f64_from(100)));
+    var sb = str_builder_new();
+    whistle_to_json(g, sb);
+    var j = str_data(str_builder_build(sb));
+    var g2 = whistle_from_json_str(j);
+    var sb2 = str_builder_new();
+    whistle_to_json(g2, sb2);
+    assert(memeq(j, str_data(str_builder_build(sb2)), strlen(j)) == 1, "whistle params json roundtrip idempotent");
+    # restored synth resumes the SAME rng sequence
+    assert_eq(rng_next_u32(Whistle_rng(g)), rng_next_u32(Whistle_rng(g2)), "restored whistle resumes rng");
+
+    return assert_summary();
+}
+var ec = main();
+syscall(60, ec);

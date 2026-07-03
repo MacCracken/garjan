@@ -1,0 +1,68 @@
+# garjan.bcyr -- synthesis-throughput benchmarks.
+# Run: cyrius bench tests/garjan.bcyr
+# Each op = process_block of one second of audio (44_100 samples) at 44.1 kHz,
+# so the reported per-op time is "time to synthesize 1 s of sound" (compare to
+# the Rust perf table in README.md). The whole library + its deps come from the
+# dist bundle (auto-prepended stdlib/naad/hisab/goonj/sakshi).
+
+include "dist/garjan.cyr"
+
+# A reusable 1-second f64 buffer.
+#must_use
+fn _one_sec_buf() {
+    var v = vec_new();
+    var i = 0;
+    while (i < 44100) { vec_push(v, 0); i = i + 1; }
+    return v;
+}
+
+fn main() {
+    alloc_init();
+    var sr = f64_from(44100);
+    var buf = _one_sec_buf();
+
+    var fire = fire_new(F64_HALF, sr);
+    var bf = bench_new("fire_1s");
+    bench_batch_start(bf);
+    var i = 0;
+    while (i < 20) { fire_process_block(fire, buf); i = i + 1; }
+    bench_batch_stop(bf, 20);
+    bench_report(bf);
+
+    var thunder = thunder_new(f64_from(2000), sr);
+    var bt = bench_new("thunder_1s");
+    bench_batch_start(bt);
+    i = 0;
+    while (i < 20) { thunder_process_block(thunder, buf); i = i + 1; }
+    bench_batch_stop(bt, 20);
+    bench_report(bt);
+
+    var rain = rain_new(RAIN_INTENSITY_MODERATE, sr);
+    var br = bench_new("rain_moderate_1s");
+    bench_batch_start(br);
+    i = 0;
+    while (i < 20) { rain_process_block(rain, buf); i = i + 1; }
+    bench_batch_stop(br, 20);
+    bench_report(br);
+
+    var wind = wind_new(f64_from(15), F64_HALF, sr);
+    var bw = bench_new("wind_1s");
+    bench_batch_start(bw);
+    i = 0;
+    while (i < 20) { wind_process_block(wind, buf); i = i + 1; }
+    bench_batch_stop(bw, 20);
+    bench_report(bw);
+
+    var cloth = cloth_new(CLOTH_FLAG, sr);
+    var bc = bench_new("cloth_flag_1s");
+    bench_batch_start(bc);
+    i = 0;
+    while (i < 20) { cloth_process_block(cloth, buf); i = i + 1; }
+    bench_batch_stop(bc, 20);
+    bench_report(bc);
+
+    return 0;
+}
+
+var r = main();
+syscall(60, r);

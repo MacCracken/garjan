@@ -1,0 +1,205 @@
+# fire.cyr -- fire synthesis: roar (brown noise LP) + stochastic crackle (HP).
+#
+# Ports rust-old/src/fire.rs. The Cyrius port always uses the naad backend
+# (no feature flags), so it ports process_block_naad and drops the fallback.
+# f32 -> f64. Result<Self> -> pointer / negative GARJAN_* code. The Rust
+# `#[serde(skip)]` naad components are reconstructed on deserialize; rng +
+# dc_blocker state ARE serialized (via the flattened FireParams below).
+# Requires: error, logging, dsp, rng foundations + the naad bundle
+# (noise_new/noise_next_sample, filter_biquad_new/filter_biquad_process_sample).
+
+# ---- FireParams: the serializable slice (exactly Rust's non-skipped fields,
+# with rng + dc_blocker FLATTENED so #derive(Serialize)'s fast single-pass
+# from_json_str works). Synced to/from the live Fire on (de)serialize. ----
+#derive(accessors)
+#derive(Serialize)
+struct FireParams {
+    intensity: f64;
+    crackle_rate: f64;
+    sample_rate: f64;
+    sample_position: i64;
+    rng_state: i64;
+    rng_inc: i64;
+    dcb_x_prev: f64;
+    dcb_y_prev: f64;
+    dcb_r: f64;
+}
+
+# ---- Fire: live synth = scalars + live rng/dc_blocker + naad component ptrs. ----
+#derive(accessors)
+struct Fire {
+    intensity;
+    crackle_rate;
+    sample_rate;
+    sample_position;
+    rng;
+    dc_blocker;
+    roar_noise;
+    roar_filter;
+    crackle_noise;
+    crackle_filter;
+}
+
+# Build/refresh the naad components from sample_rate. Shared by fire_new and
+# fire_from_json_str (mirrors naad_binaural_rebuild). Returns GARJAN_OK or a
+# negative code if a naad constructor rejects its params.
+fn fire_build_naad(self) {
+    var sr = Fire_sample_rate(self);
+    var rf = filter_biquad_new(FILTER_LOWPASS, sr, f64_from(600), f64_div(f64_from(7), f64_from(10)));
+    if (garjan_is_err(rf) == 1) { return garjan_map_naad_error(rf); }
+    var cf = filter_biquad_new(FILTER_HIGHPASS, sr, f64_from(2000), F64_ONE);
+    if (garjan_is_err(cf) == 1) { return garjan_map_naad_error(cf); }
+    Fire_set_roar_filter(self, rf);
+    Fire_set_crackle_filter(self, cf);
+    Fire_set_roar_noise(self, noise_new(NOISE_BROWN, 6661));
+    Fire_set_crackle_noise(self, noise_new(NOISE_WHITE, 6662));
+    return GARJAN_OK;
+}
+
+# Creates a new fire synthesizer. Returns a pointer or a negative code.
+#must_use
+fn fire_new(intensity, sample_rate) {
+    var e = garjan_validate_sample_rate(sample_rate);
+    if (garjan_is_err(e) == 1) { return e; }
+    var inten = f64_clamp(intensity, 0, F64_ONE);
+
+    var self = alloc(sizeof(Fire));
+    Fire_set_intensity(self, inten);
+    # crackle_rate = 5.0 + intensity * 30.0
+    Fire_set_crackle_rate(self, f64_add(f64_from(5), f64_mul(inten, f64_from(30))));
+    Fire_set_sample_rate(self, sample_rate);
+    Fire_set_sample_position(self, 0);
+    Fire_set_rng(self, rng_new(6661));
+    Fire_set_dc_blocker(self, garjan_dcblocker_new(sample_rate));
+    var b = fire_build_naad(self);
+    if (garjan_is_err(b) == 1) { return b; }
+    return self;
+}
+
+# Fills `output` (a vec of f64) with fire audio (streaming). Ports
+# process_block: naad synthesis, then DC-block, then advance position.
+fn fire_process_block(self, output) {
+    var num = vec_len(output);
+    var roar_noise = Fire_roar_noise(self);
+    var roar_filter = Fire_roar_filter(self);
+    var crackle_noise = Fire_crackle_noise(self);
+    var crackle_filter = Fire_crackle_filter(self);
+    var rng = Fire_rng(self);
+    var inten = Fire_intensity(self);
+    var sr = Fire_sample_rate(self);
+
+    # Roar: brown noise through lowpass, scaled by intensity*0.3.
+    var roar_amp = f64_mul(inten, f64_div(f64_from(3), f64_from(10)));
+    var i = 0;
+    while (i < num) {
+        var n = noise_next_sample(roar_noise);
+        vec_set(output, i, f64_mul(filter_biquad_process_sample(roar_filter, n), roar_amp));
+        i = i + 1;
+    }
+
+    # Crackle: stochastic impulses through highpass.
+    var block_size = f64_to(f64_mul(sr, f64_div(f64_from(1), f64_from(100))));   # sr*0.01
+    if (block_size < 1) { block_size = 1; }
+    var crackles_per_block = f64_mul(Fire_crackle_rate(self), f64_div(f64_from(1), f64_from(100)));
+
+    var block_start = 0;
+    while (block_start < num) {
+        var block_end = block_start + block_size;
+        if (block_end > num) { block_end = num; }
+        var n_crackles = rng_poisson(rng, crackles_per_block);
+        var c = 0;
+        while (c < n_crackles) {
+            var width = f64_from(block_end - block_start);
+            var offset = f64_to(rng_next_f32_range(rng, 0, width));
+            var idx = block_start + offset;
+            if (idx < num) {
+                var crackle_amp = f64_mul(inten, rng_next_f32_range(rng, f64_div(f64_from(1), f64_from(10)),
+                                                                    f64_div(f64_from(6), f64_from(10))));
+                var decay_len = f64_to(rng_next_f32_range(rng, f64_from(5), f64_from(30)));
+                var span = decay_len;
+                if (num - idx < span) { span = num - idx; }
+                var j = 0;
+                while (j < span) {
+                    var env = f64_sub(F64_ONE, f64_div(f64_from(j), f64_from(decay_len)));
+                    var cn = noise_next_sample(crackle_noise);
+                    var contrib = f64_mul(crackle_amp, f64_mul(env, filter_biquad_process_sample(crackle_filter, cn)));
+                    vec_set(output, idx + j, f64_add(vec_get(output, idx + j), contrib));
+                    j = j + 1;
+                }
+            }
+            c = c + 1;
+        }
+        block_start = block_start + block_size;
+    }
+
+    # DC-block the whole buffer, then advance the sample cursor.
+    var dc = Fire_dc_blocker(self);
+    i = 0;
+    while (i < num) {
+        vec_set(output, i, garjan_dcblocker_process(dc, vec_get(output, i)));
+        i = i + 1;
+    }
+    Fire_set_sample_position(self, Fire_sample_position(self) + num);
+    return 0;
+}
+
+# Synthesize `duration` seconds of fire audio into a fresh vec. Returns the
+# vec pointer, or a negative code on invalid duration.
+#must_use
+fn fire_synthesize(self, duration) {
+    var e = garjan_validate_duration(duration);
+    if (garjan_is_err(e) == 1) { return e; }
+    var num = f64_to(f64_mul(Fire_sample_rate(self), duration));
+    var output = vec_new();
+    var i = 0;
+    while (i < num) {
+        vec_push(output, 0);
+        i = i + 1;
+    }
+    fire_process_block(self, output);
+    return output;
+}
+
+# ---- serde: snapshot live state -> FireParams -> JSON, and back. ----
+#must_use
+fn fire_to_json(self, sb) {
+    var p = alloc(sizeof(FireParams));
+    FireParams_set_intensity(p, Fire_intensity(self));
+    FireParams_set_crackle_rate(p, Fire_crackle_rate(self));
+    FireParams_set_sample_rate(p, Fire_sample_rate(self));
+    FireParams_set_sample_position(p, Fire_sample_position(self));
+    var rng = Fire_rng(self);
+    FireParams_set_rng_state(p, Rng_state(rng));
+    FireParams_set_rng_inc(p, Rng_inc(rng));
+    var dc = Fire_dc_blocker(self);
+    FireParams_set_dcb_x_prev(p, DcBlocker_x_prev(dc));
+    FireParams_set_dcb_y_prev(p, DcBlocker_y_prev(dc));
+    FireParams_set_dcb_r(p, DcBlocker_r(dc));
+    return FireParams_to_json(p, sb);
+}
+
+# Rebuild a Fire from JSON: restore scalars + rng + dc_blocker state, then
+# reconstruct the naad components fresh (matches Rust's skip+reconstruct).
+#must_use
+fn fire_from_json_str(json) {
+    var p = FireParams_from_json_str(json);
+    var self = alloc(sizeof(Fire));
+    Fire_set_intensity(self, FireParams_intensity(p));
+    Fire_set_crackle_rate(self, FireParams_crackle_rate(p));
+    Fire_set_sample_rate(self, FireParams_sample_rate(p));
+    Fire_set_sample_position(self, FireParams_sample_position(p));
+
+    var rng = rng_new(0);
+    Rng_set_state(rng, FireParams_rng_state(p));
+    Rng_set_inc(rng, FireParams_rng_inc(p));
+    Fire_set_rng(self, rng);
+
+    var dc = garjan_dcblocker_new(FireParams_sample_rate(p));
+    DcBlocker_set_x_prev(dc, FireParams_dcb_x_prev(p));
+    DcBlocker_set_y_prev(dc, FireParams_dcb_y_prev(p));
+    DcBlocker_set_r(dc, FireParams_dcb_r(p));
+    Fire_set_dc_blocker(self, dc);
+
+    fire_build_naad(self);
+    return self;
+}

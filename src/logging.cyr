@@ -1,0 +1,16 @@
+# logging.cyr -- structured logging, wired through sakshi.
+#
+# The Rust crate gated diagnostics behind the `logging` feature (tracing::
+# warn!/error!). The Cyrius port wires them for real via sakshi (same pattern
+# goonj/src/logging.cyr uses). Logging is always compiled in; verbosity is
+# controlled at runtime with sakshi_set_level. These thin wrappers take a
+# NUL-terminated cstring and forward (ptr, len) to sakshi. They are called
+# for their side effect (not #must_use); each returns 0.
+#
+# Requires the sakshi bundle (auto-prepended via cyrius.cyml) + strlen (stdlib).
+
+fn garjan_log_fatal(msg) { sakshi_fatal(msg, strlen(msg)); return 0; }
+fn garjan_log_error(msg) { sakshi_error(msg, strlen(msg)); return 0; }
+fn garjan_log_warn(msg)  { sakshi_warn(msg, strlen(msg));  return 0; }
+fn garjan_log_info(msg)  { sakshi_info(msg, strlen(msg));  return 0; }
+fn garjan_log_debug(msg) { sakshi_debug(msg, strlen(msg)); return 0; }

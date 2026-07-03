@@ -1,0 +1,40 @@
+# lod.cyr -- Level-of-Detail quality scaling.
+#
+# Ports rust-old/src/lod.rs (the `Quality` enum + mode_factor/event_factor/
+# scale_modes/scale_rate). The enum becomes QUALITY_* int constants; a Quality
+# value is a plain i64 and serializes trivially as a field of any serde struct.
+# f32 -> f64. Standalone (no deps beyond stdlib math).
+
+var QUALITY_FULL    = 0;   # all modes, all events, all filters
+var QUALITY_REDUCED = 1;   # half modes, half events, simplified filtering
+var QUALITY_MINIMAL = 2;   # quarter modes, quarter events, filter bypass
+
+# Mode-count multiplier: 1.0 / 0.5 / 0.25.
+#must_use
+fn lod_mode_factor(q) {
+    if (q == QUALITY_FULL) { return F64_ONE; }
+    if (q == QUALITY_REDUCED) { return F64_HALF; }
+    return f64_div(F64_ONE, f64_from(4));
+}
+
+# Stochastic event-rate multiplier: 1.0 / 0.5 / 0.25.
+#must_use
+fn lod_event_factor(q) {
+    if (q == QUALITY_FULL) { return F64_ONE; }
+    if (q == QUALITY_REDUCED) { return F64_HALF; }
+    return f64_div(F64_ONE, f64_from(4));
+}
+
+# Scale a mode count by the quality factor, minimum 1.
+#must_use
+fn lod_scale_modes(q, count) {
+    var scaled = f64_to(f64_mul(f64_from(count), lod_mode_factor(q)));
+    if (scaled < 1) { return 1; }
+    return scaled;
+}
+
+# Scale an event rate by the quality factor.
+#must_use
+fn lod_scale_rate(q, rate) {
+    return f64_mul(rate, lod_event_factor(q));
+}

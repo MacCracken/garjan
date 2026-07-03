@@ -1,0 +1,79 @@
+# modal.tcyr -- parity tests for src/modal.cyr.
+include "src/error.cyr"
+include "src/logging.cyr"
+include "src/dsp.cyr"
+include "src/rng.cyr"
+include "src/material.cyr"
+include "src/modal.cyr"
+
+fn main() {
+    alloc_init();
+
+    test_group("beam_ratios");
+    assert(f64_lt(f64_abs(f64_sub(modal_beam_ratio(1), F64_ONE)), GARJAN_EPSILON) == 1, "beam_ratio(1)=1.0");
+    assert(f64_lt(f64_abs(f64_sub(modal_beam_ratio(2), f64_div(f64_from(2757), f64_from(1000)))), GARJAN_EPSILON) == 1, "beam_ratio(2)=2.757");
+
+    test_group("modespec_serde");
+    var ms = modal_modespec_new(f64_from(440), F64_HALF, F64_ONE);
+    var sb = str_builder_new();
+    ModeSpec_to_json(ms, sb);
+    var j = str_data(str_builder_build(sb));
+    var ms2 = ModeSpec_from_json_str(j);
+    assert(f64_lt(f64_abs(f64_sub(ModeSpec_frequency(ms2), f64_from(440))), GARJAN_EPSILON) == 1, "modespec serde freq");
+
+    test_group("generate_modes");
+    var props = material_properties(MATERIAL_METAL);
+    var specs = generate_modes(props, MODE_PATTERN_PLATE, 12, f64_div(f64_from(5), f64_from(100)));
+    assert(vec_len(specs) > 0, "generated some modes");
+    var allfinite = 1;
+    var i = 0;
+    while (i < vec_len(specs)) {
+        if (garjan_is_finite(ModeSpec_frequency(vec_get(specs, i))) == 0) { allfinite = 0; }
+        i = i + 1;
+    }
+    assert(allfinite == 1, "all mode freqs finite");
+
+    test_group("modal_bank");
+    var bank = modal_bank_new(specs, f64_from(44100));
+    assert(garjan_is_err(bank) == 0, "bank built ok");
+    assert(modal_bank_mode_count(bank) > 0, "bank has modes");
+    # impulse response: feed 1.0 then zeros; output must be finite and ring
+    var y0 = modal_bank_process_sample(bank, F64_ONE);
+    var energy = 0;
+    i = 0;
+    var okfin = 1;
+    while (i < 4000) {
+        var y = modal_bank_process_sample(bank, 0);
+        if (garjan_is_finite(y) == 0) { okfin = 0; }
+        energy = f64_add(energy, f64_abs(y));
+        i = i + 1;
+    }
+    assert(okfin == 1, "modal bank output finite");
+    assert(f64_gt(energy, 0) == 1, "modal bank rings (nonzero energy)");
+    # bad sample rate rejected
+    assert(garjan_is_err(modal_bank_new(specs, 0)) == 1, "bank rejects sr=0");
+
+    test_group("exciter");
+    var imp = exciter_new(EXCITATION_IMPULSE, 0, F64_ONE);
+    exciter_trigger(imp);
+    assert(f64_lt(f64_abs(f64_sub(exciter_next_sample(imp), F64_ONE)), GARJAN_EPSILON) == 1, "impulse first sample = amp");
+    assert(f64_lt(f64_abs(exciter_next_sample(imp)), GARJAN_EPSILON) == 1, "impulse spent after 1 sample");
+    assert_eq(exciter_is_active(imp), 0, "impulse inactive after spent");
+    var burst = exciter_new(EXCITATION_NOISE_BURST, 100, F64_HALF);
+    exciter_trigger(burst);
+    var okb = 1;
+    i = 0;
+    while (i < 100) {
+        if (garjan_is_finite(exciter_next_sample(burst)) == 0) { okb = 0; }
+        i = i + 1;
+    }
+    assert(okb == 1, "noise burst finite");
+    # Matches Rust: active through exactly `duration` samples; the NEXT call spends it.
+    assert_eq(exciter_is_active(burst), 1, "noise burst still active after exactly duration");
+    exciter_next_sample(burst);
+    assert_eq(exciter_is_active(burst), 0, "noise burst spent on next call");
+
+    return assert_summary();
+}
+var ec = main();
+syscall(60, ec);

@@ -1,0 +1,38 @@
+# material.tcyr -- parity tests for src/material.cyr.
+include "src/error.cyr"
+include "src/logging.cyr"
+include "src/dsp.cyr"
+include "src/rng.cyr"
+include "src/material.cyr"
+include "src/modal.cyr"
+
+fn main() {
+    alloc_init();
+
+    test_group("properties");
+    var m = material_properties(MATERIAL_METAL);
+    assert(f64_lt(f64_abs(f64_sub(MaterialProperties_resonance(m), f64_from(2500))), GARJAN_EPSILON) == 1, "metal resonance 2500");
+    assert(f64_lt(f64_abs(f64_sub(MaterialProperties_brightness(m), f64_div(f64_from(9), f64_from(10)))), GARJAN_EPSILON) == 1, "metal brightness 0.9");
+    var g = material_properties(MATERIAL_GLASS);
+    assert(f64_lt(f64_abs(f64_sub(MaterialProperties_transient(g), F64_ONE)), GARJAN_EPSILON) == 1, "glass transient 1.0");
+
+    test_group("mode_config");
+    var c = material_mode_config(MATERIAL_METAL);
+    assert_eq(MaterialModeConfig_pattern(c), MODE_PATTERN_PLATE, "metal pattern plate");
+    assert_eq(MaterialModeConfig_mode_count(c), 12, "metal 12 modes");
+    var e = material_mode_config(MATERIAL_EARTH);
+    assert_eq(MaterialModeConfig_pattern(e), MODE_PATTERN_DAMPED, "earth pattern damped");
+
+    test_group("material_serde");
+    var sb = str_builder_new();
+    MaterialProperties_to_json(m, sb);
+    var j = str_data(str_builder_build(sb));
+    var m2 = MaterialProperties_from_json_str(j);
+    var sb2 = str_builder_new();
+    MaterialProperties_to_json(m2, sb2);
+    assert(memeq(j, str_data(str_builder_build(sb2)), strlen(j)) == 1, "MaterialProperties roundtrip");
+
+    return assert_summary();
+}
+var ec = main();
+syscall(60, ec);

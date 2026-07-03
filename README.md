@@ -1,6 +1,8 @@
 # garjan
 
-**garjan** (Sanskrit: गर्जन — roar / thunder) — Environmental and nature sound synthesis for Rust.
+**garjan** (Sanskrit: गर्जन — roar / thunder) — Environmental and nature sound synthesis for the [Cyrius](https://github.com/MacCracken/cyrius) language (AGNOS ecosystem).
+
+> **Ported from Rust.** The original Rust crate is preserved under [`rust-old/`](rust-old/); the Cyrius port lives in `src/*.cyr`. Build with `cyrius build src/main.cyr build/garjan`, test with `cyrius test`.
 
 Procedural synthesis of weather, impacts, surfaces, fluids, fire, creatures, and aerodynamics. All sounds generated from physical models — modal resonance, stochastic particle impacts, stick-slip friction, turbulent noise shaping. No samples, no assets, pure math.
 
@@ -46,43 +48,70 @@ Procedural synthesis of weather, impacts, surfaces, fluids, fire, creatures, and
 
 ## Quick Start
 
-```rust
-use garjan::prelude::*;
+Consumers include the bundled `dist/garjan.cyr` and declare garjan's deps
+(naad / hisab / goonj / sakshi + stdlib) in their own `cyrius.cyml`, exactly as
+`src/main.cyr` does. Constructors return a heap pointer or a negative
+`GARJAN_ERR_*` code; `garjan_is_err(x)` checks it.
 
-// Thunder 2km away
-let mut thunder = Thunder::new(2000.0, 44100.0).unwrap();
-let samples = thunder.synthesize(3.0).unwrap();
+```cyrius
+include "dist/garjan.cyr"
 
-// Streaming: fill your own buffer
-let mut wind = Wind::new(15.0, 0.5, 44100.0).unwrap();
-let mut buf = [0.0f32; 512];
-wind.process_block(&mut buf);
+fn main() {
+    alloc_init();
 
-// Modal impact with velocity
-let mut impact = Impact::new(Material::Metal, 44100.0).unwrap();
-let samples = impact.synthesize_velocity(ImpactType::Strike, 0.8).unwrap();
+    # Fire at half intensity, 44.1 kHz -> 0.5 s of audio
+    var fire = fire_new(F64_HALF, f64_from(44100));
+    if (garjan_is_err(fire) == 1) { return 1; }
+    var samples = fire_synthesize(fire, F64_HALF);   # a vec of f64
+
+    # Moderate rain generator
+    var rain = rain_new(RAIN_INTENSITY_MODERATE, f64_from(44100));
+
+    # Modal impact on metal
+    var props = material_properties(MATERIAL_METAL);
+    var mc = material_mode_config(MATERIAL_METAL);
+    var specs = generate_modes(props, MaterialModeConfig_pattern(mc),
+                               MaterialModeConfig_mode_count(mc),
+                               MaterialModeConfig_damping_factor(mc));
+    var bank = modal_bank_new(specs, f64_from(44100));
+
+    return 0;
+}
+var r = main();
+syscall(60, r);
 ```
+
+Every public type also serializes to / from JSON (`<type>_to_json(p, sb)` /
+`<type>_from_json_str(json)`), including the stateful synthesizers.
 
 ## Performance
 
-All synthesizers run well above real-time. Typical measurements at 44.1 kHz:
+Every synthesizer runs comfortably above real-time. Measurements from
+`cyrius bench tests/garjan.bcyr` (`process_block` of 1 s of audio at 44.1 kHz,
+x86_64 Linux):
 
 | Synthesizer | Time for 1s audio | Real-time factor |
 |---|---|---|
-| Cloth (Flag) | 111 µs | 9,000x |
-| Thunder | 92 µs | 10,800x |
-| Rain (Moderate) | 299 µs | 3,300x |
-| Wind | 1.0 ms | 1,000x |
-| Impact (Metal) | 1.4 ms | 710x |
-| Surf (Moderate, 2s) | ~3 ms | 660x |
+| Cloth (Flag) | 1.03 ms | ~970x |
+| Rain (Moderate) | 3.84 ms | ~260x |
+| Fire | 4.94 ms | ~200x |
+| Thunder | 5.65 ms | ~180x |
+| Wind | 11.6 ms | ~85x |
 
-## Feature Flags
+The Cyrius port widened `f32` → `f64` and calls the naad DSP bundle unoptimized,
+so per-sample cost is higher than the original Rust crate — still far above
+real-time for any realistic voice count.
 
-| Flag | Default | Description |
-|------|---------|-------------|
-| `std` | Yes | Standard library. Disable for `no_std` + `alloc` |
-| `naad-backend` | Yes | Use naad for filters, noise generators, and LFOs |
-| `logging` | No | Structured tracing via the `tracing` crate |
+## What the Rust feature flags became
+
+Cyrius has no cargo-style features; the Rust flags map to always-on wiring:
+
+| Rust flag | In the Cyrius port |
+|-----------|--------------------|
+| `naad-backend` | Always on — noise/filters/LFOs come from the naad bundle |
+| `logging` | Always compiled, wired through **sakshi**; gate at runtime with `sakshi_set_level` |
+| `std` | n/a — Cyrius targets AGNOS/bare-metal natively |
+| `soorat-compat` | Deferred (kept in `rust-old/`) until soorat is ported |
 
 ## Design
 

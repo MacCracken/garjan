@@ -1,0 +1,238 @@
+# voice.cyr -- priority-based polyphony with voice stealing.
+#
+# Ports rust-old/src/voice.rs (StealPolicy, VoiceSlot, VoicePool). f32/int
+# types -> f64/i64. Option<usize> (allocate) -> VOICE_NONE (-1) sentinel.
+# VoiceSlot derives Serialize (all-scalar). VoicePool holds a Vec<VoiceSlot>,
+# which #derive(Serialize) cannot express -- its JSON codec is hand-rolled in
+# the serde test pass. Standalone (stdlib alloc/vec only).
+
+var VOICE_NONE = (0 - 1);   # Option<usize>::None
+
+# ---- StealPolicy (order matches Rust: Oldest, LowestPriority, None) ----
+var STEAL_OLDEST          = 0;
+var STEAL_LOWEST_PRIORITY = 1;
+var STEAL_NONE            = 2;
+
+# VoiceSlot -- all scalar, typed for #derive(Serialize).
+#   active: 0/1;  priority: 0..255 (higher = harder to steal);
+#   age: ticks since activation;  tag: user-defined sound id.
+#derive(accessors)
+#derive(Serialize)
+struct VoiceSlot {
+    active: i64;
+    priority: i64;
+    age: i64;
+    tag: i64;
+}
+
+#must_use
+fn voice_slot_new() {
+    var s = alloc(sizeof(VoiceSlot));
+    VoiceSlot_set_active(s, 0);
+    VoiceSlot_set_priority(s, 0);
+    VoiceSlot_set_age(s, 0);
+    VoiceSlot_set_tag(s, 0);
+    return s;
+}
+
+# VoicePool -- fixed pool of slots + steal policy.
+#derive(accessors)
+struct VoicePool { slots; steal_policy; max_voices; }
+
+#must_use
+fn voice_pool_new(max_voices_arg, steal_policy) {
+    var max_voices = max_voices_arg;
+    if (max_voices < 1) { max_voices = 1; }
+    var slots = vec_new();
+    var i = 0;
+    while (i < max_voices) {
+        vec_push(slots, voice_slot_new());
+        i = i + 1;
+    }
+    var p = alloc(sizeof(VoicePool));
+    VoicePool_set_slots(p, slots);
+    VoicePool_set_steal_policy(p, steal_policy);
+    VoicePool_set_max_voices(p, max_voices);
+    return p;
+}
+
+#inline
+#must_use
+fn voice_pool_max_voices(p) { return VoicePool_max_voices(p); }
+
+#must_use
+fn voice_pool_active_count(p) {
+    var slots = VoicePool_slots(p);
+    var n = vec_len(slots);
+    var count = 0;
+    var i = 0;
+    while (i < n) {
+        if (VoiceSlot_active(vec_get(slots, i)) == 1) { count = count + 1; }
+        i = i + 1;
+    }
+    return count;
+}
+
+# Internal: overwrite slot `idx` with a fresh active voice.
+fn _voice_pool_assign(p, idx, priority, tag) {
+    var s = vec_get(VoicePool_slots(p), idx);
+    VoiceSlot_set_active(s, 1);
+    VoiceSlot_set_priority(s, priority);
+    VoiceSlot_set_age(s, 0);
+    VoiceSlot_set_tag(s, tag);
+    return 0;
+}
+
+# Allocate a voice. Returns a slot index, or VOICE_NONE if the pool is full
+# and cannot steal. Ports VoicePool::allocate (Option<usize>).
+#must_use
+fn voice_pool_allocate(p, priority, tag) {
+    var slots = VoicePool_slots(p);
+    var n = vec_len(slots);
+
+    # First: an inactive slot (position() -> first match).
+    var i = 0;
+    while (i < n) {
+        if (VoiceSlot_active(vec_get(slots, i)) == 0) {
+            _voice_pool_assign(p, i, priority, tag);
+            return i;
+        }
+        i = i + 1;
+    }
+
+    # Full -- steal per policy.
+    var mode = VoicePool_steal_policy(p);
+    if (mode == STEAL_NONE) { return VOICE_NONE; }
+
+    if (mode == STEAL_OLDEST) {
+        # max_by_key(age): LAST maximum on ties -> use >=.
+        var best = 0;
+        var best_age = VoiceSlot_age(vec_get(slots, 0));
+        i = 1;
+        while (i < n) {
+            var a = VoiceSlot_age(vec_get(slots, i));
+            if (a >= best_age) { best = i; best_age = a; }
+            i = i + 1;
+        }
+        _voice_pool_assign(p, best, priority, tag);
+        return best;
+    }
+
+    # STEAL_LOWEST_PRIORITY: min_by(priority asc, then age desc), FIRST on tie.
+    var best = 0;
+    var best_pri = VoiceSlot_priority(vec_get(slots, 0));
+    var best_age = VoiceSlot_age(vec_get(slots, 0));
+    i = 1;
+    while (i < n) {
+        var s = vec_get(slots, i);
+        var pri = VoiceSlot_priority(s);
+        var age = VoiceSlot_age(s);
+        var better = 0;
+        if (pri < best_pri) { better = 1; }
+        elif (pri == best_pri) { if (age > best_age) { better = 1; } }
+        if (better == 1) { best = i; best_pri = pri; best_age = age; }
+        i = i + 1;
+    }
+    # Only steal if the new voice is at least as important.
+    if (priority >= best_pri) {
+        _voice_pool_assign(p, best, priority, tag);
+        return best;
+    }
+    return VOICE_NONE;
+}
+
+# Release a voice slot (bounds-checked; no-op if out of range).
+fn voice_pool_release(p, index) {
+    var slots = VoicePool_slots(p);
+    if (index < 0) { return 0; }
+    if (index >= vec_len(slots)) { return 0; }
+    var s = vec_get(slots, index);
+    VoiceSlot_set_active(s, 0);
+    VoiceSlot_set_age(s, 0);
+    return 0;
+}
+
+# Advance age for all active voices (call once per audio block).
+fn voice_pool_tick(p) {
+    var slots = VoicePool_slots(p);
+    var n = vec_len(slots);
+    var i = 0;
+    while (i < n) {
+        var s = vec_get(slots, i);
+        if (VoiceSlot_active(s) == 1) { VoiceSlot_set_age(s, VoiceSlot_age(s) + 1); }
+        i = i + 1;
+    }
+    return 0;
+}
+
+# Slot pointer at index, or 0 (None) if out of range.
+#must_use
+fn voice_pool_slot(p, index) {
+    var slots = VoicePool_slots(p);
+    if (index < 0) { return 0; }
+    if (index >= vec_len(slots)) { return 0; }
+    return vec_get(slots, index);
+}
+
+# Release all voices.
+fn voice_pool_release_all(p) {
+    var slots = VoicePool_slots(p);
+    var n = vec_len(slots);
+    var i = 0;
+    while (i < n) {
+        var s = vec_get(slots, i);
+        VoiceSlot_set_active(s, 0);
+        VoiceSlot_set_age(s, 0);
+        i = i + 1;
+    }
+    return 0;
+}
+
+# ---- serde (hand-rolled: VoicePool holds a Vec<VoiceSlot>, which
+# #derive(Serialize) can't express). Emits {steal_policy, max_voices,
+# slots:[VoiceSlot...]} reusing the derived VoiceSlot codec; parses back with
+# bayan. Roundtrip is idempotent because both to_json paths share this fn. ----
+fn voice_pool_to_json(p, sb) {
+    var slots = VoicePool_slots(p);
+    var n = vec_len(slots);
+    str_builder_add_cstr(sb, "{\"steal_policy\":");
+    str_builder_add_int(sb, VoicePool_steal_policy(p));
+    str_builder_add_cstr(sb, ",\"max_voices\":");
+    str_builder_add_int(sb, VoicePool_max_voices(p));
+    str_builder_add_cstr(sb, ",\"slots\":[");
+    var i = 0;
+    while (i < n) {
+        if (i > 0) { str_builder_add_cstr(sb, ","); }
+        VoiceSlot_to_json(vec_get(slots, i), sb);
+        i = i + 1;
+    }
+    str_builder_add_cstr(sb, "]}");
+    return 0;
+}
+
+# Uses the nesting-capable value-tree parser (bayan_json_v_parse_str) since
+# the object has a nested slots array; v_obj_get keys are plain cstrings.
+#must_use
+fn voice_pool_from_json_str(json) {
+    var root = bayan_json_v_parse_str(json, strlen(json));
+    var sp = bayan_json_v_int(bayan_json_v_obj_get(root, "steal_policy"));
+    var mv = bayan_json_v_int(bayan_json_v_obj_get(root, "max_voices"));
+    var p = voice_pool_new(mv, sp);
+    var slots_val = bayan_json_v_obj_get(root, "slots");
+    var n = bayan_json_v_arr_len(slots_val);
+    var dst = VoicePool_slots(p);
+    var cap = vec_len(dst);
+    var i = 0;
+    while (i < n) {
+        if (i < cap) {
+            var elem = bayan_json_v_arr_get(slots_val, i);
+            var s = vec_get(dst, i);
+            VoiceSlot_set_active(s, bayan_json_v_int(bayan_json_v_obj_get(elem, "active")));
+            VoiceSlot_set_priority(s, bayan_json_v_int(bayan_json_v_obj_get(elem, "priority")));
+            VoiceSlot_set_age(s, bayan_json_v_int(bayan_json_v_obj_get(elem, "age")));
+            VoiceSlot_set_tag(s, bayan_json_v_int(bayan_json_v_obj_get(elem, "tag")));
+        }
+        i = i + 1;
+    }
+    return p;
+}

@@ -1,0 +1,74 @@
+# bubble.tcyr -- parity tests for src/bubble.cyr (naad synth + serde).
+include "src/error.cyr"
+include "src/logging.cyr"
+include "src/dsp.cyr"
+include "src/rng.cyr"
+include "src/lod.cyr"
+include "src/material.cyr"
+include "src/modal.cyr"
+include "src/contact.cyr"
+include "src/aero.cyr"
+include "src/creature.cyr"
+include "src/bubble.cyr"
+
+fn main() {
+    alloc_init();
+
+    test_group("bubble_new");
+    var b = bubble_new(BUBBLE_BOILING, f64_from(44100));
+    assert(garjan_is_err(b) == 0, "bubble_new ok");
+    assert(garjan_is_err(bubble_new(BUBBLE_BOILING, 0)) == 1, "bubble_new rejects sr=0");
+    # BUBBLE_BOILING config: base_freq 800, event_rate 30, freq_spread 600.
+    assert(f64_lt(f64_abs(f64_sub(Bubble_base_freq(b), f64_from(800))), GARJAN_EPSILON) == 1, "boiling base_freq 800");
+    assert(f64_lt(f64_abs(f64_sub(Bubble_event_rate(b), f64_from(30))), GARJAN_EPSILON) == 1, "boiling event_rate 30");
+    # default intensity 1.0
+    assert(f64_lt(f64_abs(f64_sub(Bubble_intensity(b), F64_ONE)), GARJAN_EPSILON) == 1, "default intensity 1.0");
+
+    test_group("synthesize");
+    var buf = bubble_synthesize(b, f64_div(f64_from(1), f64_from(10)));   # 0.1s
+    assert(garjan_is_err(buf) == 0, "synthesize ok");
+    assert_eq(vec_len(buf), 4410, "0.1s @ 44100 = 4410 samples");
+    var i = 0;
+    var allfinite = 1;
+    var energy = 0;
+    while (i < vec_len(buf)) {
+        var s = vec_get(buf, i);
+        if (garjan_is_finite(s) == 0) { allfinite = 0; }
+        energy = f64_add(energy, f64_abs(s));
+        i = i + 1;
+    }
+    assert(allfinite == 1, "all bubble samples finite");
+    assert(f64_gt(energy, 0) == 1, "bubble produces sound (nonzero energy)");
+    assert(garjan_is_err(bubble_synthesize(b, 0)) == 1, "synthesize rejects duration=0");
+
+    test_group("silent path");
+    var q = bubble_new(BUBBLE_UNDERWATER, f64_from(44100));
+    bubble_set_intensity(q, 0);
+    var qbuf = bubble_synthesize(q, f64_div(f64_from(1), f64_from(100)));   # 0.01s
+    assert_eq(vec_len(qbuf), 441, "0.01s @ 44100 = 441 samples");
+    var qi = 0;
+    var qenergy = 0;
+    while (qi < vec_len(qbuf)) {
+        qenergy = f64_add(qenergy, f64_abs(vec_get(qbuf, qi)));
+        qi = qi + 1;
+    }
+    assert(f64_lt(qenergy, GARJAN_EPSILON) == 1, "intensity 0 is silent");
+
+    test_group("bubble_serde");
+    var g = bubble_new(BUBBLE_POURING, f64_from(48000));
+    # advance state so rng/dc_blocker are non-default
+    bubble_synthesize(g, f64_div(f64_from(1), f64_from(100)));
+    var sb = str_builder_new();
+    bubble_to_json(g, sb);
+    var j = str_data(str_builder_build(sb));
+    var g2 = bubble_from_json_str(j);
+    var sb2 = str_builder_new();
+    bubble_to_json(g2, sb2);
+    assert(memeq(j, str_data(str_builder_build(sb2)), strlen(j)) == 1, "bubble params json roundtrip idempotent");
+    # restored synth resumes the SAME rng sequence
+    assert_eq(rng_next_u32(Bubble_rng(g)), rng_next_u32(Bubble_rng(g2)), "restored bubble resumes rng");
+
+    return assert_summary();
+}
+var ec = main();
+syscall(60, ec);

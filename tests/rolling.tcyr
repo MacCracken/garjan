@@ -1,0 +1,80 @@
+# rolling.tcyr -- parity tests for src/rolling.cyr (naad synth + modal + serde).
+include "src/error.cyr"
+include "src/logging.cyr"
+include "src/dsp.cyr"
+include "src/rng.cyr"
+include "src/lod.cyr"
+include "src/material.cyr"
+include "src/modal.cyr"
+include "src/contact.cyr"
+include "src/aero.cyr"
+include "src/creature.cyr"
+include "src/rolling.cyr"
+
+fn main() {
+    alloc_init();
+
+    test_group("rolling_new");
+    var r = rolling_new(ROLLING_BALL, MATERIAL_STONE, f64_from(44100));
+    assert(garjan_is_err(r) == 0, "rolling_new ok");
+    assert(garjan_is_err(rolling_new(ROLLING_BALL, MATERIAL_STONE, 0)) == 1, "rolling_new rejects sr=0");
+    # Ball: radius 0.05, mass_factor 0.2, hollowness 0.0 (no modal bank).
+    assert(f64_lt(f64_abs(f64_sub(Rolling_radius(r), f64_div(f64_from(5), f64_from(100)))), GARJAN_EPSILON) == 1, "ball radius 0.05");
+    assert(Rolling_modal_bank(r) == 0, "ball has no modal bank");
+
+    test_group("barrel_hollow");
+    var barrel = rolling_new(ROLLING_BARREL, MATERIAL_WOOD, f64_from(44100));
+    assert(garjan_is_err(barrel) == 0, "barrel rolling_new ok");
+    # Barrel: hollowness 0.8, modal bank present.
+    assert(f64_lt(f64_abs(f64_sub(Rolling_hollowness(barrel), f64_div(f64_from(8), f64_from(10)))), GARJAN_EPSILON) == 1, "barrel hollowness 0.8");
+    assert(Rolling_modal_bank(barrel) != 0, "barrel has a modal bank");
+
+    test_group("synthesize");
+    rolling_set_velocity(r, F64_HALF);
+    var buf = rolling_synthesize(r, f64_div(f64_from(1), f64_from(10)));   # 0.1s
+    assert(garjan_is_err(buf) == 0, "synthesize ok");
+    assert_eq(vec_len(buf), 4410, "0.1s @ 44100 = 4410 samples");
+    var i = 0;
+    var allfinite = 1;
+    var energy = 0;
+    while (i < vec_len(buf)) {
+        var s = vec_get(buf, i);
+        if (garjan_is_finite(s) == 0) { allfinite = 0; }
+        energy = f64_add(energy, f64_abs(s));
+        i = i + 1;
+    }
+    assert(allfinite == 1, "all rolling samples finite");
+    assert(f64_gt(energy, 0) == 1, "rolling produces sound (nonzero energy)");
+    assert(garjan_is_err(rolling_synthesize(r, 0)) == 1, "synthesize rejects duration=0");
+
+    test_group("still_silent");
+    # velocity below 0.001 threshold -> silence.
+    var q = rolling_new(ROLLING_WHEEL, MATERIAL_METAL, f64_from(44100));
+    var sil = rolling_synthesize(q, f64_div(f64_from(1), f64_from(100)));
+    var j = 0;
+    var sil_energy = 0;
+    while (j < vec_len(sil)) {
+        sil_energy = f64_add(sil_energy, f64_abs(vec_get(sil, j)));
+        j = j + 1;
+    }
+    assert(f64_lt(sil_energy, GARJAN_EPSILON) == 1, "still body is silent");
+
+    test_group("rolling_serde");
+    var g = rolling_new(ROLLING_BARREL, MATERIAL_WOOD, f64_from(48000));
+    rolling_set_velocity(g, f64_div(f64_from(7), f64_from(10)));
+    # advance state so rng/dc_blocker/rotation_phase are non-default
+    rolling_synthesize(g, f64_div(f64_from(1), f64_from(100)));
+    var sb = str_builder_new();
+    rolling_to_json(g, sb);
+    var jtxt = str_data(str_builder_build(sb));
+    var g2 = rolling_from_json_str(jtxt);
+    var sb2 = str_builder_new();
+    rolling_to_json(g2, sb2);
+    assert(memeq(jtxt, str_data(str_builder_build(sb2)), strlen(jtxt)) == 1, "rolling params json roundtrip idempotent");
+    # restored synth resumes the SAME rng sequence
+    assert_eq(rng_next_u32(Rolling_rng(g)), rng_next_u32(Rolling_rng(g2)), "restored rolling resumes rng");
+
+    return assert_summary();
+}
+var ec = main();
+syscall(60, ec);

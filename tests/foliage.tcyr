@@ -1,0 +1,84 @@
+# foliage.tcyr -- parity tests for src/foliage.cyr (naad synth + serde).
+include "src/error.cyr"
+include "src/logging.cyr"
+include "src/dsp.cyr"
+include "src/rng.cyr"
+include "src/lod.cyr"
+include "src/material.cyr"
+include "src/modal.cyr"
+include "src/contact.cyr"
+include "src/aero.cyr"
+include "src/creature.cyr"
+include "src/foliage.cyr"
+
+fn main() {
+    alloc_init();
+
+    test_group("foliage_new");
+    var f = foliage_new(FOLIAGE_LEAF_RUSTLE, f64_from(44100));
+    assert(garjan_is_err(f) == 0, "foliage_new ok");
+    assert(garjan_is_err(foliage_new(FOLIAGE_LEAF_RUSTLE, 0)) == 1, "foliage_new rejects sr=0");
+    # event_rate = 20 for LeafRustle
+    assert(f64_lt(f64_abs(f64_sub(Foliage_event_rate(f), f64_from(20))), GARJAN_EPSILON) == 1, "leaf event_rate 20");
+    # event_duration_samples = (2.0 * 44100 / 1000) = 88
+    assert_eq(Foliage_event_duration_samples(f), 88, "leaf event_dur_samples 88");
+
+    test_group("synthesize");
+    # drive some wind + contact so the bed and micro-events are active
+    foliage_set_wind_speed(f, f64_div(f64_from(6), f64_from(10)));
+    foliage_set_contact_intensity(f, f64_div(f64_from(4), f64_from(10)));
+    var buf = foliage_synthesize(f, f64_div(f64_from(1), f64_from(10)));   # 0.1s
+    assert(garjan_is_err(buf) == 0, "synthesize ok");
+    assert_eq(vec_len(buf), 4410, "0.1s @ 44100 = 4410 samples");
+    var i = 0;
+    var allfinite = 1;
+    var energy = 0;
+    while (i < vec_len(buf)) {
+        var s = vec_get(buf, i);
+        if (garjan_is_finite(s) == 0) { allfinite = 0; }
+        energy = f64_add(energy, f64_abs(s));
+        i = i + 1;
+    }
+    assert(allfinite == 1, "all foliage samples finite");
+    assert(f64_gt(energy, 0) == 1, "foliage produces sound (nonzero energy)");
+    assert(garjan_is_err(foliage_synthesize(f, 0)) == 1, "synthesize rejects duration=0");
+
+    test_group("branch_snap");
+    var bs = foliage_new(FOLIAGE_BRANCH_SNAP, f64_from(44100));
+    assert(garjan_is_err(bs) == 0, "branch snap new ok");
+    # event_rate = 0 for BranchSnap
+    assert(f64_lt(f64_abs(Foliage_event_rate(bs)), GARJAN_EPSILON) == 1, "branch event_rate 0");
+    foliage_trigger_snap(bs);
+    var sbuf = foliage_synthesize(bs, f64_div(f64_from(1), f64_from(10)));
+    assert(garjan_is_err(sbuf) == 0, "snap synthesize ok");
+    var k = 0;
+    var snap_energy = 0;
+    var snap_finite = 1;
+    while (k < vec_len(sbuf)) {
+        var ss = vec_get(sbuf, k);
+        if (garjan_is_finite(ss) == 0) { snap_finite = 0; }
+        snap_energy = f64_add(snap_energy, f64_abs(ss));
+        k = k + 1;
+    }
+    assert(snap_finite == 1, "all snap samples finite");
+    assert(f64_gt(snap_energy, 0) == 1, "branch snap produces sound");
+
+    test_group("foliage_serde");
+    var g = foliage_new(FOLIAGE_GRASS_SWISH, f64_from(48000));
+    foliage_set_wind_speed(g, f64_div(f64_from(7), f64_from(10)));
+    # advance state so rng/dc_blocker are non-default
+    foliage_synthesize(g, f64_div(f64_from(1), f64_from(100)));
+    var sb = str_builder_new();
+    foliage_to_json(g, sb);
+    var j = str_data(str_builder_build(sb));
+    var g2 = foliage_from_json_str(j);
+    var sb2 = str_builder_new();
+    foliage_to_json(g2, sb2);
+    assert(memeq(j, str_data(str_builder_build(sb2)), strlen(j)) == 1, "foliage params json roundtrip idempotent");
+    # restored synth resumes the SAME rng sequence
+    assert_eq(rng_next_u32(Foliage_rng(g)), rng_next_u32(Foliage_rng(g2)), "restored foliage resumes rng");
+
+    return assert_summary();
+}
+var ec = main();
+syscall(60, ec);

@@ -1,0 +1,96 @@
+# water.tcyr -- parity tests for src/water.cyr (naad synth + serde).
+include "src/error.cyr"
+include "src/logging.cyr"
+include "src/dsp.cyr"
+include "src/rng.cyr"
+include "src/lod.cyr"
+include "src/material.cyr"
+include "src/modal.cyr"
+include "src/contact.cyr"
+include "src/aero.cyr"
+include "src/creature.cyr"
+include "src/water.cyr"
+
+# Sum of |sample| over a buffer (used to assert nonzero energy).
+fn water_test_energy(buf) {
+    var i = 0;
+    var e = 0;
+    while (i < vec_len(buf)) {
+        e = f64_add(e, f64_abs(vec_get(buf, i)));
+        i = i + 1;
+    }
+    return e;
+}
+
+# 1 if every sample in buf is finite, else 0.
+fn water_test_allfinite(buf) {
+    var i = 0;
+    var ok = 1;
+    while (i < vec_len(buf)) {
+        if (garjan_is_finite(vec_get(buf, i)) == 0) { ok = 0; }
+        i = i + 1;
+    }
+    return ok;
+}
+
+fn main() {
+    alloc_init();
+
+    test_group("water_new");
+    var w = water_new(WATER_STREAM, F64_HALF, f64_from(44100));
+    assert(garjan_is_err(w) == 0, "water_new ok");
+    assert(garjan_is_err(water_new(WATER_STREAM, F64_HALF, 0)) == 1, "water_new rejects sr=0");
+    # intensity clamps to [0,1]
+    var wclamp = water_new(WATER_WAVES, F64_TWO, f64_from(44100));
+    assert(f64_lt(f64_abs(f64_sub(Water_intensity(wclamp), F64_ONE)), GARJAN_EPSILON) == 1, "intensity clamped to 1");
+    # drip_freq derives deterministically from a throwaway Rng::new(2749):
+    # 1200 + Rng::new(2749).next_f32_range(-200,200). Recompute the oracle.
+    var oracle_rng = rng_new(2749);
+    var oracle_drip = f64_add(f64_from(1200), rng_next_f32_range(oracle_rng, f64_neg(f64_from(200)), f64_from(200)));
+    assert(f64_lt(f64_abs(f64_sub(Water_drip_freq(w), oracle_drip)), GARJAN_EPSILON) == 1, "drip_freq deterministic");
+
+    test_group("synthesize_stream");
+    var buf = water_synthesize(w, f64_div(f64_from(1), f64_from(10)));   # 0.1s
+    assert(garjan_is_err(buf) == 0, "stream synthesize ok");
+    assert_eq(vec_len(buf), 4410, "0.1s @ 44100 = 4410 samples");
+    assert(water_test_allfinite(buf) == 1, "all stream samples finite");
+    assert(f64_gt(water_test_energy(buf), 0) == 1, "stream produces sound");
+    assert(garjan_is_err(water_synthesize(w, 0)) == 1, "synthesize rejects duration=0");
+
+    test_group("synthesize_drip");
+    var wd = water_new(WATER_DRIP, F64_ONE, f64_from(44100));
+    var dbuf = water_synthesize(wd, f64_div(f64_from(1), f64_from(10)));
+    assert(garjan_is_err(dbuf) == 0, "drip synthesize ok");
+    assert(water_test_allfinite(dbuf) == 1, "all drip samples finite");
+    assert(f64_gt(water_test_energy(dbuf), 0) == 1, "drip produces sound");
+
+    test_group("synthesize_splash_waves");
+    var ws = water_new(WATER_SPLASH, f64_div(f64_from(8), f64_from(10)), f64_from(44100));
+    var sbuf = water_synthesize(ws, f64_div(f64_from(1), f64_from(10)));
+    assert(water_test_allfinite(sbuf) == 1, "all splash samples finite");
+    assert(f64_gt(water_test_energy(sbuf), 0) == 1, "splash produces sound");
+    var wv = water_new(WATER_WAVES, f64_div(f64_from(6), f64_from(10)), f64_from(44100));
+    var vbuf = water_synthesize(wv, f64_div(f64_from(1), f64_from(10)));
+    assert(water_test_allfinite(vbuf) == 1, "all waves samples finite");
+    assert(f64_gt(water_test_energy(vbuf), 0) == 1, "waves produces sound");
+
+    test_group("water_serde");
+    var g = water_new(WATER_STREAM, f64_div(f64_from(7), f64_from(10)), f64_from(48000));
+    # advance state so rng/dc_blocker/naad are non-default
+    water_synthesize(g, f64_div(f64_from(1), f64_from(100)));
+    var jb = str_builder_new();
+    water_to_json(g, jb);
+    var j = str_data(str_builder_build(jb));
+    var g2 = water_from_json_str(j);
+    var jb2 = str_builder_new();
+    water_to_json(g2, jb2);
+    assert(memeq(j, str_data(str_builder_build(jb2)), strlen(j)) == 1, "water params json roundtrip idempotent");
+    # restored synth resumes the SAME rng sequence
+    assert_eq(rng_next_u32(Water_rng(g)), rng_next_u32(Water_rng(g2)), "restored water resumes rng");
+    # water_type survives the roundtrip
+    assert_eq(Water_water_type(g2), WATER_STREAM, "water_type roundtrips");
+
+    return assert_summary();
+}
+var ec = main();
+syscall(60, ec);

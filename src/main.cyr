@@ -1,0 +1,57 @@
+# garjan — Cyrius port smoke entry.
+#
+# Builds the whole library (the dist bundle + its consumer deps: stdlib +
+# naad/hisab/goonj/sakshi, auto-prepended from cyrius.cyml) into one binary and
+# runs a tiny cross-layer smoke — proving dist/garjan.cyr compiles and links as
+# an executable. Downstream consumers include dist/garjan.cyr the same way.
+# Per-module behaviour is validated by tests/*.tcyr; this entry is not what
+# those suites include.
+
+include "dist/garjan.cyr"
+
+fn main() {
+    alloc_init();
+
+    # Fire: synthesize 0.05 s at 44.1 kHz; every sample must be finite.
+    var f = fire_new(F64_HALF, f64_from(44100));
+    if (garjan_is_err(f) == 1) { println("garjan: fire init failed"); return 1; }
+    var buf = fire_synthesize(f, f64_div(f64_from(5), f64_from(100)));
+    if (garjan_is_err(buf) == 1) { println("garjan: fire synth failed"); return 1; }
+    var i = 0;
+    var finite = 0;
+    while (i < vec_len(buf)) {
+        if (garjan_is_finite(vec_get(buf, i)) == 1) { finite = finite + 1; }
+        i = i + 1;
+    }
+
+    # Weather: a moderate rain generator must initialize.
+    var rain = rain_new(RAIN_INTENSITY_MODERATE, f64_from(44100));
+    if (garjan_is_err(rain) == 1) { println("garjan: rain init failed"); return 1; }
+
+    # Modal impact on metal: build a bank and confirm it rings finite.
+    var props = material_properties(MATERIAL_METAL);
+    var mc = material_mode_config(MATERIAL_METAL);
+    var specs = generate_modes(props, MaterialModeConfig_pattern(mc),
+                               MaterialModeConfig_mode_count(mc),
+                               MaterialModeConfig_damping_factor(mc));
+    var bank = modal_bank_new(specs, f64_from(44100));
+    if (garjan_is_err(bank) == 1) { println("garjan: modal bank failed"); return 1; }
+    var y = modal_bank_process_sample(bank, F64_ONE);
+
+    # Bridge: a physical-input conversion must classify correctly.
+    var ri = bridge_rain_intensity_from_rate(f64_from(10));   # 10 mm/hr -> Heavy
+
+    if (finite == vec_len(buf)) {
+        if (garjan_is_finite(y) == 1) {
+            if (ri == RAIN_INTENSITY_HEAVY) {
+                println("garjan (Cyrius port) — smoke OK");
+                return 0;
+            }
+        }
+    }
+    println("garjan: smoke FAILED");
+    return 1;
+}
+
+var r = main();
+syscall(60, r);

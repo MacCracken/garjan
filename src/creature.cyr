@@ -1,0 +1,77 @@
+# creature.cyr -- shared types for creature & fluid synthesis.
+#
+# Ports rust-old/src/creature.rs (InsectType + BubbleType enums and their
+# config() tuple accessors). Enums -> module-prefixed int constants; the
+# config() tuples -> small transient config structs (accessor-read, no serde).
+# f32 -> f64. Standalone (no deps beyond stdlib math). Constants use
+# f64_from(N) / f64_div(f64_from(a), f64_from(b)) for readability.
+
+# ---- InsectType ----
+var INSECT_WING_BUZZ     = 0;   # FM vibration (bee/fly/mosquito)
+var INSECT_CRICKET_CHIRP = 1;   # stridulation
+var INSECT_CICADA_DRONE  = 2;   # sustained rattle
+
+# ---- BubbleType ----
+var BUBBLE_UNDERWATER = 0;
+var BUBBLE_BOILING    = 1;
+var BUBBLE_VISCOUS    = 2;
+var BUBBLE_POURING    = 3;
+
+# config tuple (base_freq_hz, mod_rate_hz, chirp_rate_hz, amplitude).
+#derive(accessors)
+struct InsectConfig { base_freq; mod_rate; chirp_rate; amplitude; }
+
+#must_use
+fn creature_insect_config(ty) {
+    var c = alloc(sizeof(InsectConfig));
+    if (ty == INSECT_WING_BUZZ) {
+        InsectConfig_set_base_freq(c, f64_from(200));
+        InsectConfig_set_mod_rate(c, f64_from(8));
+        InsectConfig_set_chirp_rate(c, 0);
+        InsectConfig_set_amplitude(c, f64_div(f64_from(3), f64_from(10)));      # 0.3
+    } elif (ty == INSECT_CRICKET_CHIRP) {
+        InsectConfig_set_base_freq(c, f64_from(4000));
+        InsectConfig_set_mod_rate(c, f64_from(15));
+        InsectConfig_set_chirp_rate(c, f64_from(3));
+        InsectConfig_set_amplitude(c, f64_div(f64_from(2), f64_from(10)));      # 0.2
+    } else {
+        # CicadaDrone
+        InsectConfig_set_base_freq(c, f64_from(6000));
+        InsectConfig_set_mod_rate(c, f64_from(20));
+        InsectConfig_set_chirp_rate(c, f64_div(f64_from(5), f64_from(10)));     # 0.5
+        InsectConfig_set_amplitude(c, f64_div(f64_from(25), f64_from(100)));    # 0.25
+    }
+    return c;
+}
+
+# config tuple (base_freq_hz, event_rate, freq_spread, decay_time_s).
+#derive(accessors)
+struct BubbleConfig { base_freq; event_rate; freq_spread; decay; }
+
+#must_use
+fn creature_bubble_config(ty) {
+    var c = alloc(sizeof(BubbleConfig));
+    if (ty == BUBBLE_UNDERWATER) {
+        BubbleConfig_set_base_freq(c, f64_from(400));
+        BubbleConfig_set_event_rate(c, f64_from(5));
+        BubbleConfig_set_freq_spread(c, f64_from(300));
+        BubbleConfig_set_decay(c, f64_div(f64_from(3), f64_from(100)));         # 0.03
+    } elif (ty == BUBBLE_BOILING) {
+        BubbleConfig_set_base_freq(c, f64_from(800));
+        BubbleConfig_set_event_rate(c, f64_from(30));
+        BubbleConfig_set_freq_spread(c, f64_from(600));
+        BubbleConfig_set_decay(c, f64_div(f64_from(1), f64_from(100)));         # 0.01
+    } elif (ty == BUBBLE_VISCOUS) {
+        BubbleConfig_set_base_freq(c, f64_from(150));
+        BubbleConfig_set_event_rate(c, f64_from(2));
+        BubbleConfig_set_freq_spread(c, f64_from(100));
+        BubbleConfig_set_decay(c, f64_div(f64_from(8), f64_from(100)));         # 0.08
+    } else {
+        # Pouring
+        BubbleConfig_set_base_freq(c, f64_from(600));
+        BubbleConfig_set_event_rate(c, f64_from(40));
+        BubbleConfig_set_freq_spread(c, f64_from(400));
+        BubbleConfig_set_decay(c, f64_div(f64_from(5), f64_from(1000)));        # 0.005
+    }
+    return c;
+}

@@ -1,0 +1,33 @@
+# contact.tcyr -- parity tests for src/contact.cyr.
+include "src/error.cyr"
+include "src/logging.cyr"
+include "src/dsp.cyr"
+include "src/rng.cyr"
+include "src/material.cyr"
+include "src/modal.cyr"
+include "src/contact.cyr"
+
+fn main() {
+    alloc_init();
+
+    test_group("resonant_material");
+    assert_eq(terrain_resonant_material(TERRAIN_WOOD), MATERIAL_WOOD, "wood -> Wood");
+    assert_eq(terrain_resonant_material(TERRAIN_TILE), MATERIAL_CERAMIC, "tile -> Ceramic");
+    assert_eq(terrain_resonant_material(TERRAIN_SAND), CONTACT_NO_MATERIAL, "sand -> none");
+
+    test_group("terrain_noise");
+    var g = terrain_noise_config(TERRAIN_GRAVEL);
+    assert_eq(TerrainNoiseConfig_noise_type(g), CONTACT_NOISE_PINK, "gravel pink");
+    assert_eq(TerrainNoiseConfig_highpass(g), 1, "gravel highpass");
+    assert(f64_lt(f64_abs(f64_sub(TerrainNoiseConfig_filter_freq(g), f64_from(1500))), GARJAN_EPSILON) == 1, "gravel 1500hz");
+
+    test_group("movement");
+    var r = movement_config(MOVEMENT_RUN);
+    assert(f64_lt(f64_abs(f64_sub(MovementConfig_step_interval(r), f64_div(f64_from(3), f64_from(10)))), GARJAN_EPSILON) == 1, "run step 0.3");
+    var jl = movement_config(MOVEMENT_JUMP_LAND);
+    assert(f64_lt(f64_abs(MovementConfig_step_interval(jl)), GARJAN_EPSILON) == 1, "jumpland one-shot (0)");
+
+    return assert_summary();
+}
+var ec = main();
+syscall(60, ec);

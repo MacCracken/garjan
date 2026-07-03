@@ -1,0 +1,134 @@
+# weather.tcyr -- parity tests for src/weather.cyr (rain/thunder/wind naad + serde).
+include "src/error.cyr"
+include "src/logging.cyr"
+include "src/dsp.cyr"
+include "src/rng.cyr"
+include "src/lod.cyr"
+include "src/material.cyr"
+include "src/modal.cyr"
+include "src/contact.cyr"
+include "src/aero.cyr"
+include "src/creature.cyr"
+include "src/weather.cyr"
+
+fn main() {
+    alloc_init();
+
+    # -------------------------------------------------------------------
+    test_group("rain_new");
+    var r = rain_new(RAIN_INTENSITY_MODERATE, f64_from(44100));
+    assert(garjan_is_err(r) == 0, "rain_new ok");
+    assert(garjan_is_err(rain_new(RAIN_INTENSITY_MODERATE, 0)) == 1, "rain_new rejects sr=0");
+
+    test_group("rain_synthesize");
+    var rbuf = rain_synthesize(r, f64_div(f64_from(1), f64_from(10)));   # 0.1s
+    assert(garjan_is_err(rbuf) == 0, "rain synthesize ok");
+    assert_eq(vec_len(rbuf), 4410, "rain 0.1s @ 44100 = 4410 samples");
+    var ri = 0;
+    var rfinite = 1;
+    var renergy = 0;
+    while (ri < vec_len(rbuf)) {
+        var rs = vec_get(rbuf, ri);
+        if (garjan_is_finite(rs) == 0) { rfinite = 0; }
+        renergy = f64_add(renergy, f64_abs(rs));
+        ri = ri + 1;
+    }
+    assert(rfinite == 1, "all rain samples finite");
+    assert(f64_gt(renergy, 0) == 1, "rain produces sound (nonzero energy)");
+    assert(garjan_is_err(rain_synthesize(r, 0)) == 1, "rain synthesize rejects duration=0");
+
+    test_group("rain_serde");
+    var r2seed = rain_new(RAIN_INTENSITY_HEAVY, f64_from(48000));
+    rain_synthesize(r2seed, f64_div(f64_from(1), f64_from(100)));
+    var rsb = str_builder_new();
+    rain_to_json(r2seed, rsb);
+    var rj = str_data(str_builder_build(rsb));
+    var r2 = rain_from_json_str(rj);
+    var rsb2 = str_builder_new();
+    rain_to_json(r2, rsb2);
+    assert(memeq(rj, str_data(str_builder_build(rsb2)), strlen(rj)) == 1, "rain params json roundtrip idempotent");
+    assert_eq(rng_next_u32(Rain_rng(r2seed)), rng_next_u32(Rain_rng(r2)), "restored rain resumes rng");
+
+    # -------------------------------------------------------------------
+    test_group("thunder_new");
+    var th = thunder_new(f64_from(200), f64_from(44100));
+    assert(garjan_is_err(th) == 0, "thunder_new ok");
+    assert(garjan_is_err(thunder_new(f64_from(200), 0)) == 1, "thunder_new rejects sr=0");
+    # distance_m clamped to >= 10
+    var thclamp = thunder_new(f64_from(1), f64_from(44100));
+    assert(f64_lt(f64_abs(f64_sub(Thunder_distance_m(thclamp), f64_from(10))), GARJAN_EPSILON) == 1, "thunder distance clamped to 10");
+
+    # Thunder at 200m has a ~0.58s acoustic delay, so synthesize 1.0s to
+    # capture the crack + rumble (0.1s would be all pre-delay silence).
+    test_group("thunder_synthesize");
+    var tbuf = thunder_synthesize(th, F64_ONE);   # 1.0s
+    assert(garjan_is_err(tbuf) == 0, "thunder synthesize ok");
+    assert_eq(vec_len(tbuf), 44100, "thunder 1.0s @ 44100 = 44100 samples");
+    var ti = 0;
+    var tfinite = 1;
+    var tenergy = 0;
+    while (ti < vec_len(tbuf)) {
+        var ts = vec_get(tbuf, ti);
+        if (garjan_is_finite(ts) == 0) { tfinite = 0; }
+        tenergy = f64_add(tenergy, f64_abs(ts));
+        ti = ti + 1;
+    }
+    assert(tfinite == 1, "all thunder samples finite");
+    assert(f64_gt(tenergy, 0) == 1, "thunder produces sound (nonzero energy)");
+    assert(garjan_is_err(thunder_synthesize(th, 0)) == 1, "thunder synthesize rejects duration=0");
+
+    test_group("thunder_serde");
+    var th2seed = thunder_new(f64_from(150), f64_from(48000));
+    thunder_synthesize(th2seed, f64_div(f64_from(1), f64_from(100)));
+    var tsb = str_builder_new();
+    thunder_to_json(th2seed, tsb);
+    var tj = str_data(str_builder_build(tsb));
+    var th2 = thunder_from_json_str(tj);
+    var tsb2 = str_builder_new();
+    thunder_to_json(th2, tsb2);
+    assert(memeq(tj, str_data(str_builder_build(tsb2)), strlen(tj)) == 1, "thunder params json roundtrip idempotent");
+    assert_eq(rng_next_u32(Thunder_rng(th2seed)), rng_next_u32(Thunder_rng(th2)), "restored thunder resumes rng");
+
+    # -------------------------------------------------------------------
+    test_group("wind_new");
+    var w = wind_new(f64_from(15), F64_HALF, f64_from(44100));
+    assert(garjan_is_err(w) == 0, "wind_new ok");
+    assert(garjan_is_err(wind_new(f64_from(15), F64_HALF, 0)) == 1, "wind_new rejects sr=0");
+    # speed clamped to >= 0, gustiness clamped to [0,1]
+    var wclamp = wind_new(f64_neg(f64_from(5)), F64_TWO, f64_from(44100));
+    assert(f64_lt(f64_abs(Wind_speed(wclamp)), GARJAN_EPSILON) == 1, "wind speed clamped to 0");
+    assert(f64_lt(f64_abs(f64_sub(Wind_gustiness(wclamp), F64_ONE)), GARJAN_EPSILON) == 1, "wind gustiness clamped to 1");
+
+    test_group("wind_synthesize");
+    var wbuf = wind_synthesize(w, f64_div(f64_from(1), f64_from(10)));   # 0.1s
+    assert(garjan_is_err(wbuf) == 0, "wind synthesize ok");
+    assert_eq(vec_len(wbuf), 4410, "wind 0.1s @ 44100 = 4410 samples");
+    var wi = 0;
+    var wfinite = 1;
+    var wenergy = 0;
+    while (wi < vec_len(wbuf)) {
+        var ws = vec_get(wbuf, wi);
+        if (garjan_is_finite(ws) == 0) { wfinite = 0; }
+        wenergy = f64_add(wenergy, f64_abs(ws));
+        wi = wi + 1;
+    }
+    assert(wfinite == 1, "all wind samples finite");
+    assert(f64_gt(wenergy, 0) == 1, "wind produces sound (nonzero energy)");
+    assert(garjan_is_err(wind_synthesize(w, 0)) == 1, "wind synthesize rejects duration=0");
+
+    test_group("wind_serde");
+    var w2seed = wind_new(f64_from(20), f64_div(f64_from(7), f64_from(10)), f64_from(48000));
+    wind_synthesize(w2seed, f64_div(f64_from(1), f64_from(100)));
+    var wsb = str_builder_new();
+    wind_to_json(w2seed, wsb);
+    var wj = str_data(str_builder_build(wsb));
+    var w2 = wind_from_json_str(wj);
+    var wsb2 = str_builder_new();
+    wind_to_json(w2, wsb2);
+    assert(memeq(wj, str_data(str_builder_build(wsb2)), strlen(wj)) == 1, "wind params json roundtrip idempotent");
+    assert_eq(rng_next_u32(Wind_rng(w2seed)), rng_next_u32(Wind_rng(w2)), "restored wind resumes rng");
+
+    return assert_summary();
+}
+var ec = main();
+syscall(60, ec);
