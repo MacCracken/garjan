@@ -5,7 +5,8 @@
 
 ## Version
 
-**1.1.0** — full Rust→Cyrius port complete (2026-07-03). The 6,186-line Rust
+**2.0.0** — full Rust→Cyrius port complete (2026-07-03). Major bump: the public
+API moves from Rust to Cyrius (breaking for all consumers). The 6,186-line Rust
 crate is preserved at `rust-old/` for parity reference (frozen, do not edit).
 
 ## Toolchain

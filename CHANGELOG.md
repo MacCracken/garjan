@@ -5,10 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased] — Cyrius port
+## [2.0.0] - Cyrius port
 
 Full port of the crate from Rust to the **Cyrius** language (AGNOS ecosystem
-migration). The original Rust sources are preserved under `rust-old/`; the
+migration). Major bump: the entire public surface moves from the Rust API to
+the Cyrius `fn` API (constructors return pointers / negative error codes), so
+this is a breaking change for every consumer. The original Rust sources are preserved under `rust-old/`; the
 Cyrius port lives in `src/*.cyr` with per-module parity suites in `tests/*.tcyr`.
 Build with `cyrius build src/main.cyr build/garjan`; test with `cyrius test`.
 
