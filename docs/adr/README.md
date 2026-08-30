@@ -24,6 +24,7 @@ Decisions about garjan — what we chose, the context, and the consequences we a
 - [0003 — Scope boundaries with sibling crates](0003-scope-boundaries.md) — Accepted. The boundary table (garjan owns sources; goonj propagation, dhvani mixing, prani/svara vocal, ghurni mechanical).
 - [0004 — Deterministic synthesis](0004-deterministic-synthesis.md) — Accepted
 - [0005 — Allocation failure is an error code, not an abort](0005-allocation-failure-is-an-error-code-not-an-abort.md) — Accepted, 2026-08-30
+- [0006 — Out-of-range enum ids are rejected, not absorbed](0006-out-of-range-enum-ids-are-rejected.md) — Accepted, 2026-08-30
 
 > **Format note.** 0001-0004 were written before these conventions and before
 > the port; they use `## Status` / `Accepted (vN)` headings rather than the

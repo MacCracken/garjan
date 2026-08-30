@@ -42,6 +42,7 @@ struct TerrainNoiseConfig { noise_type; filter_freq; filter_q; highpass; amplitu
 
 #must_use
 fn terrain_noise_config(t) {
+    if (garjan_enum_invalid(t, TERRAIN_WET) == 1) { return GARJAN_ERR_INVALID_PARAMETER; }
     var c = garjan_alloc(sizeof(TerrainNoiseConfig));
     if (garjan_is_err(c) == 1) { return c; }
     if (t == TERRAIN_GRAVEL) {
@@ -109,6 +110,7 @@ struct MovementConfig { step_interval; force; excitation_duration; }
 
 #must_use
 fn movement_config(m) {
+    if (garjan_enum_invalid(m, MOVEMENT_JUMP_LAND) == 1) { return GARJAN_ERR_INVALID_PARAMETER; }
     var c = garjan_alloc(sizeof(MovementConfig));
     if (garjan_is_err(c) == 1) { return c; }
     if (m == MOVEMENT_WALK) {

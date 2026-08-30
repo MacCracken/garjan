@@ -109,6 +109,7 @@ fn wingflap_build_naad(self) {
 # Creates a new wing flap synthesizer. Returns a pointer or a negative code.
 #must_use
 fn wingflap_new(bird_size, sample_rate) {
+    if (garjan_enum_invalid(bird_size, BIRD_SIZE_LARGE) == 1) { return GARJAN_ERR_INVALID_PARAMETER; }
     var e = garjan_validate_sample_rate(sample_rate);
     if (garjan_is_err(e) == 1) { return e; }
 

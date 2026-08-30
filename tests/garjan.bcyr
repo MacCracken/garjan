@@ -205,7 +205,7 @@ fn main() {
     i = 0; while (i < 20) { precipitation_process_block(pr, buf); i = i + 1; }
     bench_batch_stop(b24, 20); bench_report(b24);
 
-    var uw = underwater_new(f64_from(25), sr);
+    var uw = underwater_new(UNDERWATER_DEPTH_MEDIUM, sr);
     underwater_set_intensity(uw, F64_HALF);
     var b25 = bench_new("underwater_medium_1s");
     bench_batch_start(b25);
@@ -213,7 +213,7 @@ fn main() {
     bench_batch_stop(b25, 20); bench_report(b25);
 
     var buf2s = _buf(88200);
-    var sf = surf_new(F64_HALF, sr);
+    var sf = surf_new(SURF_MODERATE, sr);
     var b26 = bench_new("surf_moderate_2s");
     bench_batch_start(b26);
     i = 0; while (i < 20) { surf_process_block(sf, buf2s); i = i + 1; }

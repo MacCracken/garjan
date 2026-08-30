@@ -80,6 +80,7 @@ fn whoosh_build_naad(self) {
 # Creates a new whoosh synthesizer. Returns a pointer or a negative code.
 #must_use
 fn whoosh_new(whoosh_type, sample_rate) {
+    if (garjan_enum_invalid(whoosh_type, WHOOSH_THROW) == 1) { return GARJAN_ERR_INVALID_PARAMETER; }
     var e = garjan_validate_sample_rate(sample_rate);
     if (garjan_is_err(e) == 1) { return e; }
 

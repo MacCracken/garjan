@@ -5,6 +5,58 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.0]
+
+First of the deliberate-divergence items: out-of-range enum ids are now
+rejected instead of silently absorbed. See
+[ADR-0006](docs/adr/0006-out-of-range-enum-ids-are-rejected.md).
+
+### Fixed — an invalid enum id silently selected the last variant
+
+Rust's enums made an invalid variant **unrepresentable**; the port carries them
+as module-prefixed integers and dispatches with `if`/`elif` chains ending in a
+bare `else`. So an out-of-range id did not fail — it returned the **last
+variant's table**. `material_properties(99)` returned Ceramic.
+`surf_new(0.5)` returned Storm. No error, no log, quietly wrong audio.
+
+**This was live in this repository's own harnesses.** The 2.1.0 benchmark suite,
+the `scripts/audio-hash.cyr` bit-exactness oracle and the cross-module
+integration suite all passed an f64 where `surf_new` / `underwater_new` expect
+an enum id (`F64_HALF`, and a depth in metres). An f64's *bit pattern* is a huge
+integer, so every call fell through:
+
+- the "surf renders at every intensity" sweep tested **Storm four times**;
+- the "underwater renders at every depth" sweep tested **Shallow three times**;
+- the published `surf` and `underwater` benchmark figures measured the wrong
+  configuration. Corrected in `BENCHMARKS.md`.
+
+The per-module suites (`tests/surf.tcyr`, `tests/underwater.tcyr`) had it right
+all along — the defect was confined to harnesses added during 2.0.5/2.1.0.
+
+### Added
+
+- **`garjan_enum_invalid(id, max_id)`** in `src/error.cyr`, applied at
+  **21 public constructors and entry points** and **10 pointer-returning table
+  dispatchers**. Bounds are written as the *named* maximum variant
+  (`MATERIAL_CERAMIC`, not `9`) so adding a variant cannot silently narrow the
+  accepted range. All 30 dispatcher call sites already checked `garjan_is_err`
+  (a consequence of the 2.0.3 allocation guard), so no caller changes were
+  needed.
+- Regression tests pinning the contract, including the specific
+  f64-where-an-id-belongs case. **779 assertions** across 33 suites (was 764).
+
+Deliberately not covered: dispatchers returning a bare `f64`
+(`lod_mode_factor`, `rain_intensity_amplitude`, `impact_type_force`,
+`friction_filter_freq`, `creak_shape_filter_freq`) — a negative return is a
+valid value there, so an error code would be ambiguous, and they are reachable
+only through an already-validated constructor.
+
+### Verified
+
+`scripts/audio-hash.cyr` shows **19 of 21 synths bit-identical**; the two that
+changed are `surf` and `underwater`, which now receive the configuration they
+were always labelled with. The guards altered no valid-path behavior.
+
 ## [2.1.0]
 
 Parity completion — everything Rust shipped that the port had not. Additive

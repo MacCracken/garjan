@@ -115,6 +115,7 @@ fn surf_config_wash_amp(intensity) {
 # Creates a new surf zone synthesizer. Returns a pointer or a negative code.
 #must_use
 fn surf_new(intensity, sample_rate) {
+    if (garjan_enum_invalid(intensity, SURF_STORM) == 1) { return GARJAN_ERR_INVALID_PARAMETER; }
     var e = garjan_validate_sample_rate(sample_rate);
     if (garjan_is_err(e) == 1) { return e; }
 

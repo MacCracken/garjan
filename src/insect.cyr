@@ -103,6 +103,7 @@ fn insect_build_naad(self) {
 # detunings BEFORE the main rng(9999) is created.
 #must_use
 fn insect_new(insect_type, sample_rate) {
+    if (garjan_enum_invalid(insect_type, INSECT_CICADA_DRONE) == 1) { return GARJAN_ERR_INVALID_PARAMETER; }
     var e = garjan_validate_sample_rate(sample_rate);
     if (garjan_is_err(e) == 1) { return e; }
 

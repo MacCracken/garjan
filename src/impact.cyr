@@ -147,6 +147,7 @@ fn impact_build_naad(self) {
 # or a negative code.
 #must_use
 fn impact_new(material, sample_rate) {
+    if (garjan_enum_invalid(material, MATERIAL_CERAMIC) == 1) { return GARJAN_ERR_INVALID_PARAMETER; }
     var e = garjan_validate_sample_rate(sample_rate);
     if (garjan_is_err(e) == 1) { return e; }
 
@@ -174,6 +175,8 @@ fn impact_new(material, sample_rate) {
 # Currently equivalent to impact_new(surface, sample_rate).
 #must_use
 fn impact_new_interaction(striker, surface, sample_rate) {
+    if (garjan_enum_invalid(striker, MATERIAL_CERAMIC) == 1) { return GARJAN_ERR_INVALID_PARAMETER; }
+    if (garjan_enum_invalid(surface, MATERIAL_CERAMIC) == 1) { return GARJAN_ERR_INVALID_PARAMETER; }
     return impact_new(surface, sample_rate);
 }
 
@@ -188,6 +191,7 @@ fn impact_material(self) {
 # impact type at the given velocity. Ports generate_impact (naad-backend path).
 # Does not reset state; advances sample_position by output length.
 fn impact_generate(self, impact_type, velocity, output) {
+    if (garjan_enum_invalid(impact_type, IMPACT_SHATTER) == 1) { return GARJAN_ERR_INVALID_PARAMETER; }
     var num_samples = vec_len(output);
     var sr = Impact_sample_rate(self);
     var props = Impact_props(self);

@@ -136,8 +136,8 @@ fn main() {
     assert(garjan_is_err(cloth_new(CLOTH_FLAG, 0)) == 1, "cloth");
     assert(garjan_is_err(insect_new(INSECT_CICADA_DRONE, 0)) == 1, "insect");
     assert(garjan_is_err(wingflap_new(BIRD_SIZE_MEDIUM, 0)) == 1, "wingflap");
-    assert(garjan_is_err(underwater_new(f64_from(10), 0)) == 1, "underwater");
-    assert(garjan_is_err(surf_new(F64_HALF, 0)) == 1, "surf");
+    assert(garjan_is_err(underwater_new(UNDERWATER_DEPTH_MEDIUM, 0)) == 1, "underwater");
+    assert(garjan_is_err(surf_new(SURF_MODERATE, 0)) == 1, "surf");
     assert(garjan_is_err(texture_new(TEXTURE_TYPE_FOREST, F64_HALF, 0)) == 1, "texture");
     assert(garjan_is_err(precipitation_new(PRECIP_HAIL, STONE_MEDIUM, MATERIAL_STONE, 0)) == 1, "precipitation");
 
@@ -150,7 +150,7 @@ fn main() {
     assert(garjan_is_err(rain_new(RAIN_INTENSITY_LIGHT, NAN_BITS)) == 1, "rain NaN");
     assert(garjan_is_err(wind_new(f64_from(10), F64_HALF, GARJAN_POS_INF)) == 1, "wind +inf");
     assert(garjan_is_err(impact_new(MATERIAL_METAL, NAN_BITS)) == 1, "impact NaN");
-    assert(garjan_is_err(surf_new(F64_HALF, GARJAN_NEG_INF)) == 1, "surf -inf");
+    assert(garjan_is_err(surf_new(SURF_MODERATE, GARJAN_NEG_INF)) == 1, "surf -inf");
 
     test_group("every synthesize rejects non-positive / non-finite duration");
     var f = fire_new(F64_HALF, SR);
@@ -357,18 +357,23 @@ fn main() {
         renders_ok(px, pxb, "precipitation renders for every type");
         cr3 = cr3 + 1;
     }
+    # NOTE these are ENUM IDS, not metres. underwater_new dispatches on
+    # depth == UNDERWATER_DEPTH_*, so an f64 depth silently selects the
+    # default (Shallow) branch -- which is exactly what this suite used to do.
     var dep = 0;
     while (dep < 3) {
-        var ux = underwater_new(f64_from(5 + dep * 20), SR);
+        var ux = underwater_new(dep, SR);
         underwater_set_intensity(ux, F64_HALF);
         var uxb = mkbuf(1024);
         underwater_process_block(ux, uxb);
         renders_ok(ux, uxb, "underwater renders at every depth");
         dep = dep + 1;
     }
+    # Enum ids again: surf_new dispatches on intensity == SURF_*, so an f64
+    # intensity silently fell through to Storm on every iteration.
     var si = 0;
     while (si < 4) {
-        var sx = surf_new(f64_div(f64_from(si * 3 + 1), f64_from(10)), SR);
+        var sx = surf_new(si, SR);
         var sxb = mkbuf(2048);
         surf_process_block(sx, sxb);
         renders_ok(sx, sxb, "surf renders at every intensity");
@@ -585,6 +590,49 @@ fn main() {
     var _vn2 = voice_pool_allocate(vpn, 5, 2);
     assert_eq(voice_pool_active_count(vpn), 2, "no-steal pool fills");
     assert(voice_pool_allocate(vpn, 5, 3) < 0, "no-steal pool refuses a 3rd voice");
+
+    # =====================================================================
+    # Enum-id contract (2.2.0). Rust's enums made an out-of-range id
+    # UNREPRESENTABLE -- the type system rejected it at the call site. The port
+    # carries them as plain integers, so before 2.2.0 an invalid id fell through
+    # each if/elif chain's final `else` and silently selected the LAST variant's
+    # table: wrong material, wrong intensity, no error.
+    #
+    # This is not hypothetical. The 2.1.0 benchmark harness, hash oracle and
+    # this very suite all passed an f64 (F64_HALF, or a depth in metres) where
+    # surf_new/underwater_new want an enum id -- so they silently benchmarked
+    # and hashed Storm and Shallow on every iteration.
+    # =====================================================================
+    test_group("out-of-range enum ids are rejected");
+    assert(garjan_is_err(impact_new(99, SR)) == 1, "impact_new rejects material 99");
+    assert(garjan_is_err(impact_new(0 - 1, SR)) == 1, "impact_new rejects negative material");
+    assert(garjan_is_err(texture_new(6, F64_HALF, SR)) == 1, "texture_new rejects type 6 (max 5)");
+    assert(garjan_is_err(footstep_new(8, MOVEMENT_WALK, SR)) == 1, "footstep_new rejects terrain 8 (max 7)");
+    assert(garjan_is_err(footstep_new(TERRAIN_WOOD, 4, SR)) == 1, "footstep_new rejects movement 4 (max 3)");
+    assert(garjan_is_err(rain_new(4, SR)) == 1, "rain_new rejects intensity 4 (max 3)");
+    assert(garjan_is_err(precipitation_new(3, STONE_SMALL, MATERIAL_STONE, SR)) == 1, "precipitation_new rejects precip 3");
+    assert(garjan_is_err(voice_pool_new(4, 99)) == 1, "voice_pool_new rejects steal policy 99");
+    assert(garjan_is_err(material_properties(99)) == 1, "material_properties rejects 99");
+    assert(garjan_is_err(material_mode_config(0 - 1)) == 1, "material_mode_config rejects -1");
+
+    test_group("an f64 passed where an enum id belongs is rejected");
+    # F64_HALF's BIT PATTERN is a huge integer, so it is out of every enum's
+    # range -- which is exactly why it used to fall through to the last variant.
+    assert(garjan_is_err(surf_new(F64_HALF, SR)) == 1, "surf_new rejects an f64 intensity");
+    assert(garjan_is_err(underwater_new(f64_from(10), SR)) == 1, "underwater_new rejects a depth in metres");
+    # ...and the enum ids still work
+    assert(garjan_is_err(surf_new(SURF_STORM, SR)) == 0, "surf_new accepts SURF_STORM");
+    assert(garjan_is_err(underwater_new(UNDERWATER_DEPTH_DEEP, SR)) == 0, "underwater_new accepts DEEP");
+
+    test_group("every enum id in range is accepted");
+    var okm = 0;
+    var oki = 0;
+    while (oki <= MATERIAL_CERAMIC) {
+        if (garjan_is_err(material_properties(oki)) == 0) { okm = okm + 1; }
+        oki = oki + 1;
+    }
+    assert_eq(okm, 10, "all 10 material ids accepted");
+
 
     return assert_summary();
 }

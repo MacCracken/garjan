@@ -88,6 +88,7 @@ fn cloth_build_naad(self) {
 # Creates a new cloth flapping synthesizer. Returns a pointer or negative code.
 #must_use
 fn cloth_new(cloth_type, sample_rate) {
+    if (garjan_enum_invalid(cloth_type, CLOTH_TARP) == 1) { return GARJAN_ERR_INVALID_PARAMETER; }
     var e = garjan_validate_sample_rate(sample_rate);
     if (garjan_is_err(e) == 1) { return e; }
     var config = aero_cloth_config(cloth_type);

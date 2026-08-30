@@ -62,6 +62,7 @@ fn bubble_build_naad(self) {
 # Creates a new bubble synthesizer. Returns a pointer or a negative code.
 #must_use
 fn bubble_new(bubble_type, sample_rate) {
+    if (garjan_enum_invalid(bubble_type, BUBBLE_POURING) == 1) { return GARJAN_ERR_INVALID_PARAMETER; }
     var e = garjan_validate_sample_rate(sample_rate);
     if (garjan_is_err(e) == 1) { return e; }
     var cfg = creature_bubble_config(bubble_type);

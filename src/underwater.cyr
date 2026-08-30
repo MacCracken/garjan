@@ -110,6 +110,7 @@ fn underwater_build_naad(self) {
 # negative code.
 #must_use
 fn underwater_new(depth, sample_rate) {
+    if (garjan_enum_invalid(depth, UNDERWATER_DEPTH_DEEP) == 1) { return GARJAN_ERR_INVALID_PARAMETER; }
     var e = garjan_validate_sample_rate(sample_rate);
     if (garjan_is_err(e) == 1) { return e; }
 

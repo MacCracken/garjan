@@ -106,6 +106,8 @@ fn friction_build_naad(self) {
 # Creates a new friction synthesizer. Returns a pointer or a negative code.
 #must_use
 fn friction_new(friction_type, surface, sample_rate) {
+    if (garjan_enum_invalid(friction_type, FRICTION_GRIND) == 1) { return GARJAN_ERR_INVALID_PARAMETER; }
+    if (garjan_enum_invalid(surface, MATERIAL_CERAMIC) == 1) { return GARJAN_ERR_INVALID_PARAMETER; }
     var e = garjan_validate_sample_rate(sample_rate);
     if (garjan_is_err(e) == 1) { return e; }
 

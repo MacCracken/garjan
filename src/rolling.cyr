@@ -100,6 +100,8 @@ fn rolling_build_naad(self) {
 # Creates a new rolling synthesizer. Returns a pointer or a negative code.
 #must_use
 fn rolling_new(body, surface, sample_rate) {
+    if (garjan_enum_invalid(body, ROLLING_BARREL) == 1) { return GARJAN_ERR_INVALID_PARAMETER; }
+    if (garjan_enum_invalid(surface, MATERIAL_CERAMIC) == 1) { return GARJAN_ERR_INVALID_PARAMETER; }
     var e = garjan_validate_sample_rate(sample_rate);
     if (garjan_is_err(e) == 1) { return e; }
 

@@ -30,6 +30,7 @@ struct StoneConfig { rate; amplitude; decay_ms; }
 
 #must_use
 fn stone_size_config(s) {
+    if (garjan_enum_invalid(s, STONE_LARGE) == 1) { return GARJAN_ERR_INVALID_PARAMETER; }
     var c = garjan_alloc(sizeof(StoneConfig));
     if (garjan_is_err(c) == 1) { return c; }
     if (s == STONE_SMALL) {
@@ -151,6 +152,9 @@ fn precipitation_build_naad(self) {
 # negative code.
 #must_use
 fn precipitation_new(precip_type, stone_size, surface, sample_rate) {
+    if (garjan_enum_invalid(precip_type, PRECIP_SURFACE_RAIN) == 1) { return GARJAN_ERR_INVALID_PARAMETER; }
+    if (garjan_enum_invalid(stone_size, STONE_LARGE) == 1) { return GARJAN_ERR_INVALID_PARAMETER; }
+    if (garjan_enum_invalid(surface, MATERIAL_CERAMIC) == 1) { return GARJAN_ERR_INVALID_PARAMETER; }
     var e = garjan_validate_sample_rate(sample_rate);
     if (garjan_is_err(e) == 1) { return e; }
 

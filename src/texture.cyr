@@ -103,6 +103,7 @@ fn texture_build_naad(self) {
 # Creates a new ambient texture. Returns a pointer or a negative code.
 #must_use
 fn texture_new(texture_type, level, sample_rate) {
+    if (garjan_enum_invalid(texture_type, TEXTURE_TYPE_NIGHT) == 1) { return GARJAN_ERR_INVALID_PARAMETER; }
     var e = garjan_validate_sample_rate(sample_rate);
     if (garjan_is_err(e) == 1) { return e; }
     var lvl = f64_clamp(level, 0, F64_ONE);

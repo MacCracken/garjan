@@ -73,6 +73,24 @@ fn garjan_alloc(size) {
     return p;
 }
 
+# 1 iff `id` falls outside the closed range [0, max_id] that a ported Rust enum
+# occupies. Rust's enums made an out-of-range id UNREPRESENTABLE -- the type
+# system rejected it at the call site. The port carries them as plain integers,
+# so without this an invalid id falls through an if/elif chain's final `else`
+# and silently selects the LAST variant's table: wrong material, wrong terrain,
+# wrong intensity, no error. See ADR-0006.
+#
+# Deliberately does NOT log, for the same reason garjan_alloc does not:
+# error.cyr is the L0 module and the aero/creature/rng/voice test entries
+# include it WITHOUT logging.cyr, and a reachable undefined function is a hard
+# build error since cyrius 6.5.36.
+#must_use
+fn garjan_enum_invalid(id, max_id) {
+    if (id < 0) { return 1; }
+    if (id > max_id) { return 1; }
+    return 0;
+}
+
 # Finite test: 1 iff x is neither +/-inf nor NaN. abs(x) < +inf holds for
 # every finite x, fails for infinities (inf < inf is false) and NaN (any
 # NaN comparison is false). Mirrors Rust `f32::is_finite`.

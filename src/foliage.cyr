@@ -113,6 +113,7 @@ fn foliage_build_naad(self) {
 # Creates a new foliage synthesizer. Returns a pointer or a negative code.
 #must_use
 fn foliage_new(foliage_type, sample_rate) {
+    if (garjan_enum_invalid(foliage_type, FOLIAGE_BRANCH_SNAP) == 1) { return GARJAN_ERR_INVALID_PARAMETER; }
     var e = garjan_validate_sample_rate(sample_rate);
     if (garjan_is_err(e) == 1) { return e; }
 

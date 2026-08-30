@@ -78,7 +78,7 @@ fn main() {
     k = 0; h = 0; while (k < 3) { cloth_process_block(cloth, b); h = hbuf(h, b); k = k + 1; }
     report("cloth", h);
 
-    var surf = surf_new(F64_HALF, sr);
+    var surf = surf_new(SURF_MODERATE, sr);
     k = 0; h = 0; while (k < 3) { surf_process_block(surf, b); h = hbuf(h, b); k = k + 1; }
     report("surf", h);
 
@@ -133,7 +133,7 @@ fn main() {
     k = 0; h = 0; while (k < 3) { insect_process_block(ins, b); h = hbuf(h, b); k = k + 1; }
     report("insect", h);
 
-    var uw = underwater_new(f64_from(10), sr);
+    var uw = underwater_new(UNDERWATER_DEPTH_MEDIUM, sr);
     k = 0; h = 0; while (k < 3) { underwater_process_block(uw, b); h = hbuf(h, b); k = k + 1; }
     report("underwater", h);
 

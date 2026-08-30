@@ -63,6 +63,7 @@ fn material_mode_config_new(pattern, mode_count, damping_factor) {
 # Modal synthesis configuration for a material.
 #must_use
 fn material_mode_config(m) {
+    if (garjan_enum_invalid(m, MATERIAL_CERAMIC) == 1) { return GARJAN_ERR_INVALID_PARAMETER; }
     if (m == MATERIAL_METAL)   { return material_mode_config_new(MODE_PATTERN_PLATE,        12, garjan_frac(5, 100)); }
     if (m == MATERIAL_WOOD)    { return material_mode_config_new(MODE_PATTERN_BEAM,          8, garjan_frac(8, 10));  }
     if (m == MATERIAL_STONE)   { return material_mode_config_new(MODE_PATTERN_PLATE,         6, f64_from(3));         }
@@ -78,6 +79,7 @@ fn material_mode_config(m) {
 # Default acoustic properties for a material.
 #must_use
 fn material_properties(m) {
+    if (garjan_enum_invalid(m, MATERIAL_CERAMIC) == 1) { return GARJAN_ERR_INVALID_PARAMETER; }
     if (m == MATERIAL_METAL)   { return material_properties_new(f64_from(2500), f64_from(200),  garjan_frac(15, 10),
           garjan_frac(9, 10),   garjan_frac(7, 10)); }
     if (m == MATERIAL_WOOD)    { return material_properties_new(f64_from(800),  f64_from(400),  garjan_frac(3, 10),

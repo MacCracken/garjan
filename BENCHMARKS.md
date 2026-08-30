@@ -26,13 +26,13 @@ Linux; 20 iterations per synth (200 for the 512-sample ops).
 | water (Stream)             | 11.00 ms         | ~91x             |
 | foliage (rustle)           | 11.04 ms         | ~91x             |
 | friction (scrape metal)    | 12.49 ms         | ~80x             |
-| underwater (25 m)          | 14.51 ms         | ~69x             |
+| underwater (Medium depth)  | 14.20 ms         | ~70x             |
 | impact (wood strike)       | 14.67 ms         | ~68x             |
 | whistle (Pipe)             | 15.33 ms         | ~65x             |
-| surf (Moderate, 2 s op)    | 15.90 ms         | ~63x             |
+| surf (Moderate, 2 s op)    | 15.67 ms         | ~64x             |
 | texture (Forest)           | 16.77 ms         | ~60x             |
 | creak (Door)               | 18.68 ms         | ~54x             |
-| **insect (swarm of 8)**    | **50.27 ms**     | **~20x**         |
+| **insect (swarm of 8)**    | **49.91 ms**     | **~20x**         |
 
 Sub-block ops:
 
@@ -44,6 +44,15 @@ Sub-block ops:
 Last measured on Cyrius 6.5.36 with naad 2.2.2 / hisab 2.11.2 / goonj 2.0.4.
 Run-to-run spread is roughly 3%, so treat single-run differences under that as
 noise.
+
+> **Corrected in 2.2.0.** The `surf` and `underwater` rows previously measured
+> the wrong configuration. `surf_new` and `underwater_new` take **enum ids**
+> (`SURF_*`, `UNDERWATER_DEPTH_*`), and the harness was passing an f64 —
+> `F64_HALF`, and a depth in metres. An f64's bit pattern is a huge integer, so
+> both calls fell through their dispatch chain's final `else`, silently
+> benchmarking **Storm** and **Shallow** while labelled Moderate and 25 m.
+> The rows above are the labelled configurations. ADR-0006 now rejects such ids
+> outright.
 
 ## Notes
 
@@ -66,6 +75,9 @@ noise.
 - Most remaining time is inside naad, in per-sample noise generation and
   biquad/SVF filtering, not in garjan's own arithmetic. 2.0.5 took the
   garjan-side hoisting wins; further gains need naad-level or algorithmic work.
+- Benchmark an event-driven synth with its **enum id**, not a plausible-looking
+  float. Nothing in the toolchain distinguishes them, and before 2.2.0 a wrong
+  id produced believable numbers for the wrong configuration.
 - Every optimization must keep [`scripts/audio-hash.cyr`](scripts/audio-hash.cyr)
   bit-identical. The test suite asserts finiteness and energy, **not** exact
   sample values, so it will not catch an optimization that changes the audio.

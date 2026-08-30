@@ -108,6 +108,7 @@ fn water_build_naad(self) {
 # Creates a new water synthesizer. Returns a pointer or a negative code.
 #must_use
 fn water_new(water_type, intensity, sample_rate) {
+    if (garjan_enum_invalid(water_type, WATER_WAVES) == 1) { return GARJAN_ERR_INVALID_PARAMETER; }
     var e = garjan_validate_sample_rate(sample_rate);
     if (garjan_is_err(e) == 1) { return e; }
     var inten = f64_clamp(intensity, 0, F64_ONE);

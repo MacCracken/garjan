@@ -17,6 +17,7 @@ struct WhooshConfig { duration; brightness; low_freq; }
 
 #must_use
 fn aero_whoosh_config(ty) {
+    if (garjan_enum_invalid(ty, WHOOSH_THROW) == 1) { return GARJAN_ERR_INVALID_PARAMETER; }
     var c = garjan_alloc(sizeof(WhooshConfig));
     if (garjan_is_err(c) == 1) { return c; }
     if (ty == WHOOSH_SWING) {
@@ -52,6 +53,7 @@ struct WhistleConfig { base_freq; bandwidth; noise_mix; }
 
 #must_use
 fn aero_whistle_config(ty) {
+    if (garjan_enum_invalid(ty, WHISTLE_WIRE) == 1) { return GARJAN_ERR_INVALID_PARAMETER; }
     var c = garjan_alloc(sizeof(WhistleConfig));
     if (garjan_is_err(c) == 1) { return c; }
     if (ty == WHISTLE_GAP) {
@@ -87,6 +89,7 @@ struct ClothConfig { flap_rate; amplitude; filter_freq; use_modal; }
 
 #must_use
 fn aero_cloth_config(ty) {
+    if (garjan_enum_invalid(ty, CLOTH_TARP) == 1) { return GARJAN_ERR_INVALID_PARAMETER; }
     var c = garjan_alloc(sizeof(ClothConfig));
     if (garjan_is_err(c) == 1) { return c; }
     if (ty == CLOTH_FLAG) {

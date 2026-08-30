@@ -163,18 +163,33 @@ existing APIs.
 
 ---
 
-## 2.2.x — deliberate divergences _(each needs an ADR)_
+## 2.2.x — deliberate divergences _(each needs an ADR)_ — 2.2.0 shipped
 
 Behavior changes where the port must knowingly differ from the oracle. Per
 `CLAUDE.md`, none of these may land without an ADR.
 
-- **serde live-state round-trip parity.** Rust serialized the naad component
-  state (`BiquadFilter`, `NoiseGenerator`) as ordinary derived fields; the port
-  drops them from `*Params` and rebuilds fresh. A save/restore mid-stream
-  therefore loses filter and noise-generator state that Rust preserved —
-  audible on restore. Decide: reproduce Rust (serialize the state, requires the
-  naad types to expose it) or keep reconstruct-and-document. **Changes the JSON
-  format**, so it cannot be a patch.
+- **serde live-state round-trip parity — NEEDS A DECISION, sized below.**
+  Rust serialized the naad component state as ordinary derived fields; the port
+  drops them from `*Params` and rebuilds fresh, so a mid-stream save/restore
+  loses filter and noise state Rust preserved (architecture note
+  [001](../architecture/001-deserialize-does-not-restore-dsp-state.md)).
+
+  **Feasible** — naad exposes full accessors, including the live state:
+  `BiquadFilter` z1/z2, `StateVariableFilter` ic1eq/ic2eq, `Lfo` phase/sh_value,
+  and `NoiseGenerator`'s rng + pink_counter + pink_running_sum + brown_prev +
+  a 16-element pink_octaves array.
+
+  **But expensive**: per component that is 2 fields for a biquad, 2 for an SVF,
+  and **20 for a noise generator**. `AmbientTexture` alone has 3 noise
+  generators, 3 biquads and an LFO — roughly **70 new `*Params` fields**, versus
+  about 10 scalars today, and the pink-octave array needs array (de)serializing.
+  Across 19 synths that is a large, format-breaking change whose only benefit is
+  exact mid-stream session snapshotting, for which there is no consumer yet.
+
+  Options: (a) implement it for full parity; (b) implement it only for the
+  synths where restore fidelity matters; (c) keep reconstruct-on-deserialize and
+  document it as a permanent divergence (note 001 already does). **Recommend
+  (c) until a consumer needs (a).**
 - **Upper bounds on `duration` / `sample_rate`.** `validate_duration` accepts
   any positive finite value, so 1e8 s sizes a 4.4-trillion-sample buffer.
   `rust-old/src/dsp.rs:39` validated only positive-and-finite too, so a cap is a

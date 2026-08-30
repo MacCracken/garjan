@@ -126,6 +126,8 @@ fn footstep_build_naad(self) {
 # Creates a new footstep synthesizer. Returns a pointer or a negative code.
 #must_use
 fn footstep_new(terrain, movement, sample_rate) {
+    if (garjan_enum_invalid(terrain, TERRAIN_WET) == 1) { return GARJAN_ERR_INVALID_PARAMETER; }
+    if (garjan_enum_invalid(movement, MOVEMENT_JUMP_LAND) == 1) { return GARJAN_ERR_INVALID_PARAMETER; }
     var e = garjan_validate_sample_rate(sample_rate);
     if (garjan_is_err(e) == 1) { return e; }
 

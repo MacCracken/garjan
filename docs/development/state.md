@@ -5,6 +5,14 @@
 
 ## Version
 
+**2.2.0** (2026-08-30) — out-of-range enum ids are rejected rather than
+silently selecting the last variant's table
+([ADR-0006](../adr/0006-out-of-range-enum-ids-are-rejected.md)). Caught a live
+defect: the 2.1.0 benchmark harness, hash oracle and integration suite were all
+passing an f64 where `surf_new`/`underwater_new` want an enum id, silently
+exercising Storm and Shallow. 19 of 21 synths bit-identical; surf and underwater
+now get the configuration they were labelled with.
+
 **2.1.0** (2026-08-30) — parity completion: the cross-module integration suite
 (2 → 288 assertions, 764 total), all 26 benchmarks (was 5), 5 runnable examples,
 and the audit write-up. The expanded benchmarks overturned the perf priority —
@@ -62,7 +70,7 @@ crate is preserved at `rust-old/` for parity reference (frozen, do not edit).
 
 ## Tests
 
-- **33 module suites** in `tests/*.tcyr`, **764 assertions, all green**.
+- **33 module suites** in `tests/*.tcyr`, **779 assertions, all green**.
   `tests/garjan.tcyr` is the cross-module integration suite (288 of those),
   ported from `rust-old/tests/integration.rs`.
   Covers parity (incl. bit-exact PCG32), synthesis finiteness/energy, and
@@ -114,8 +122,11 @@ outstanding item pinned to a version. Immediate:
 - ✅ **2.1.x shipped as 2.1.0** — integration suite, 26 benchmarks, 5 examples,
   audit write-up. Output-vector pre-sizing is ⛔ blocked on a missing stdlib
   `vec_with_capacity` (~695 KB wasted per second of synthesized audio).
-- **2.2.x (needs ADRs)** — serde live-state round-trip parity, duration /
-  sample-rate caps, out-of-range enum ids.
+- ✅ **2.2.0 shipped** — out-of-range enum ids rejected (ADR-0006). Still open
+  in 2.2.x: serde live-state round-trip parity (**sized, needs your decision** —
+  ~70 new `*Params` fields for `AmbientTexture` alone; recommend documenting the
+  divergence rather than implementing) and duration / sample-rate caps (**needs
+  a cap value from you**).
 - **Gated** — `integration/soorat.rs` (315 lines) is the one genuinely unported
   *feature*; blocked until soorat lands in Cyrius.
 

@@ -120,6 +120,7 @@ fn creak_build_naad(self) {
 # Creates a new creak synthesizer. Returns a pointer or a negative code.
 #must_use
 fn creak_new(source, sample_rate) {
+    if (garjan_enum_invalid(source, CREAK_WOOD_STRESS) == 1) { return GARJAN_ERR_INVALID_PARAMETER; }
     var e = garjan_validate_sample_rate(sample_rate);
     if (garjan_is_err(e) == 1) { return e; }
 

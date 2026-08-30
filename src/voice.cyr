@@ -42,6 +42,7 @@ struct VoicePool { slots; steal_policy; max_voices; }
 
 #must_use
 fn voice_pool_new(max_voices_arg, steal_policy) {
+    if (garjan_enum_invalid(steal_policy, STEAL_NONE) == 1) { return GARJAN_ERR_INVALID_PARAMETER; }
     var max_voices = max_voices_arg;
     if (max_voices < 1) { max_voices = 1; }
     var slots = vec_new();

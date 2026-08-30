@@ -23,6 +23,7 @@ struct InsectConfig { base_freq; mod_rate; chirp_rate; amplitude; }
 
 #must_use
 fn creature_insect_config(ty) {
+    if (garjan_enum_invalid(ty, INSECT_CICADA_DRONE) == 1) { return GARJAN_ERR_INVALID_PARAMETER; }
     var c = garjan_alloc(sizeof(InsectConfig));
     if (garjan_is_err(c) == 1) { return c; }
     if (ty == INSECT_WING_BUZZ) {
@@ -51,6 +52,7 @@ struct BubbleConfig { base_freq; event_rate; freq_spread; decay; }
 
 #must_use
 fn creature_bubble_config(ty) {
+    if (garjan_enum_invalid(ty, BUBBLE_POURING) == 1) { return GARJAN_ERR_INVALID_PARAMETER; }
     var c = garjan_alloc(sizeof(BubbleConfig));
     if (garjan_is_err(c) == 1) { return c; }
     if (ty == BUBBLE_UNDERWATER) {

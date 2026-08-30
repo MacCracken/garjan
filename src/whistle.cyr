@@ -78,6 +78,7 @@ fn whistle_build_naad(self) {
 # Creates a new wind whistle synthesizer. Returns a pointer or a negative code.
 #must_use
 fn whistle_new(source, sample_rate) {
+    if (garjan_enum_invalid(source, WHISTLE_WIRE) == 1) { return GARJAN_ERR_INVALID_PARAMETER; }
     var e = garjan_validate_sample_rate(sample_rate);
     if (garjan_is_err(e) == 1) { return e; }
 
