@@ -92,18 +92,29 @@ _None yet (kiran, joshua, dhvani + any AGNOS component needing environmental aud
 
 ## Next
 
-- **Arena lifetime, remaining.** 2.0.4 fixed the two per-block streaming
-  allocations. Still outstanding: every `*_synthesize` grows its output vec from
-  capacity 16 (~12 doubling reallocations per second of audio, all retained),
-  and the allocator has no free at all, so constructing and discarding synths in
-  a loop still grows the arena. `alloc_reset()` invalidates *every* outstanding
-  pointer, so it is only usable at a clean epoch boundary.
-- **Duration / sample-rate upper bounds — needs an ADR.** Currently unbounded
-  (1e8 s sizes a 4.4-trillion-sample buffer). Faithful to `rust-old`, so
-  capping is a deliberate divergence, not a bug fix.
-- **Further perf needs naad-level work.** 2.0.5 took the hoisting wins
-  (−5.6% on the worst synth); profiling now points into the naad bundle's
-  per-sample noise generation and biquad/SVF filtering, not garjan's own
-  arithmetic. Remaining garjan-side candidates are small: per-event conversions
-  in `bubble`/`foliage`/`precipitation`/`insect`/`whoosh`/`impact`.
-- Port `integration/soorat.rs` (visualization data) once soorat lands in Cyrius.
+Sequencing lives in [`roadmap.md`](roadmap.md) — the 2.x arc, with each
+outstanding item pinned to a version. Immediate:
+
+- **2.0.6 (docs accuracy)** — ~8 source comments claim the port "mirrors Rust's
+  `#[serde(skip)]`"; `rust-old/src` contains **zero** `serde(skip)`. Rust
+  derived Serialize over all fields, naad components included. Also: the
+  `CLAUDE.md` `## Goal` stub, the empty architecture-notes index, and the
+  ADR-location split (`adr-001`..`004` in `docs/architecture/`, 0005 in
+  `docs/adr/`).
+- **2.1.x (parity completion)** — port Rust's 134 cross-module integration
+  tests (`tests/garjan.tcyr` is a two-assertion placeholder), the 5 examples
+  (`docs/examples/` holds only `.gitkeep`), and more of the 26 benchmarks.
+- **2.2.x (needs ADRs)** — serde live-state round-trip parity, duration /
+  sample-rate caps, out-of-range enum ids.
+- **Gated** — `integration/soorat.rs` (315 lines) is the one genuinely unported
+  *feature*; blocked until soorat lands in Cyrius.
+
+## Port completeness
+
+Verified 2026-08-30: **30 of 34** `rust-old/src` modules ported; **219** public
+items checked; **106 of 106** enum variants have a Cyrius constant. `lib.rs`
+(crate root) and `math.rs` (f32 shim, superseded by ganita) are correctly not
+ported. Re-run the check with the recipe in
+[`roadmap.md`](roadmap.md#port-completeness) after any upstream change — a
+missing `pub fn` fails the build, but a missing enum *variant* silently narrows
+the surface.
