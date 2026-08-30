@@ -124,7 +124,8 @@ fn surf_new(intensity, sample_rate) {
     # wave_period_samples = (period * sample_rate) as usize
     var wave_period_samples = f64_to(f64_mul(period, sample_rate));
 
-    var self = alloc(sizeof(Surf));
+    var self = garjan_alloc(sizeof(Surf));
+    if (garjan_is_err(self) == 1) { return self; }
     Surf_set_intensity(self, intensity);
     Surf_set_sample_rate(self, sample_rate);
     Surf_set_sample_position(self, 0);
@@ -133,8 +134,12 @@ fn surf_new(intensity, sample_rate) {
     Surf_set_wash_amp(self, wash_amp);
     Surf_set_volume(self, F64_ONE);
     Surf_set_wave_phase(self, 0);
-    Surf_set_rng(self, rng_new(8080));
-    Surf_set_dc_blocker(self, garjan_dcblocker_new(sample_rate));
+    var ga_rng1 = rng_new(8080);
+    if (garjan_is_err(ga_rng1) == 1) { return ga_rng1; }
+    Surf_set_rng(self, ga_rng1);
+    var ga_dcb2 = garjan_dcblocker_new(sample_rate);
+    if (garjan_is_err(ga_dcb2) == 1) { return ga_dcb2; }
+    Surf_set_dc_blocker(self, ga_dcb2);
     var b = surf_build_naad(self);
     if (garjan_is_err(b) == 1) { return b; }
     return self;
@@ -262,7 +267,8 @@ fn surf_synthesize(self, duration) {
 # ---- serde: snapshot live state -> SurfParams -> JSON, and back. ----
 #must_use
 fn surf_to_json(self, sb) {
-    var p = alloc(sizeof(SurfParams));
+    var p = garjan_alloc(sizeof(SurfParams));
+    if (garjan_is_err(p) == 1) { return p; }
     SurfParams_set_intensity(p, Surf_intensity(self));
     SurfParams_set_sample_rate(p, Surf_sample_rate(self));
     SurfParams_set_sample_position(p, Surf_sample_position(self));
@@ -286,7 +292,8 @@ fn surf_to_json(self, sb) {
 #must_use
 fn surf_from_json_str(json) {
     var p = SurfParams_from_json_str(json);
-    var self = alloc(sizeof(Surf));
+    var self = garjan_alloc(sizeof(Surf));
+    if (garjan_is_err(self) == 1) { return self; }
     Surf_set_intensity(self, SurfParams_intensity(p));
     Surf_set_sample_rate(self, SurfParams_sample_rate(p));
     Surf_set_sample_position(self, SurfParams_sample_position(p));
@@ -297,11 +304,13 @@ fn surf_from_json_str(json) {
     Surf_set_wave_phase(self, SurfParams_wave_phase(p));
 
     var rng = rng_new(0);
+    if (garjan_is_err(rng) == 1) { return rng; }
     Rng_set_state(rng, SurfParams_rng_state(p));
     Rng_set_inc(rng, SurfParams_rng_inc(p));
     Surf_set_rng(self, rng);
 
     var dc = garjan_dcblocker_new(SurfParams_sample_rate(p));
+    if (garjan_is_err(dc) == 1) { return dc; }
     DcBlocker_set_x_prev(dc, SurfParams_dcb_x_prev(p));
     DcBlocker_set_y_prev(dc, SurfParams_dcb_y_prev(p));
     DcBlocker_set_r(dc, SurfParams_dcb_r(p));

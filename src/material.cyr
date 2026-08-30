@@ -31,7 +31,8 @@ struct MaterialProperties {
 
 #must_use
 fn material_properties_new(resonance, bandwidth, decay, brightness, transient) {
-    var p = alloc(sizeof(MaterialProperties));
+    var p = garjan_alloc(sizeof(MaterialProperties));
+    if (garjan_is_err(p) == 1) { return p; }
     MaterialProperties_set_resonance(p, resonance);
     MaterialProperties_set_bandwidth(p, bandwidth);
     MaterialProperties_set_decay(p, decay);
@@ -51,7 +52,8 @@ struct MaterialModeConfig {
 
 #must_use
 fn material_mode_config_new(pattern, mode_count, damping_factor) {
-    var c = alloc(sizeof(MaterialModeConfig));
+    var c = garjan_alloc(sizeof(MaterialModeConfig));
+    if (garjan_is_err(c) == 1) { return c; }
     MaterialModeConfig_set_pattern(c, pattern);
     MaterialModeConfig_set_mode_count(c, mode_count);
     MaterialModeConfig_set_damping_factor(c, damping_factor);

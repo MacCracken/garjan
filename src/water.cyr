@@ -115,16 +115,22 @@ fn water_new(water_type, intensity, sample_rate) {
     # drip_freq = 1200.0 + Rng::new(2749).next_f32_range(-200.0, 200.0)
     # (a THROWAWAY rng seeded 2749; the live rng is a fresh Rng::new(2749)).
     var tmp_rng = rng_new(2749);
+    if (garjan_is_err(tmp_rng) == 1) { return tmp_rng; }
     var drip_freq = f64_add(f64_from(1200), rng_next_f32_range(tmp_rng, f64_neg(f64_from(200)), f64_from(200)));
 
-    var self = alloc(sizeof(Water));
+    var self = garjan_alloc(sizeof(Water));
+    if (garjan_is_err(self) == 1) { return self; }
     Water_set_water_type(self, water_type);
     Water_set_intensity(self, inten);
     Water_set_sample_rate(self, sample_rate);
     Water_set_sample_position(self, 0);
     Water_set_drip_freq(self, drip_freq);
-    Water_set_rng(self, rng_new(2749));
-    Water_set_dc_blocker(self, garjan_dcblocker_new(sample_rate));
+    var ga_rng1 = rng_new(2749);
+    if (garjan_is_err(ga_rng1) == 1) { return ga_rng1; }
+    Water_set_rng(self, ga_rng1);
+    var ga_dcb2 = garjan_dcblocker_new(sample_rate);
+    if (garjan_is_err(ga_dcb2) == 1) { return ga_dcb2; }
+    Water_set_dc_blocker(self, ga_dcb2);
     var b = water_build_naad(self);
     if (garjan_is_err(b) == 1) { return b; }
     return self;
@@ -260,7 +266,8 @@ fn water_synthesize(self, duration) {
 # ---- serde: snapshot live state -> WaterParams -> JSON, and back. ----
 #must_use
 fn water_to_json(self, sb) {
-    var p = alloc(sizeof(WaterParams));
+    var p = garjan_alloc(sizeof(WaterParams));
+    if (garjan_is_err(p) == 1) { return p; }
     WaterParams_set_water_type(p, Water_water_type(self));
     WaterParams_set_intensity(p, Water_intensity(self));
     WaterParams_set_sample_rate(p, Water_sample_rate(self));
@@ -281,7 +288,8 @@ fn water_to_json(self, sb) {
 #must_use
 fn water_from_json_str(json) {
     var p = WaterParams_from_json_str(json);
-    var self = alloc(sizeof(Water));
+    var self = garjan_alloc(sizeof(Water));
+    if (garjan_is_err(self) == 1) { return self; }
     Water_set_water_type(self, WaterParams_water_type(p));
     Water_set_intensity(self, WaterParams_intensity(p));
     Water_set_sample_rate(self, WaterParams_sample_rate(p));
@@ -289,11 +297,13 @@ fn water_from_json_str(json) {
     Water_set_drip_freq(self, WaterParams_drip_freq(p));
 
     var rng = rng_new(0);
+    if (garjan_is_err(rng) == 1) { return rng; }
     Rng_set_state(rng, WaterParams_rng_state(p));
     Rng_set_inc(rng, WaterParams_rng_inc(p));
     Water_set_rng(self, rng);
 
     var dc = garjan_dcblocker_new(WaterParams_sample_rate(p));
+    if (garjan_is_err(dc) == 1) { return dc; }
     DcBlocker_set_x_prev(dc, WaterParams_dcb_x_prev(p));
     DcBlocker_set_y_prev(dc, WaterParams_dcb_y_prev(p));
     DcBlocker_set_r(dc, WaterParams_dcb_r(p));

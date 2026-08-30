@@ -25,7 +25,8 @@ struct DcBlocker {
 fn garjan_dcblocker_new(sample_rate) {
     var raw = f64_sub(F64_ONE, f64_div(f64_mul(F64_TAU, f64_from(10)), sample_rate));
     var r = f64_clamp(raw, 0x3FECCCCCCCCCCCCD, 0x3FEFFF2E48E8A71E);   # 0.9 .. 0.9999
-    var self = alloc(sizeof(DcBlocker));
+    var self = garjan_alloc(sizeof(DcBlocker));
+    if (garjan_is_err(self) == 1) { return self; }
     DcBlocker_set_x_prev(self, 0);
     DcBlocker_set_y_prev(self, 0);
     DcBlocker_set_r(self, r);

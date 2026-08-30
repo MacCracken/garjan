@@ -20,6 +20,9 @@ var GARJAN_OK                    = 0;
 var GARJAN_ERR_INVALID_PARAMETER = (0 - 1);   # a synthesis parameter out of range
 var GARJAN_ERR_SYNTHESIS_FAILED  = (0 - 2);   # a synthesis operation failed
 var GARJAN_ERR_COMPUTATION       = (0 - 3);   # a numeric computation went invalid
+# Not a port of a Rust variant -- Rust aborts the process on allocation
+# failure, so it had no such error to carry. See ADR-005.
+var GARJAN_ERR_ALLOCATION        = (0 - 4);   # heap exhausted (alloc returned 0)
 
 # ================================================================
 # Shared f64 tolerances / sentinels (IEEE-754 bit patterns). The Rust
@@ -46,7 +49,28 @@ fn garjan_err_name(code) {
     if (code == GARJAN_ERR_INVALID_PARAMETER) { return "invalid parameter"; }
     if (code == GARJAN_ERR_SYNTHESIS_FAILED) { return "synthesis failed"; }
     if (code == GARJAN_ERR_COMPUTATION) { return "computation error"; }
+    if (code == GARJAN_ERR_ALLOCATION) { return "allocation failed"; }
     return "unknown error";
+}
+
+# Allocate `size` bytes, or return GARJAN_ERR_ALLOCATION.
+#
+# The stdlib `alloc` reports exhaustion by returning 0 -- and 0 is GARJAN_OK,
+# so `garjan_is_err(alloc(n))` is FALSE on failure. Every constructor in this
+# crate writes through its allocation on the very next line, which turned an
+# out-of-memory condition into a store to address 0 rather than a clean error.
+# This wrapper maps that 0 onto a negative code, so the `if (garjan_is_err(p)
+# == 1) { return p; }` idiom the constructors already use catches it.
+#
+# Deliberately does NOT log. error.cyr is the L0 module, and several test
+# entries (aero, creature, rng, voice) include it WITHOUT logging.cyr; since
+# cyrius 6.5.36 a *reachable* undefined function is a hard build error, so a
+# garjan_log_error call here would break those builds.
+#must_use
+fn garjan_alloc(size) {
+    var p = alloc(size);
+    if (p == 0) { return GARJAN_ERR_ALLOCATION; }
+    return p;
 }
 
 # Finite test: 1 iff x is neither +/-inf nor NaN. abs(x) < +inf holds for

@@ -36,7 +36,8 @@ fn rng_next_u32(self) {
 # Seed the generator (PCG32 seeding: two warm-up draws around a state bump).
 #must_use
 fn rng_new(seed) {
-    var self = alloc(sizeof(Rng));
+    var self = garjan_alloc(sizeof(Rng));
+    if (garjan_is_err(self) == 1) { return self; }
     Rng_set_state(self, 0);
     Rng_set_inc(self, (seed << 1) | 1);
     rng_next_u32(self);

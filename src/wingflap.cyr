@@ -118,7 +118,8 @@ fn wingflap_new(bird_size, sample_rate) {
     var filter_freq = wingflap_config_filter_freq(bird_size);
     var amplitude = wingflap_config_amplitude(bird_size);
 
-    var self = alloc(sizeof(WingFlap));
+    var self = garjan_alloc(sizeof(WingFlap));
+    if (garjan_is_err(self) == 1) { return self; }
     WingFlap_set_bird_size(self, bird_size);
     WingFlap_set_sample_rate(self, sample_rate);
     WingFlap_set_sample_position(self, 0);
@@ -128,8 +129,12 @@ fn wingflap_new(bird_size, sample_rate) {
     WingFlap_set_flap_phase(self, 0);
     WingFlap_set_intensity(self, F64_ONE);
     WingFlap_set_filter_freq(self, filter_freq);
-    WingFlap_set_rng(self, rng_new(7070));
-    WingFlap_set_dc_blocker(self, garjan_dcblocker_new(sample_rate));
+    var ga_rng1 = rng_new(7070);
+    if (garjan_is_err(ga_rng1) == 1) { return ga_rng1; }
+    WingFlap_set_rng(self, ga_rng1);
+    var ga_dcb2 = garjan_dcblocker_new(sample_rate);
+    if (garjan_is_err(ga_dcb2) == 1) { return ga_dcb2; }
+    WingFlap_set_dc_blocker(self, ga_dcb2);
     var b = wingflap_build_naad(self);
     if (garjan_is_err(b) == 1) { return b; }
     return self;
@@ -228,7 +233,8 @@ fn wingflap_synthesize(self, duration) {
 # ---- serde: snapshot live state -> WingFlapParams -> JSON, and back. ----
 #must_use
 fn wingflap_to_json(self, sb) {
-    var p = alloc(sizeof(WingFlapParams));
+    var p = garjan_alloc(sizeof(WingFlapParams));
+    if (garjan_is_err(p) == 1) { return p; }
     WingFlapParams_set_bird_size(p, WingFlap_bird_size(self));
     WingFlapParams_set_sample_rate(p, WingFlap_sample_rate(self));
     WingFlapParams_set_sample_position(p, WingFlap_sample_position(self));
@@ -253,7 +259,8 @@ fn wingflap_to_json(self, sb) {
 #must_use
 fn wingflap_from_json_str(json) {
     var p = WingFlapParams_from_json_str(json);
-    var self = alloc(sizeof(WingFlap));
+    var self = garjan_alloc(sizeof(WingFlap));
+    if (garjan_is_err(self) == 1) { return self; }
     WingFlap_set_bird_size(self, WingFlapParams_bird_size(p));
     WingFlap_set_sample_rate(self, WingFlapParams_sample_rate(p));
     WingFlap_set_sample_position(self, WingFlapParams_sample_position(p));
@@ -265,11 +272,13 @@ fn wingflap_from_json_str(json) {
     WingFlap_set_filter_freq(self, WingFlapParams_filter_freq(p));
 
     var rng = rng_new(0);
+    if (garjan_is_err(rng) == 1) { return rng; }
     Rng_set_state(rng, WingFlapParams_rng_state(p));
     Rng_set_inc(rng, WingFlapParams_rng_inc(p));
     WingFlap_set_rng(self, rng);
 
     var dc = garjan_dcblocker_new(WingFlapParams_sample_rate(p));
+    if (garjan_is_err(dc) == 1) { return dc; }
     DcBlocker_set_x_prev(dc, WingFlapParams_dcb_x_prev(p));
     DcBlocker_set_y_prev(dc, WingFlapParams_dcb_y_prev(p));
     DcBlocker_set_r(dc, WingFlapParams_dcb_r(p));

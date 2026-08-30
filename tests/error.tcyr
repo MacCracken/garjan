@@ -21,6 +21,20 @@ fn main() {
     assert(garjan_is_finite(GARJAN_NEG_INF) == 0, "-inf is not finite");
     assert(garjan_is_finite(0x7FF8000000000000) == 0, "NaN is not finite");
 
+    # --- 2.0.3: allocation failure must be DETECTABLE ---
+    # The stdlib `alloc` signals exhaustion by returning 0, and 0 is GARJAN_OK,
+    # so `garjan_is_err(alloc(n))` is FALSE on failure. Every constructor here
+    # writes through its allocation on the next line, so before 2.0.3 an OOM
+    # was a store to address 0. garjan_alloc maps that 0 onto a negative code.
+    test_group("garjan_alloc");
+    assert_eq(alloc(0 - 1), 0, "raw alloc reports failure as 0");
+    assert_eq(garjan_is_err(alloc(0 - 1)), 0, "...which garjan_is_err CANNOT detect");
+    assert_eq(garjan_alloc(0 - 1), GARJAN_ERR_ALLOCATION, "garjan_alloc maps it to a negative code");
+    assert_eq(garjan_is_err(garjan_alloc(0 - 1)), 1, "...which garjan_is_err DOES detect");
+    assert_eq(garjan_is_err(garjan_alloc(ALLOC_MAX + 1)), 1, "oversized request rejected");
+    assert(garjan_alloc(64) > 0, "a valid request still returns a real pointer");
+
+
     return assert_summary();
 }
 

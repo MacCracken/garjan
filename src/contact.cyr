@@ -42,7 +42,8 @@ struct TerrainNoiseConfig { noise_type; filter_freq; filter_q; highpass; amplitu
 
 #must_use
 fn terrain_noise_config(t) {
-    var c = alloc(sizeof(TerrainNoiseConfig));
+    var c = garjan_alloc(sizeof(TerrainNoiseConfig));
+    if (garjan_is_err(c) == 1) { return c; }
     if (t == TERRAIN_GRAVEL) {
         TerrainNoiseConfig_set_noise_type(c, CONTACT_NOISE_PINK);
         TerrainNoiseConfig_set_filter_freq(c, f64_from(1500));
@@ -108,7 +109,8 @@ struct MovementConfig { step_interval; force; excitation_duration; }
 
 #must_use
 fn movement_config(m) {
-    var c = alloc(sizeof(MovementConfig));
+    var c = garjan_alloc(sizeof(MovementConfig));
+    if (garjan_is_err(c) == 1) { return c; }
     if (m == MOVEMENT_WALK) {
         MovementConfig_set_step_interval(c, F64_HALF);
         MovementConfig_set_force(c, F64_HALF);

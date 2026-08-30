@@ -113,14 +113,19 @@ fn underwater_new(depth, sample_rate) {
     var e = garjan_validate_sample_rate(sample_rate);
     if (garjan_is_err(e) == 1) { return e; }
 
-    var self = alloc(sizeof(Underwater));
+    var self = garjan_alloc(sizeof(Underwater));
+    if (garjan_is_err(self) == 1) { return self; }
     Underwater_set_depth(self, depth);
     Underwater_set_sample_rate(self, sample_rate);
     Underwater_set_sample_position(self, 0);
     underwater_apply_config(self, depth);
     Underwater_set_intensity(self, F64_ONE);
-    Underwater_set_rng(self, rng_new(6060));
-    Underwater_set_dc_blocker(self, garjan_dcblocker_new(sample_rate));
+    var ga_rng1 = rng_new(6060);
+    if (garjan_is_err(ga_rng1) == 1) { return ga_rng1; }
+    Underwater_set_rng(self, ga_rng1);
+    var ga_dcb2 = garjan_dcblocker_new(sample_rate);
+    if (garjan_is_err(ga_dcb2) == 1) { return ga_dcb2; }
+    Underwater_set_dc_blocker(self, ga_dcb2);
     var b = underwater_build_naad(self);
     if (garjan_is_err(b) == 1) { return b; }
     return self;
@@ -253,7 +258,8 @@ fn underwater_synthesize(self, duration) {
 # ---- serde: snapshot live state -> UnderwaterParams -> JSON, and back. ----
 #must_use
 fn underwater_to_json(self, sb) {
-    var p = alloc(sizeof(UnderwaterParams));
+    var p = garjan_alloc(sizeof(UnderwaterParams));
+    if (garjan_is_err(p) == 1) { return p; }
     UnderwaterParams_set_depth(p, Underwater_depth(self));
     UnderwaterParams_set_sample_rate(p, Underwater_sample_rate(self));
     UnderwaterParams_set_sample_position(p, Underwater_sample_position(self));
@@ -277,7 +283,8 @@ fn underwater_to_json(self, sb) {
 #must_use
 fn underwater_from_json_str(json) {
     var p = UnderwaterParams_from_json_str(json);
-    var self = alloc(sizeof(Underwater));
+    var self = garjan_alloc(sizeof(Underwater));
+    if (garjan_is_err(self) == 1) { return self; }
     Underwater_set_depth(self, UnderwaterParams_depth(p));
     Underwater_set_sample_rate(self, UnderwaterParams_sample_rate(p));
     Underwater_set_sample_position(self, UnderwaterParams_sample_position(p));
@@ -288,11 +295,13 @@ fn underwater_from_json_str(json) {
     Underwater_set_intensity(self, UnderwaterParams_intensity(p));
 
     var rng = rng_new(0);
+    if (garjan_is_err(rng) == 1) { return rng; }
     Rng_set_state(rng, UnderwaterParams_rng_state(p));
     Rng_set_inc(rng, UnderwaterParams_rng_inc(p));
     Underwater_set_rng(self, rng);
 
     var dc = garjan_dcblocker_new(UnderwaterParams_sample_rate(p));
+    if (garjan_is_err(dc) == 1) { return dc; }
     DcBlocker_set_x_prev(dc, UnderwaterParams_dcb_x_prev(p));
     DcBlocker_set_y_prev(dc, UnderwaterParams_dcb_y_prev(p));
     DcBlocker_set_r(dc, UnderwaterParams_dcb_r(p));

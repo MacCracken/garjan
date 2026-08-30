@@ -80,11 +80,14 @@ fn friction_build_naad(self) {
 
     # Modal bank: generate_modes(props, pattern, mode_count.min(6), damping).
     var props = material_properties(surface);
+    if (garjan_is_err(props) == 1) { return props; }
     var mode_cfg = material_mode_config(surface);
+    if (garjan_is_err(mode_cfg) == 1) { return mode_cfg; }
     var count = MaterialModeConfig_mode_count(mode_cfg);
     if (count > 6) { count = 6; }
     var specs = generate_modes(props, MaterialModeConfig_pattern(mode_cfg), count,
       MaterialModeConfig_damping_factor(mode_cfg));
+    if (garjan_is_err(specs) == 1) { return specs; }
     var bank = modal_bank_new(specs, sr);
     if (garjan_is_err(bank) == 1) { return garjan_map_naad_error(bank); }
     Friction_set_modal_bank(self, bank);
@@ -125,7 +128,8 @@ fn friction_new(friction_type, surface, sample_rate) {
         noise_mix = F64_HALF;                                    # 0.5
     }
 
-    var self = alloc(sizeof(Friction));
+    var self = garjan_alloc(sizeof(Friction));
+    if (garjan_is_err(self) == 1) { return self; }
     Friction_set_friction_type(self, friction_type);
     Friction_set_surface(self, surface);
     Friction_set_sample_rate(self, sample_rate);
@@ -136,8 +140,12 @@ fn friction_new(friction_type, surface, sample_rate) {
     Friction_set_noise_mix(self, noise_mix);
     Friction_set_velocity(self, 0);
     Friction_set_pressure(self, F64_HALF);
-    Friction_set_rng(self, rng_new(7777));
-    Friction_set_dc_blocker(self, garjan_dcblocker_new(sample_rate));
+    var ga_rng1 = rng_new(7777);
+    if (garjan_is_err(ga_rng1) == 1) { return ga_rng1; }
+    Friction_set_rng(self, ga_rng1);
+    var ga_dcb2 = garjan_dcblocker_new(sample_rate);
+    if (garjan_is_err(ga_dcb2) == 1) { return ga_dcb2; }
+    Friction_set_dc_blocker(self, ga_dcb2);
 
     var b = friction_build_naad(self);
     if (garjan_is_err(b) == 1) { return b; }
@@ -240,7 +248,8 @@ fn friction_synthesize(self, duration) {
 # ---- serde: snapshot live state -> FrictionParams -> JSON, and back. ----
 #must_use
 fn friction_to_json(self, sb) {
-    var p = alloc(sizeof(FrictionParams));
+    var p = garjan_alloc(sizeof(FrictionParams));
+    if (garjan_is_err(p) == 1) { return p; }
     FrictionParams_set_friction_type(p, Friction_friction_type(self));
     FrictionParams_set_surface(p, Friction_surface(self));
     FrictionParams_set_sample_rate(p, Friction_sample_rate(self));
@@ -267,7 +276,8 @@ fn friction_to_json(self, sb) {
 #must_use
 fn friction_from_json_str(json) {
     var p = FrictionParams_from_json_str(json);
-    var self = alloc(sizeof(Friction));
+    var self = garjan_alloc(sizeof(Friction));
+    if (garjan_is_err(self) == 1) { return self; }
     Friction_set_friction_type(self, FrictionParams_friction_type(p));
     Friction_set_surface(self, FrictionParams_surface(p));
     Friction_set_sample_rate(self, FrictionParams_sample_rate(p));
@@ -280,11 +290,13 @@ fn friction_from_json_str(json) {
     Friction_set_pressure(self, FrictionParams_pressure(p));
 
     var rng = rng_new(0);
+    if (garjan_is_err(rng) == 1) { return rng; }
     Rng_set_state(rng, FrictionParams_rng_state(p));
     Rng_set_inc(rng, FrictionParams_rng_inc(p));
     Friction_set_rng(self, rng);
 
     var dc = garjan_dcblocker_new(FrictionParams_sample_rate(p));
+    if (garjan_is_err(dc) == 1) { return dc; }
     DcBlocker_set_x_prev(dc, FrictionParams_dcb_x_prev(p));
     DcBlocker_set_y_prev(dc, FrictionParams_dcb_y_prev(p));
     DcBlocker_set_r(dc, FrictionParams_dcb_r(p));

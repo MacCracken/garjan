@@ -64,8 +64,10 @@ fn bubble_new(bubble_type, sample_rate) {
     var e = garjan_validate_sample_rate(sample_rate);
     if (garjan_is_err(e) == 1) { return e; }
     var cfg = creature_bubble_config(bubble_type);
+    if (garjan_is_err(cfg) == 1) { return cfg; }
 
-    var self = alloc(sizeof(Bubble));
+    var self = garjan_alloc(sizeof(Bubble));
+    if (garjan_is_err(self) == 1) { return self; }
     Bubble_set_bubble_type(self, bubble_type);
     Bubble_set_sample_rate(self, sample_rate);
     Bubble_set_sample_position(self, 0);
@@ -74,8 +76,12 @@ fn bubble_new(bubble_type, sample_rate) {
     Bubble_set_freq_spread(self, BubbleConfig_freq_spread(cfg));
     Bubble_set_decay_time(self, BubbleConfig_decay(cfg));
     Bubble_set_intensity(self, F64_ONE);
-    Bubble_set_rng(self, rng_new(4040));
-    Bubble_set_dc_blocker(self, garjan_dcblocker_new(sample_rate));
+    var ga_rng1 = rng_new(4040);
+    if (garjan_is_err(ga_rng1) == 1) { return ga_rng1; }
+    Bubble_set_rng(self, ga_rng1);
+    var ga_dcb2 = garjan_dcblocker_new(sample_rate);
+    if (garjan_is_err(ga_dcb2) == 1) { return ga_dcb2; }
+    Bubble_set_dc_blocker(self, ga_dcb2);
     var b = bubble_build_naad(self);
     if (garjan_is_err(b) == 1) { return b; }
     return self;
@@ -208,7 +214,8 @@ fn bubble_synthesize(self, duration) {
 # ---- serde: snapshot live state -> BubbleParams -> JSON, and back. ----
 #must_use
 fn bubble_to_json(self, sb) {
-    var p = alloc(sizeof(BubbleParams));
+    var p = garjan_alloc(sizeof(BubbleParams));
+    if (garjan_is_err(p) == 1) { return p; }
     BubbleParams_set_bubble_type(p, Bubble_bubble_type(self));
     BubbleParams_set_sample_rate(p, Bubble_sample_rate(self));
     BubbleParams_set_sample_position(p, Bubble_sample_position(self));
@@ -232,7 +239,8 @@ fn bubble_to_json(self, sb) {
 #must_use
 fn bubble_from_json_str(json) {
     var p = BubbleParams_from_json_str(json);
-    var self = alloc(sizeof(Bubble));
+    var self = garjan_alloc(sizeof(Bubble));
+    if (garjan_is_err(self) == 1) { return self; }
     Bubble_set_bubble_type(self, BubbleParams_bubble_type(p));
     Bubble_set_sample_rate(self, BubbleParams_sample_rate(p));
     Bubble_set_sample_position(self, BubbleParams_sample_position(p));
@@ -243,11 +251,13 @@ fn bubble_from_json_str(json) {
     Bubble_set_intensity(self, BubbleParams_intensity(p));
 
     var rng = rng_new(0);
+    if (garjan_is_err(rng) == 1) { return rng; }
     Rng_set_state(rng, BubbleParams_rng_state(p));
     Rng_set_inc(rng, BubbleParams_rng_inc(p));
     Bubble_set_rng(self, rng);
 
     var dc = garjan_dcblocker_new(BubbleParams_sample_rate(p));
+    if (garjan_is_err(dc) == 1) { return dc; }
     DcBlocker_set_x_prev(dc, BubbleParams_dcb_x_prev(p));
     DcBlocker_set_y_prev(dc, BubbleParams_dcb_y_prev(p));
     DcBlocker_set_r(dc, BubbleParams_dcb_r(p));

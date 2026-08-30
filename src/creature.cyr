@@ -23,7 +23,8 @@ struct InsectConfig { base_freq; mod_rate; chirp_rate; amplitude; }
 
 #must_use
 fn creature_insect_config(ty) {
-    var c = alloc(sizeof(InsectConfig));
+    var c = garjan_alloc(sizeof(InsectConfig));
+    if (garjan_is_err(c) == 1) { return c; }
     if (ty == INSECT_WING_BUZZ) {
         InsectConfig_set_base_freq(c, f64_from(200));
         InsectConfig_set_mod_rate(c, f64_from(8));
@@ -50,7 +51,8 @@ struct BubbleConfig { base_freq; event_rate; freq_spread; decay; }
 
 #must_use
 fn creature_bubble_config(ty) {
-    var c = alloc(sizeof(BubbleConfig));
+    var c = garjan_alloc(sizeof(BubbleConfig));
+    if (garjan_is_err(c) == 1) { return c; }
     if (ty == BUBBLE_UNDERWATER) {
         BubbleConfig_set_base_freq(c, f64_from(400));
         BubbleConfig_set_event_rate(c, f64_from(5));

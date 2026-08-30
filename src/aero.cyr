@@ -17,7 +17,8 @@ struct WhooshConfig { duration; brightness; low_freq; }
 
 #must_use
 fn aero_whoosh_config(ty) {
-    var c = alloc(sizeof(WhooshConfig));
+    var c = garjan_alloc(sizeof(WhooshConfig));
+    if (garjan_is_err(c) == 1) { return c; }
     if (ty == WHOOSH_SWING) {
         WhooshConfig_set_duration(c, f64_div(f64_from(3), f64_from(10)));       # 0.3
         WhooshConfig_set_brightness(c, f64_div(f64_from(7), f64_from(10)));     # 0.7
@@ -51,7 +52,8 @@ struct WhistleConfig { base_freq; bandwidth; noise_mix; }
 
 #must_use
 fn aero_whistle_config(ty) {
-    var c = alloc(sizeof(WhistleConfig));
+    var c = garjan_alloc(sizeof(WhistleConfig));
+    if (garjan_is_err(c) == 1) { return c; }
     if (ty == WHISTLE_GAP) {
         WhistleConfig_set_base_freq(c, f64_from(2000));
         WhistleConfig_set_bandwidth(c, f64_from(200));
@@ -85,7 +87,8 @@ struct ClothConfig { flap_rate; amplitude; filter_freq; use_modal; }
 
 #must_use
 fn aero_cloth_config(ty) {
-    var c = alloc(sizeof(ClothConfig));
+    var c = garjan_alloc(sizeof(ClothConfig));
+    if (garjan_is_err(c) == 1) { return c; }
     if (ty == CLOTH_FLAG) {
         ClothConfig_set_flap_rate(c, f64_from(8));
         ClothConfig_set_amplitude(c, f64_div(f64_from(3), f64_from(10)));       # 0.3

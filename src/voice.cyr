@@ -27,7 +27,8 @@ struct VoiceSlot {
 
 #must_use
 fn voice_slot_new() {
-    var s = alloc(sizeof(VoiceSlot));
+    var s = garjan_alloc(sizeof(VoiceSlot));
+    if (garjan_is_err(s) == 1) { return s; }
     VoiceSlot_set_active(s, 0);
     VoiceSlot_set_priority(s, 0);
     VoiceSlot_set_age(s, 0);
@@ -46,10 +47,13 @@ fn voice_pool_new(max_voices_arg, steal_policy) {
     var slots = vec_new();
     var i = 0;
     while (i < max_voices) {
-        vec_push(slots, voice_slot_new());
+        var ga_slot1 = voice_slot_new();
+        if (garjan_is_err(ga_slot1) == 1) { return ga_slot1; }
+        vec_push(slots, ga_slot1);
         i = i + 1;
     }
-    var p = alloc(sizeof(VoicePool));
+    var p = garjan_alloc(sizeof(VoicePool));
+    if (garjan_is_err(p) == 1) { return p; }
     VoicePool_set_slots(p, slots);
     VoicePool_set_steal_policy(p, steal_policy);
     VoicePool_set_max_voices(p, max_voices);

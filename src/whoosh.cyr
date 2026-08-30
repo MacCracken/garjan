@@ -84,12 +84,14 @@ fn whoosh_new(whoosh_type, sample_rate) {
     if (garjan_is_err(e) == 1) { return e; }
 
     var cfg = aero_whoosh_config(whoosh_type);
+    if (garjan_is_err(cfg) == 1) { return cfg; }
     var env_dur = WhooshConfig_duration(cfg);
     var brightness = WhooshConfig_brightness(cfg);
     var low_content = WhooshConfig_low_freq(cfg);
     var envelope_samples = f64_to(f64_mul(env_dur, sample_rate));
 
-    var self = alloc(sizeof(Whoosh));
+    var self = garjan_alloc(sizeof(Whoosh));
+    if (garjan_is_err(self) == 1) { return self; }
     Whoosh_set_whoosh_type(self, whoosh_type);
     Whoosh_set_sample_rate(self, sample_rate);
     Whoosh_set_sample_position(self, 0);
@@ -100,8 +102,12 @@ fn whoosh_new(whoosh_type, sample_rate) {
     Whoosh_set_trigger_position(self, 0);
     # speed default = 0.5
     Whoosh_set_speed(self, F64_HALF);
-    Whoosh_set_rng(self, rng_new(1111));
-    Whoosh_set_dc_blocker(self, garjan_dcblocker_new(sample_rate));
+    var ga_rng1 = rng_new(1111);
+    if (garjan_is_err(ga_rng1) == 1) { return ga_rng1; }
+    Whoosh_set_rng(self, ga_rng1);
+    var ga_dcb2 = garjan_dcblocker_new(sample_rate);
+    if (garjan_is_err(ga_dcb2) == 1) { return ga_dcb2; }
+    Whoosh_set_dc_blocker(self, ga_dcb2);
 
     var b = whoosh_build_naad(self);
     if (garjan_is_err(b) == 1) { return b; }
@@ -197,7 +203,8 @@ fn whoosh_synthesize(self, duration) {
 # ---- serde: snapshot live state -> WhooshParams -> JSON, and back. ----
 #must_use
 fn whoosh_to_json(self, sb) {
-    var p = alloc(sizeof(WhooshParams));
+    var p = garjan_alloc(sizeof(WhooshParams));
+    if (garjan_is_err(p) == 1) { return p; }
     WhooshParams_set_whoosh_type(p, Whoosh_whoosh_type(self));
     WhooshParams_set_sample_rate(p, Whoosh_sample_rate(self));
     WhooshParams_set_sample_position(p, Whoosh_sample_position(self));
@@ -222,7 +229,8 @@ fn whoosh_to_json(self, sb) {
 #must_use
 fn whoosh_from_json_str(json) {
     var p = WhooshParams_from_json_str(json);
-    var self = alloc(sizeof(Whoosh));
+    var self = garjan_alloc(sizeof(Whoosh));
+    if (garjan_is_err(self) == 1) { return self; }
     Whoosh_set_whoosh_type(self, WhooshParams_whoosh_type(p));
     Whoosh_set_sample_rate(self, WhooshParams_sample_rate(p));
     Whoosh_set_sample_position(self, WhooshParams_sample_position(p));
@@ -234,11 +242,13 @@ fn whoosh_from_json_str(json) {
     Whoosh_set_speed(self, WhooshParams_speed(p));
 
     var rng = rng_new(0);
+    if (garjan_is_err(rng) == 1) { return rng; }
     Rng_set_state(rng, WhooshParams_rng_state(p));
     Rng_set_inc(rng, WhooshParams_rng_inc(p));
     Whoosh_set_rng(self, rng);
 
     var dc = garjan_dcblocker_new(WhooshParams_sample_rate(p));
+    if (garjan_is_err(dc) == 1) { return dc; }
     DcBlocker_set_x_prev(dc, WhooshParams_dcb_x_prev(p));
     DcBlocker_set_y_prev(dc, WhooshParams_dcb_y_prev(p));
     DcBlocker_set_r(dc, WhooshParams_dcb_r(p));

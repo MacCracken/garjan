@@ -66,11 +66,14 @@ fn rolling_build_naad(self) {
     # Modal bank for hollow bodies (barrels are wooden). Rebuilt, not serialized.
     if (f64_gt(Rolling_hollowness(self), 0) == 1) {
         var props = material_properties(MATERIAL_WOOD);
+        if (garjan_is_err(props) == 1) { return props; }
         var mode_cfg = material_mode_config(MATERIAL_WOOD);
+        if (garjan_is_err(mode_cfg) == 1) { return mode_cfg; }
         var count = MaterialModeConfig_mode_count(mode_cfg);
         if (count > 6) { count = 6; }
         var specs = generate_modes(props, MaterialModeConfig_pattern(mode_cfg), count,
           MaterialModeConfig_damping_factor(mode_cfg));
+        if (garjan_is_err(specs) == 1) { return specs; }
         var bank = modal_bank_new(specs, sr);
         if (garjan_is_err(bank) == 1) { return garjan_map_naad_error(bank); }
         Rolling_set_modal_bank(self, bank);
@@ -81,6 +84,7 @@ fn rolling_build_naad(self) {
     # Surface filter: bandpass at material resonance * (1 - 0.3*mass_factor),
     # clamped to [50, 8000] Hz, Q = 1.0.
     var surf_props = material_properties(Rolling_surface(self));
+    if (garjan_is_err(surf_props) == 1) { return surf_props; }
     var resonance = MaterialProperties_resonance(surf_props);
     var scale = f64_sub(F64_ONE, f64_mul(f64_div(f64_from(3), f64_from(10)), Rolling_mass_factor(self)));
     var base_cutoff = f64_mul(resonance, scale);
@@ -122,7 +126,8 @@ fn rolling_new(body, surface, sample_rate) {
         hollowness = f64_div(f64_from(8), f64_from(10));    # 0.8
     }
 
-    var self = alloc(sizeof(Rolling));
+    var self = garjan_alloc(sizeof(Rolling));
+    if (garjan_is_err(self) == 1) { return self; }
     Rolling_set_body(self, body);
     Rolling_set_surface(self, surface);
     Rolling_set_sample_rate(self, sample_rate);
@@ -132,8 +137,12 @@ fn rolling_new(body, surface, sample_rate) {
     Rolling_set_hollowness(self, hollowness);
     Rolling_set_rotation_phase(self, 0);
     Rolling_set_velocity(self, 0);
-    Rolling_set_rng(self, rng_new(3333));
-    Rolling_set_dc_blocker(self, garjan_dcblocker_new(sample_rate));
+    var ga_rng1 = rng_new(3333);
+    if (garjan_is_err(ga_rng1) == 1) { return ga_rng1; }
+    Rolling_set_rng(self, ga_rng1);
+    var ga_dcb2 = garjan_dcblocker_new(sample_rate);
+    if (garjan_is_err(ga_dcb2) == 1) { return ga_dcb2; }
+    Rolling_set_dc_blocker(self, ga_dcb2);
 
     var b = rolling_build_naad(self);
     if (garjan_is_err(b) == 1) { return b; }
@@ -226,7 +235,8 @@ fn rolling_synthesize(self, duration) {
 # ---- serde: snapshot live state -> RollingParams -> JSON, and back. ----
 #must_use
 fn rolling_to_json(self, sb) {
-    var p = alloc(sizeof(RollingParams));
+    var p = garjan_alloc(sizeof(RollingParams));
+    if (garjan_is_err(p) == 1) { return p; }
     RollingParams_set_body(p, Rolling_body(self));
     RollingParams_set_surface(p, Rolling_surface(self));
     RollingParams_set_sample_rate(p, Rolling_sample_rate(self));
@@ -252,7 +262,8 @@ fn rolling_to_json(self, sb) {
 #must_use
 fn rolling_from_json_str(json) {
     var p = RollingParams_from_json_str(json);
-    var self = alloc(sizeof(Rolling));
+    var self = garjan_alloc(sizeof(Rolling));
+    if (garjan_is_err(self) == 1) { return self; }
     Rolling_set_body(self, RollingParams_body(p));
     Rolling_set_surface(self, RollingParams_surface(p));
     Rolling_set_sample_rate(self, RollingParams_sample_rate(p));
@@ -264,11 +275,13 @@ fn rolling_from_json_str(json) {
     Rolling_set_velocity(self, RollingParams_velocity(p));
 
     var rng = rng_new(0);
+    if (garjan_is_err(rng) == 1) { return rng; }
     Rng_set_state(rng, RollingParams_rng_state(p));
     Rng_set_inc(rng, RollingParams_rng_inc(p));
     Rolling_set_rng(self, rng);
 
     var dc = garjan_dcblocker_new(RollingParams_sample_rate(p));
+    if (garjan_is_err(dc) == 1) { return dc; }
     DcBlocker_set_x_prev(dc, RollingParams_dcb_x_prev(p));
     DcBlocker_set_y_prev(dc, RollingParams_dcb_y_prev(p));
     DcBlocker_set_r(dc, RollingParams_dcb_r(p));

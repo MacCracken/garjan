@@ -5,6 +5,13 @@
 
 ## Version
 
+**2.0.3** (2026-08-30) — completes the allocation-failure hardening deferred
+from 2.0.2. `alloc` returns `0` on exhaustion and `garjan_is_err` only detects
+`< 0`, so an OOM was a store to address 0; all allocations now route through
+`garjan_alloc` -> `GARJAN_ERR_ALLOCATION` (`-4`), with 132 guards across the 85
+direct sites and every unchecked helper result. See
+[ADR-0005](../adr/0005-allocation-failure-is-an-error-code-not-an-abort.md).
+
 **2.0.2** (2026-08-30) — security/hardening from a P-1 audit sweep. Closed
 three defects reachable from untrusted JSON: `*_from_json_str` discarded
 `*_build_naad`'s error code (20 of 21 sites; a null-deref SIGSEGV, confirmed and
@@ -38,7 +45,7 @@ crate is preserved at `rust-old/` for parity reference (frozen, do not edit).
 
 ## Tests
 
-- **33 module suites** in `tests/*.tcyr`, **466 assertions, all green**.
+- **33 module suites** in `tests/*.tcyr`, **472 assertions, all green**.
   Covers parity (incl. bit-exact PCG32), synthesis finiteness/energy, and
   serde roundtrips. `cyrius test` runs them; each also builds standalone.
 - Cleanliness: `cyrius lint` 0 warnings (33 modules), `cyrius vet` clean,
@@ -74,11 +81,10 @@ _None yet (kiran, joshua, dhvani + any AGNOS component needing environmental aud
 
 ## Next
 
-- **Allocation-failure guard (2.1.0).** `alloc` returns `0` on exhaustion, but
-  `garjan_is_err` only treats `< 0` as an error and `GARJAN_OK` *is* `0`, so a
-  failed allocation passes every error check and is then written through as a
-  null pointer. All ~85 `alloc(sizeof(X))` sites are unchecked. Needs a
-  `garjan_alloc` wrapper mapping `0` to a negative code, applied at every site.
+- **Arena lifetime.** Nothing is ever freed, so long-running streams grow
+  without bound — `texture_band_mix` allocates per `texture_process_block`, and
+  `impact_process_block` builds a fresh `Exciter` (and `Rng`) per call. 2.0.3
+  fixed OOM *detection*; this is the separate problem of not reaching OOM.
 - **Duration / sample-rate upper bounds — needs an ADR.** Currently unbounded
   (1e8 s sizes a 4.4-trillion-sample buffer). Faithful to `rust-old`, so
   capping is a deliberate divergence, not a bug fix.

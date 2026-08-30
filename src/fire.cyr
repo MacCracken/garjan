@@ -63,14 +63,19 @@ fn fire_new(intensity, sample_rate) {
     if (garjan_is_err(e) == 1) { return e; }
     var inten = f64_clamp(intensity, 0, F64_ONE);
 
-    var self = alloc(sizeof(Fire));
+    var self = garjan_alloc(sizeof(Fire));
+    if (garjan_is_err(self) == 1) { return self; }
     Fire_set_intensity(self, inten);
     # crackle_rate = 5.0 + intensity * 30.0
     Fire_set_crackle_rate(self, f64_add(f64_from(5), f64_mul(inten, f64_from(30))));
     Fire_set_sample_rate(self, sample_rate);
     Fire_set_sample_position(self, 0);
-    Fire_set_rng(self, rng_new(6661));
-    Fire_set_dc_blocker(self, garjan_dcblocker_new(sample_rate));
+    var ga_rng1 = rng_new(6661);
+    if (garjan_is_err(ga_rng1) == 1) { return ga_rng1; }
+    Fire_set_rng(self, ga_rng1);
+    var ga_dcb2 = garjan_dcblocker_new(sample_rate);
+    if (garjan_is_err(ga_dcb2) == 1) { return ga_dcb2; }
+    Fire_set_dc_blocker(self, ga_dcb2);
     var b = fire_build_naad(self);
     if (garjan_is_err(b) == 1) { return b; }
     return self;
@@ -163,7 +168,8 @@ fn fire_synthesize(self, duration) {
 # ---- serde: snapshot live state -> FireParams -> JSON, and back. ----
 #must_use
 fn fire_to_json(self, sb) {
-    var p = alloc(sizeof(FireParams));
+    var p = garjan_alloc(sizeof(FireParams));
+    if (garjan_is_err(p) == 1) { return p; }
     FireParams_set_intensity(p, Fire_intensity(self));
     FireParams_set_crackle_rate(p, Fire_crackle_rate(self));
     FireParams_set_sample_rate(p, Fire_sample_rate(self));
@@ -183,18 +189,21 @@ fn fire_to_json(self, sb) {
 #must_use
 fn fire_from_json_str(json) {
     var p = FireParams_from_json_str(json);
-    var self = alloc(sizeof(Fire));
+    var self = garjan_alloc(sizeof(Fire));
+    if (garjan_is_err(self) == 1) { return self; }
     Fire_set_intensity(self, FireParams_intensity(p));
     Fire_set_crackle_rate(self, FireParams_crackle_rate(p));
     Fire_set_sample_rate(self, FireParams_sample_rate(p));
     Fire_set_sample_position(self, FireParams_sample_position(p));
 
     var rng = rng_new(0);
+    if (garjan_is_err(rng) == 1) { return rng; }
     Rng_set_state(rng, FireParams_rng_state(p));
     Rng_set_inc(rng, FireParams_rng_inc(p));
     Fire_set_rng(self, rng);
 
     var dc = garjan_dcblocker_new(FireParams_sample_rate(p));
+    if (garjan_is_err(dc) == 1) { return dc; }
     DcBlocker_set_x_prev(dc, FireParams_dcb_x_prev(p));
     DcBlocker_set_y_prev(dc, FireParams_dcb_y_prev(p));
     DcBlocker_set_r(dc, FireParams_dcb_r(p));

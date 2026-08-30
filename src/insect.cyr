@@ -107,6 +107,7 @@ fn insect_new(insect_type, sample_rate) {
     if (garjan_is_err(e) == 1) { return e; }
 
     var cfg = creature_insect_config(insect_type);
+    if (garjan_is_err(cfg) == 1) { return cfg; }
     var base_freq = InsectConfig_base_freq(cfg);
     var mod_rate = InsectConfig_mod_rate(cfg);
     var chirp_rate = InsectConfig_chirp_rate(cfg);
@@ -114,10 +115,12 @@ fn insect_new(insect_type, sample_rate) {
 
     # Pre-compute swarm detunings (det_rng seeded 12321), +/- 8% each.
     var det_rng = rng_new(12321);
+    if (garjan_is_err(det_rng) == 1) { return det_rng; }
     var lo = f64_neg(f64_div(f64_from(8), f64_from(100)));
     var hi = f64_div(f64_from(8), f64_from(100));
 
-    var self = alloc(sizeof(Insect));
+    var self = garjan_alloc(sizeof(Insect));
+    if (garjan_is_err(self) == 1) { return self; }
     Insect_set_det0(self, rng_next_f32_range(det_rng, lo, hi));
     Insect_set_det1(self, rng_next_f32_range(det_rng, lo, hi));
     Insect_set_det2(self, rng_next_f32_range(det_rng, lo, hi));
@@ -136,8 +139,12 @@ fn insect_new(insect_type, sample_rate) {
     Insect_set_amplitude(self, amplitude);
     Insect_set_intensity(self, F64_ONE);
     Insect_set_swarm_count(self, 1);
-    Insect_set_rng(self, rng_new(9999));
-    Insect_set_dc_blocker(self, garjan_dcblocker_new(sample_rate));
+    var ga_rng1 = rng_new(9999);
+    if (garjan_is_err(ga_rng1) == 1) { return ga_rng1; }
+    Insect_set_rng(self, ga_rng1);
+    var ga_dcb2 = garjan_dcblocker_new(sample_rate);
+    if (garjan_is_err(ga_dcb2) == 1) { return ga_dcb2; }
+    Insect_set_dc_blocker(self, ga_dcb2);
 
     var b = insect_build_naad(self);
     if (garjan_is_err(b) == 1) { return b; }
@@ -277,7 +284,8 @@ fn insect_synthesize(self, duration) {
 # ---- serde: snapshot live state -> InsectParams -> JSON, and back. ----
 #must_use
 fn insect_to_json(self, sb) {
-    var p = alloc(sizeof(InsectParams));
+    var p = garjan_alloc(sizeof(InsectParams));
+    if (garjan_is_err(p) == 1) { return p; }
     InsectParams_set_insect_type(p, Insect_insect_type(self));
     InsectParams_set_sample_rate(p, Insect_sample_rate(self));
     InsectParams_set_sample_position(p, Insect_sample_position(self));
@@ -310,7 +318,8 @@ fn insect_to_json(self, sb) {
 #must_use
 fn insect_from_json_str(json) {
     var p = InsectParams_from_json_str(json);
-    var self = alloc(sizeof(Insect));
+    var self = garjan_alloc(sizeof(Insect));
+    if (garjan_is_err(self) == 1) { return self; }
     Insect_set_insect_type(self, InsectParams_insect_type(p));
     Insect_set_sample_rate(self, InsectParams_sample_rate(p));
     Insect_set_sample_position(self, InsectParams_sample_position(p));
@@ -340,11 +349,13 @@ fn insect_from_json_str(json) {
     Insect_set_det7(self, InsectParams_det7(p));
 
     var rng = rng_new(0);
+    if (garjan_is_err(rng) == 1) { return rng; }
     Rng_set_state(rng, InsectParams_rng_state(p));
     Rng_set_inc(rng, InsectParams_rng_inc(p));
     Insect_set_rng(self, rng);
 
     var dc = garjan_dcblocker_new(InsectParams_sample_rate(p));
+    if (garjan_is_err(dc) == 1) { return dc; }
     DcBlocker_set_x_prev(dc, InsectParams_dcb_x_prev(p));
     DcBlocker_set_y_prev(dc, InsectParams_dcb_y_prev(p));
     DcBlocker_set_r(dc, InsectParams_dcb_r(p));

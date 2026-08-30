@@ -72,10 +72,13 @@ fn foliage_build_naad(self) {
     var bank = 0;
     if (ftype == FOLIAGE_BRANCH_SNAP) {
         var props = material_properties(MATERIAL_WOOD);
+        if (garjan_is_err(props) == 1) { return props; }
         var mode_cfg = material_mode_config(MATERIAL_WOOD);
+        if (garjan_is_err(mode_cfg) == 1) { return mode_cfg; }
         var specs = generate_modes(props, MaterialModeConfig_pattern(mode_cfg),
           MaterialModeConfig_mode_count(mode_cfg),
           MaterialModeConfig_damping_factor(mode_cfg));
+        if (garjan_is_err(specs) == 1) { return specs; }
         var mb = modal_bank_new(specs, sr);
         if (garjan_is_err(mb) == 1) { return garjan_map_naad_error(mb); }
         bank = mb;
@@ -126,7 +129,8 @@ fn foliage_new(foliage_type, sample_rate) {
     # event_duration_samples = (event_dur_ms * sample_rate / 1000.0) as usize
     var event_duration_samples = f64_to(f64_div(f64_mul(event_dur_ms, sample_rate), f64_from(1000)));
 
-    var self = alloc(sizeof(Foliage));
+    var self = garjan_alloc(sizeof(Foliage));
+    if (garjan_is_err(self) == 1) { return self; }
     Foliage_set_foliage_type(self, foliage_type);
     Foliage_set_sample_rate(self, sample_rate);
     Foliage_set_sample_position(self, 0);
@@ -135,12 +139,17 @@ fn foliage_new(foliage_type, sample_rate) {
     Foliage_set_snap_pending(self, 0);
     Foliage_set_event_rate(self, event_rate);
     Foliage_set_event_duration_samples(self, event_duration_samples);
-    Foliage_set_rng(self, rng_new(4444));
-    Foliage_set_dc_blocker(self, garjan_dcblocker_new(sample_rate));
+    var ga_rng1 = rng_new(4444);
+    if (garjan_is_err(ga_rng1) == 1) { return ga_rng1; }
+    Foliage_set_rng(self, ga_rng1);
+    var ga_dcb2 = garjan_dcblocker_new(sample_rate);
+    if (garjan_is_err(ga_dcb2) == 1) { return ga_dcb2; }
+    Foliage_set_dc_blocker(self, ga_dcb2);
 
     # Snap exciter: NoiseBurst with duration (sample_rate * 0.002) as usize, amp 0.8.
     var burst_dur = f64_to(f64_mul(sample_rate, f64_div(f64_from(2), f64_from(1000))));
     var exc = exciter_new(EXCITATION_NOISE_BURST, burst_dur, f64_div(f64_from(8), f64_from(10)));
+    if (garjan_is_err(exc) == 1) { return exc; }
     Foliage_set_snap_exciter(self, exc);
 
     var b = foliage_build_naad(self);
@@ -306,7 +315,8 @@ fn foliage_synthesize(self, duration) {
 # ---- serde: snapshot live state -> FoliageParams -> JSON, and back. ----
 #must_use
 fn foliage_to_json(self, sb) {
-    var p = alloc(sizeof(FoliageParams));
+    var p = garjan_alloc(sizeof(FoliageParams));
+    if (garjan_is_err(p) == 1) { return p; }
     FoliageParams_set_foliage_type(p, Foliage_foliage_type(self));
     FoliageParams_set_sample_rate(p, Foliage_sample_rate(self));
     FoliageParams_set_sample_position(p, Foliage_sample_position(self));
@@ -341,7 +351,8 @@ fn foliage_to_json(self, sb) {
 #must_use
 fn foliage_from_json_str(json) {
     var p = FoliageParams_from_json_str(json);
-    var self = alloc(sizeof(Foliage));
+    var self = garjan_alloc(sizeof(Foliage));
+    if (garjan_is_err(self) == 1) { return self; }
     Foliage_set_foliage_type(self, FoliageParams_foliage_type(p));
     Foliage_set_sample_rate(self, FoliageParams_sample_rate(p));
     Foliage_set_sample_position(self, FoliageParams_sample_position(p));
@@ -352,11 +363,13 @@ fn foliage_from_json_str(json) {
     Foliage_set_event_duration_samples(self, FoliageParams_event_duration_samples(p));
 
     var rng = rng_new(0);
+    if (garjan_is_err(rng) == 1) { return rng; }
     Rng_set_state(rng, FoliageParams_rng_state(p));
     Rng_set_inc(rng, FoliageParams_rng_inc(p));
     Foliage_set_rng(self, rng);
 
     var dc = garjan_dcblocker_new(FoliageParams_sample_rate(p));
+    if (garjan_is_err(dc) == 1) { return dc; }
     DcBlocker_set_x_prev(dc, FoliageParams_dcb_x_prev(p));
     DcBlocker_set_y_prev(dc, FoliageParams_dcb_y_prev(p));
     DcBlocker_set_r(dc, FoliageParams_dcb_r(p));
@@ -365,6 +378,7 @@ fn foliage_from_json_str(json) {
     # Rebuild the exciter, restoring its live state.
     var burst_dur = f64_to(f64_mul(FoliageParams_sample_rate(p), f64_div(f64_from(2), f64_from(1000))));
     var exc = exciter_new(EXCITATION_NOISE_BURST, burst_dur, f64_div(f64_from(8), f64_from(10)));
+    if (garjan_is_err(exc) == 1) { return exc; }
     Exciter_set_position(exc, FoliageParams_exc_position(p));
     Exciter_set_active(exc, FoliageParams_exc_active(p));
     var exc_rng = Exciter_rng(exc);

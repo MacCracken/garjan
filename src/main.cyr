@@ -30,10 +30,13 @@ fn main() {
 
     # Modal impact on metal: build a bank and confirm it rings finite.
     var props = material_properties(MATERIAL_METAL);
+    if (garjan_is_err(props) == 1) { println("garjan: material props failed"); return 1; }
     var mc = material_mode_config(MATERIAL_METAL);
+    if (garjan_is_err(mc) == 1) { println("garjan: material mode config failed"); return 1; }
     var specs = generate_modes(props, MaterialModeConfig_pattern(mc),
       MaterialModeConfig_mode_count(mc),
       MaterialModeConfig_damping_factor(mc));
+    if (garjan_is_err(specs) == 1) { println("garjan: generate_modes failed"); return 1; }
     var bank = modal_bank_new(specs, f64_from(44100));
     if (garjan_is_err(bank) == 1) { println("garjan: modal bank failed"); return 1; }
     var y = modal_bank_process_sample(bank, F64_ONE);

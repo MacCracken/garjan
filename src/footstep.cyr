@@ -80,12 +80,15 @@ fn footstep_build_naad(self) {
 
     # Exciter: HalfSine for Sneak, NoiseBurst otherwise. duration = exc_dur*sr.
     var mc = movement_config(movement);
+    if (garjan_is_err(mc) == 1) { return mc; }
     var exc_dur = MovementConfig_excitation_duration(mc);
     var exc_samples = f64_to(f64_mul(exc_dur, sr));
     var force = MovementConfig_force(mc);
     var exc_type = EXCITATION_NOISE_BURST;
     if (movement == MOVEMENT_SNEAK) { exc_type = EXCITATION_HALF_SINE; }
-    Footstep_set_exciter(self, exciter_new(exc_type, exc_samples, force));
+    var ga_exc1 = exciter_new(exc_type, exc_samples, force);
+    if (garjan_is_err(ga_exc1) == 1) { return ga_exc1; }
+    Footstep_set_exciter(self, ga_exc1);
 
     # Modal bank from the terrain's resonant material (0 = none).
     var mat = terrain_resonant_material(terrain);
@@ -93,10 +96,13 @@ fn footstep_build_naad(self) {
         Footstep_set_modal_bank(self, 0);
     } else {
         var props = material_properties(mat);
+        if (garjan_is_err(props) == 1) { return props; }
         var mode_cfg = material_mode_config(mat);
+        if (garjan_is_err(mode_cfg) == 1) { return mode_cfg; }
         var specs = generate_modes(props, MaterialModeConfig_pattern(mode_cfg),
           MaterialModeConfig_mode_count(mode_cfg),
           MaterialModeConfig_damping_factor(mode_cfg));
+        if (garjan_is_err(specs) == 1) { return specs; }
         var bank = modal_bank_new(specs, sr);
         if (garjan_is_err(bank) == 1) { return garjan_map_naad_error(bank); }
         Footstep_set_modal_bank(self, bank);
@@ -104,6 +110,7 @@ fn footstep_build_naad(self) {
 
     # Noise generator: white/pink/brown per terrain config (seed 8888).
     var noise_cfg = terrain_noise_config(terrain);
+    if (garjan_is_err(noise_cfg) == 1) { return noise_cfg; }
     Footstep_set_noise_gen(self, noise_new(TerrainNoiseConfig_noise_type(noise_cfg), 8888));
 
     # Shape filter: highpass or lowpass per config.
@@ -123,6 +130,7 @@ fn footstep_new(terrain, movement, sample_rate) {
     if (garjan_is_err(e) == 1) { return e; }
 
     var mc = movement_config(movement);
+    if (garjan_is_err(mc) == 1) { return mc; }
     var interval = MovementConfig_step_interval(mc);
     var force = MovementConfig_force(mc);
     var step_interval_samples = 0;
@@ -131,13 +139,19 @@ fn footstep_new(terrain, movement, sample_rate) {
     }
 
     var noise_cfg = terrain_noise_config(terrain);
+    if (garjan_is_err(noise_cfg) == 1) { return noise_cfg; }
 
-    var self = alloc(sizeof(Footstep));
+    var self = garjan_alloc(sizeof(Footstep));
+    if (garjan_is_err(self) == 1) { return self; }
     Footstep_set_terrain(self, terrain);
     Footstep_set_movement(self, movement);
     Footstep_set_sample_rate(self, sample_rate);
-    Footstep_set_rng(self, rng_new(8888));
-    Footstep_set_dc_blocker(self, garjan_dcblocker_new(sample_rate));
+    var ga_rng2 = rng_new(8888);
+    if (garjan_is_err(ga_rng2) == 1) { return ga_rng2; }
+    Footstep_set_rng(self, ga_rng2);
+    var ga_dcb3 = garjan_dcblocker_new(sample_rate);
+    if (garjan_is_err(ga_dcb3) == 1) { return ga_dcb3; }
+    Footstep_set_dc_blocker(self, ga_dcb3);
     Footstep_set_sample_position(self, 0);
     Footstep_set_base_step_interval(self, step_interval_samples);
     Footstep_set_step_interval_samples(self, step_interval_samples);
@@ -269,7 +283,8 @@ fn footstep_synthesize(self, duration) {
 # ---- serde: snapshot live state -> FootstepParams -> JSON, and back. ----
 #must_use
 fn footstep_to_json(self, sb) {
-    var p = alloc(sizeof(FootstepParams));
+    var p = garjan_alloc(sizeof(FootstepParams));
+    if (garjan_is_err(p) == 1) { return p; }
     FootstepParams_set_terrain(p, Footstep_terrain(self));
     FootstepParams_set_movement(p, Footstep_movement(self));
     FootstepParams_set_sample_rate(p, Footstep_sample_rate(self));
@@ -297,7 +312,8 @@ fn footstep_to_json(self, sb) {
 #must_use
 fn footstep_from_json_str(json) {
     var p = FootstepParams_from_json_str(json);
-    var self = alloc(sizeof(Footstep));
+    var self = garjan_alloc(sizeof(Footstep));
+    if (garjan_is_err(self) == 1) { return self; }
     Footstep_set_terrain(self, FootstepParams_terrain(p));
     Footstep_set_movement(self, FootstepParams_movement(p));
     Footstep_set_sample_rate(self, FootstepParams_sample_rate(p));
@@ -312,11 +328,13 @@ fn footstep_from_json_str(json) {
     Footstep_set_noise_highpass(self, FootstepParams_noise_highpass(p));
 
     var rng = rng_new(0);
+    if (garjan_is_err(rng) == 1) { return rng; }
     Rng_set_state(rng, FootstepParams_rng_state(p));
     Rng_set_inc(rng, FootstepParams_rng_inc(p));
     Footstep_set_rng(self, rng);
 
     var dc = garjan_dcblocker_new(FootstepParams_sample_rate(p));
+    if (garjan_is_err(dc) == 1) { return dc; }
     DcBlocker_set_x_prev(dc, FootstepParams_dcb_x_prev(p));
     DcBlocker_set_y_prev(dc, FootstepParams_dcb_y_prev(p));
     DcBlocker_set_r(dc, FootstepParams_dcb_r(p));

@@ -98,9 +98,11 @@ fn impact_build_naad(self) {
 
     # Modal bank from the material's mode config + props.
     var mode_cfg = material_mode_config(material);
+    if (garjan_is_err(mode_cfg) == 1) { return mode_cfg; }
     var mode_specs = generate_modes(props, MaterialModeConfig_pattern(mode_cfg),
       MaterialModeConfig_mode_count(mode_cfg),
       MaterialModeConfig_damping_factor(mode_cfg));
+    if (garjan_is_err(mode_specs) == 1) { return mode_specs; }
     var modal_bank = modal_bank_new(mode_specs, sr);
     if (garjan_is_err(modal_bank) == 1) { return modal_bank; }
     Impact_set_modal_bank(self, modal_bank);
@@ -138,12 +140,19 @@ fn impact_new(material, sample_rate) {
     var e = garjan_validate_sample_rate(sample_rate);
     if (garjan_is_err(e) == 1) { return e; }
 
-    var self = alloc(sizeof(Impact));
+    var self = garjan_alloc(sizeof(Impact));
+    if (garjan_is_err(self) == 1) { return self; }
     Impact_set_material(self, material);
-    Impact_set_props(self, material_properties(material));
+    var ga_v1 = material_properties(material);
+    if (garjan_is_err(ga_v1) == 1) { return ga_v1; }
+    Impact_set_props(self, ga_v1);
     Impact_set_sample_rate(self, sample_rate);
-    Impact_set_rng(self, rng_new(5381));
-    Impact_set_dc_blocker(self, garjan_dcblocker_new(sample_rate));
+    var ga_rng2 = rng_new(5381);
+    if (garjan_is_err(ga_rng2) == 1) { return ga_rng2; }
+    Impact_set_rng(self, ga_rng2);
+    var ga_dcb3 = garjan_dcblocker_new(sample_rate);
+    if (garjan_is_err(ga_dcb3) == 1) { return ga_dcb3; }
+    Impact_set_dc_blocker(self, ga_dcb3);
     Impact_set_sample_position(self, 0);
     var b = impact_build_naad(self);
     if (garjan_is_err(b) == 1) { return b; }
@@ -190,6 +199,7 @@ fn impact_generate(self, impact_type, velocity, output) {
     var exc_type = impact_type_exc_type(impact_type);
     var exc_dur = impact_type_exc_duration(impact_type, sr);
     var exciter = exciter_new(exc_type, exc_dur, velocity);
+    if (garjan_is_err(exciter) == 1) { return exciter; }
     exciter_trigger(exciter);
 
     var transient_noise = Impact_transient_noise(self);
@@ -297,7 +307,8 @@ fn impact_synthesize(self, impact_type) {
 # ---- serde: snapshot live state -> ImpactParams -> JSON, and back. ----
 #must_use
 fn impact_to_json(self, sb) {
-    var p = alloc(sizeof(ImpactParams));
+    var p = garjan_alloc(sizeof(ImpactParams));
+    if (garjan_is_err(p) == 1) { return p; }
     ImpactParams_set_material(p, Impact_material(self));
     var props = Impact_props(self);
     ImpactParams_set_prop_resonance(p, MaterialProperties_resonance(props));
@@ -322,7 +333,8 @@ fn impact_to_json(self, sb) {
 #must_use
 fn impact_from_json_str(json) {
     var p = ImpactParams_from_json_str(json);
-    var self = alloc(sizeof(Impact));
+    var self = garjan_alloc(sizeof(Impact));
+    if (garjan_is_err(self) == 1) { return self; }
     Impact_set_material(self, ImpactParams_material(p));
 
     var props = material_properties_new(ImpactParams_prop_resonance(p), ImpactParams_prop_bandwidth(p),
@@ -333,11 +345,13 @@ fn impact_from_json_str(json) {
     Impact_set_sample_position(self, ImpactParams_sample_position(p));
 
     var rng = rng_new(0);
+    if (garjan_is_err(rng) == 1) { return rng; }
     Rng_set_state(rng, ImpactParams_rng_state(p));
     Rng_set_inc(rng, ImpactParams_rng_inc(p));
     Impact_set_rng(self, rng);
 
     var dc = garjan_dcblocker_new(ImpactParams_sample_rate(p));
+    if (garjan_is_err(dc) == 1) { return dc; }
     DcBlocker_set_x_prev(dc, ImpactParams_dcb_x_prev(p));
     DcBlocker_set_y_prev(dc, ImpactParams_dcb_y_prev(p));
     DcBlocker_set_r(dc, ImpactParams_dcb_r(p));

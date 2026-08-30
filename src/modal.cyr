@@ -27,7 +27,8 @@ struct ModeSpec {
 
 #must_use
 fn modal_modespec_new(frequency, amplitude, decay) {
-    var s = alloc(sizeof(ModeSpec));
+    var s = garjan_alloc(sizeof(ModeSpec));
+    if (garjan_is_err(s) == 1) { return s; }
     ModeSpec_set_frequency(s, frequency);
     ModeSpec_set_amplitude(s, amplitude);
     ModeSpec_set_decay(s, decay);
@@ -99,7 +100,8 @@ fn modal_bank_new(specs, sample_rate) {
         i = i + 1;
     }
 
-    var self = alloc(sizeof(ModalBank));
+    var self = garjan_alloc(sizeof(ModalBank));
+    if (garjan_is_err(self) == 1) { return self; }
     ModalBank_set_state_re(self, state_re);
     ModalBank_set_state_im(self, state_im);
     ModalBank_set_coeff_re(self, coeff_re);
@@ -179,6 +181,7 @@ fn generate_modes(props, pattern, count, damping_factor) {
     # rolloff_exp = 2.0 - 1.5 * brightness
     var rolloff_exp = f64_sub(f64_from(2), f64_mul(f64_div(f64_from(15), f64_from(10)), brightness));
     var rng = rng_new(f64_to(f64_mul(f0, f64_from(1000))));
+    if (garjan_is_err(rng) == 1) { return rng; }
 
     var half = F64_HALF;
     var c1_5056 = f64_div(f64_from(15056), f64_from(10000));
@@ -222,7 +225,9 @@ fn generate_modes(props, pattern, count, damping_factor) {
         var fm1 = f64_sub(freq_ratio, F64_ONE);
         var decay = f64_div(pdecay, f64_add(F64_ONE, f64_mul(damping_factor, f64_mul(fm1, fm1))));
         decay = f64_max(decay, decay_floor);
-        vec_push(out, modal_modespec_new(freq, amplitude, decay));
+        var ga_spec1 = modal_modespec_new(freq, amplitude, decay);
+        if (garjan_is_err(ga_spec1) == 1) { return ga_spec1; }
+        vec_push(out, ga_spec1);
         k = k + 1;
     }
     return out;
@@ -239,13 +244,16 @@ struct Exciter { excitation_type; duration_samples; amplitude; position; active;
 
 #must_use
 fn exciter_new(excitation_type, duration_samples, amplitude) {
-    var self = alloc(sizeof(Exciter));
+    var self = garjan_alloc(sizeof(Exciter));
+    if (garjan_is_err(self) == 1) { return self; }
     Exciter_set_excitation_type(self, excitation_type);
     Exciter_set_duration_samples(self, duration_samples);
     Exciter_set_amplitude(self, amplitude);
     Exciter_set_position(self, 0);
     Exciter_set_active(self, 0);
-    Exciter_set_rng(self, rng_new(31337));
+    var ga_rng2 = rng_new(31337);
+    if (garjan_is_err(ga_rng2) == 1) { return ga_rng2; }
+    Exciter_set_rng(self, ga_rng2);
     return self;
 }
 

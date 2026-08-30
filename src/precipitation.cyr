@@ -30,7 +30,8 @@ struct StoneConfig { rate; amplitude; decay_ms; }
 
 #must_use
 fn stone_size_config(s) {
-    var c = alloc(sizeof(StoneConfig));
+    var c = garjan_alloc(sizeof(StoneConfig));
+    if (garjan_is_err(c) == 1) { return c; }
     if (s == STONE_SMALL) {
         StoneConfig_set_rate(c, f64_from(30));
         StoneConfig_set_amplitude(c, f64_div(f64_from(2), f64_from(10)));
@@ -103,11 +104,14 @@ fn precipitation_build_naad(self) {
         var mat = terrain_resonant_material(surface);
         if (mat != CONTACT_NO_MATERIAL) {
             var props = material_properties(mat);
+            if (garjan_is_err(props) == 1) { return props; }
             var mode_cfg = material_mode_config(mat);
+            if (garjan_is_err(mode_cfg) == 1) { return mode_cfg; }
             var count = MaterialModeConfig_mode_count(mode_cfg);
             if (count > 4) { count = 4; }
             var specs = generate_modes(props, MaterialModeConfig_pattern(mode_cfg), count,
               MaterialModeConfig_damping_factor(mode_cfg));
+            if (garjan_is_err(specs) == 1) { return specs; }
             var mb = modal_bank_new(specs, sr);
             if (garjan_is_err(mb) == 1) { return garjan_map_naad_error(mb); }
             bank = mb;
@@ -126,6 +130,7 @@ fn precipitation_build_naad(self) {
         filter_freq = f64_from(1500);
     } else {
         var cfg = terrain_noise_config(surface);
+        if (garjan_is_err(cfg) == 1) { return cfg; }
         var pref = TerrainNoiseConfig_noise_type(cfg);
         var mapped = NOISE_WHITE;
         if (pref == CONTACT_NOISE_WHITE) { mapped = NOISE_WHITE; }
@@ -150,19 +155,25 @@ fn precipitation_new(precip_type, stone_size, surface, sample_rate) {
     if (garjan_is_err(e) == 1) { return e; }
 
     var cfg = stone_size_config(stone_size);
+    if (garjan_is_err(cfg) == 1) { return cfg; }
     var rate = StoneConfig_rate(cfg);
     var amplitude = StoneConfig_amplitude(cfg);
     var decay_ms = StoneConfig_decay_ms(cfg);
     # decay_samples = (decay_ms * sample_rate / 1000.0) as usize
     var decay_samples = f64_to(f64_div(f64_mul(decay_ms, sample_rate), f64_from(1000)));
 
-    var self = alloc(sizeof(Precipitation));
+    var self = garjan_alloc(sizeof(Precipitation));
+    if (garjan_is_err(self) == 1) { return self; }
     Precipitation_set_precip_type(self, precip_type);
     Precipitation_set_stone_size(self, stone_size);
     Precipitation_set_surface(self, surface);
     Precipitation_set_sample_rate(self, sample_rate);
-    Precipitation_set_rng(self, rng_new(5050));
-    Precipitation_set_dc_blocker(self, garjan_dcblocker_new(sample_rate));
+    var ga_rng1 = rng_new(5050);
+    if (garjan_is_err(ga_rng1) == 1) { return ga_rng1; }
+    Precipitation_set_rng(self, ga_rng1);
+    var ga_dcb2 = garjan_dcblocker_new(sample_rate);
+    if (garjan_is_err(ga_dcb2) == 1) { return ga_dcb2; }
+    Precipitation_set_dc_blocker(self, ga_dcb2);
     Precipitation_set_sample_position(self, 0);
     Precipitation_set_rate(self, rate);
     Precipitation_set_amplitude(self, amplitude);
@@ -297,7 +308,8 @@ fn precipitation_synthesize(self, duration) {
 # ---- serde: snapshot live state -> PrecipitationParams -> JSON, and back. ----
 #must_use
 fn precipitation_to_json(self, sb) {
-    var p = alloc(sizeof(PrecipitationParams));
+    var p = garjan_alloc(sizeof(PrecipitationParams));
+    if (garjan_is_err(p) == 1) { return p; }
     PrecipitationParams_set_precip_type(p, Precipitation_precip_type(self));
     PrecipitationParams_set_stone_size(p, Precipitation_stone_size(self));
     PrecipitationParams_set_surface(p, Precipitation_surface(self));
@@ -323,7 +335,8 @@ fn precipitation_to_json(self, sb) {
 #must_use
 fn precipitation_from_json_str(json) {
     var p = PrecipitationParams_from_json_str(json);
-    var self = alloc(sizeof(Precipitation));
+    var self = garjan_alloc(sizeof(Precipitation));
+    if (garjan_is_err(self) == 1) { return self; }
     Precipitation_set_precip_type(self, PrecipitationParams_precip_type(p));
     Precipitation_set_stone_size(self, PrecipitationParams_stone_size(p));
     Precipitation_set_surface(self, PrecipitationParams_surface(p));
@@ -335,11 +348,13 @@ fn precipitation_from_json_str(json) {
     Precipitation_set_intensity(self, PrecipitationParams_intensity(p));
 
     var rng = rng_new(0);
+    if (garjan_is_err(rng) == 1) { return rng; }
     Rng_set_state(rng, PrecipitationParams_rng_state(p));
     Rng_set_inc(rng, PrecipitationParams_rng_inc(p));
     Precipitation_set_rng(self, rng);
 
     var dc = garjan_dcblocker_new(PrecipitationParams_sample_rate(p));
+    if (garjan_is_err(dc) == 1) { return dc; }
     DcBlocker_set_x_prev(dc, PrecipitationParams_dcb_x_prev(p));
     DcBlocker_set_y_prev(dc, PrecipitationParams_dcb_y_prev(p));
     DcBlocker_set_r(dc, PrecipitationParams_dcb_r(p));

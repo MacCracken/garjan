@@ -107,13 +107,18 @@ fn texture_new(texture_type, level, sample_rate) {
     if (garjan_is_err(e) == 1) { return e; }
     var lvl = f64_clamp(level, 0, F64_ONE);
 
-    var self = alloc(sizeof(AmbientTexture));
+    var self = garjan_alloc(sizeof(AmbientTexture));
+    if (garjan_is_err(self) == 1) { return self; }
     AmbientTexture_set_texture_type(self, texture_type);
     AmbientTexture_set_level(self, lvl);
     AmbientTexture_set_sample_rate(self, sample_rate);
     AmbientTexture_set_sample_position(self, 0);
-    AmbientTexture_set_rng(self, rng_new(9001));
-    AmbientTexture_set_dc_blocker(self, garjan_dcblocker_new(sample_rate));
+    var ga_rng1 = rng_new(9001);
+    if (garjan_is_err(ga_rng1) == 1) { return ga_rng1; }
+    AmbientTexture_set_rng(self, ga_rng1);
+    var ga_dcb2 = garjan_dcblocker_new(sample_rate);
+    if (garjan_is_err(ga_dcb2) == 1) { return ga_dcb2; }
+    AmbientTexture_set_dc_blocker(self, ga_dcb2);
     var b = texture_build_naad(self);
     if (garjan_is_err(b) == 1) { return b; }
     return self;
@@ -129,7 +134,8 @@ fn ambient_texture_new(texture_type, level, sample_rate) {
 # 3-slot buffer. Ports the band_mix match. Slot 0=low, 1=mid, 2=high.
 #must_use
 fn texture_band_mix(texture_type) {
-    var m = alloc(24);
+    var m = garjan_alloc(24);
+    if (garjan_is_err(m) == 1) { return m; }
     var low = f64_div(f64_from(2), f64_from(10));
     var mid = F64_HALF;
     var high = f64_div(f64_from(3), f64_from(10));
@@ -178,6 +184,7 @@ fn texture_process_block(self, output) {
     var level = AmbientTexture_level(self);
 
     var mix = texture_band_mix(AmbientTexture_texture_type(self));
+    if (garjan_is_err(mix) == 1) { return mix; }
     var low_mix = load64(mix);
     var mid_mix = load64(mix + 8);
     var high_mix = load64(mix + 16);
@@ -230,7 +237,8 @@ fn texture_synthesize(self, duration) {
 # ---- serde: snapshot live state -> AmbientTextureParams -> JSON, and back. ----
 #must_use
 fn texture_to_json(self, sb) {
-    var p = alloc(sizeof(AmbientTextureParams));
+    var p = garjan_alloc(sizeof(AmbientTextureParams));
+    if (garjan_is_err(p) == 1) { return p; }
     AmbientTextureParams_set_texture_type(p, AmbientTexture_texture_type(self));
     AmbientTextureParams_set_level(p, AmbientTexture_level(self));
     AmbientTextureParams_set_sample_rate(p, AmbientTexture_sample_rate(self));
@@ -250,18 +258,21 @@ fn texture_to_json(self, sb) {
 #must_use
 fn texture_from_json_str(json) {
     var p = AmbientTextureParams_from_json_str(json);
-    var self = alloc(sizeof(AmbientTexture));
+    var self = garjan_alloc(sizeof(AmbientTexture));
+    if (garjan_is_err(self) == 1) { return self; }
     AmbientTexture_set_texture_type(self, AmbientTextureParams_texture_type(p));
     AmbientTexture_set_level(self, AmbientTextureParams_level(p));
     AmbientTexture_set_sample_rate(self, AmbientTextureParams_sample_rate(p));
     AmbientTexture_set_sample_position(self, AmbientTextureParams_sample_position(p));
 
     var rng = rng_new(0);
+    if (garjan_is_err(rng) == 1) { return rng; }
     Rng_set_state(rng, AmbientTextureParams_rng_state(p));
     Rng_set_inc(rng, AmbientTextureParams_rng_inc(p));
     AmbientTexture_set_rng(self, rng);
 
     var dc = garjan_dcblocker_new(AmbientTextureParams_sample_rate(p));
+    if (garjan_is_err(dc) == 1) { return dc; }
     DcBlocker_set_x_prev(dc, AmbientTextureParams_dcb_x_prev(p));
     DcBlocker_set_y_prev(dc, AmbientTextureParams_dcb_y_prev(p));
     DcBlocker_set_r(dc, AmbientTextureParams_dcb_r(p));

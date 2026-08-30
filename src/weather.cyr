@@ -87,12 +87,17 @@ fn rain_new(intensity, sample_rate) {
     var e = garjan_validate_sample_rate(sample_rate);
     if (garjan_is_err(e) == 1) { return e; }
 
-    var self = alloc(sizeof(Rain));
+    var self = garjan_alloc(sizeof(Rain));
+    if (garjan_is_err(self) == 1) { return self; }
     Rain_set_intensity(self, intensity);
     Rain_set_sample_rate(self, sample_rate);
     Rain_set_sample_position(self, 0);
-    Rain_set_rng(self, rng_new(7919));
-    Rain_set_dc_blocker(self, garjan_dcblocker_new(sample_rate));
+    var ga_rng1 = rng_new(7919);
+    if (garjan_is_err(ga_rng1) == 1) { return ga_rng1; }
+    Rain_set_rng(self, ga_rng1);
+    var ga_dcb2 = garjan_dcblocker_new(sample_rate);
+    if (garjan_is_err(ga_dcb2) == 1) { return ga_dcb2; }
+    Rain_set_dc_blocker(self, ga_dcb2);
     var b = rain_build_naad(self);
     if (garjan_is_err(b) == 1) { return b; }
     return self;
@@ -183,7 +188,8 @@ fn rain_synthesize(self, duration) {
 # ---- serde: snapshot live state -> RainParams -> JSON, and back. ----
 #must_use
 fn rain_to_json(self, sb) {
-    var p = alloc(sizeof(RainParams));
+    var p = garjan_alloc(sizeof(RainParams));
+    if (garjan_is_err(p) == 1) { return p; }
     RainParams_set_intensity(p, Rain_intensity(self));
     RainParams_set_sample_rate(p, Rain_sample_rate(self));
     RainParams_set_sample_position(p, Rain_sample_position(self));
@@ -201,17 +207,20 @@ fn rain_to_json(self, sb) {
 #must_use
 fn rain_from_json_str(json) {
     var p = RainParams_from_json_str(json);
-    var self = alloc(sizeof(Rain));
+    var self = garjan_alloc(sizeof(Rain));
+    if (garjan_is_err(self) == 1) { return self; }
     Rain_set_intensity(self, RainParams_intensity(p));
     Rain_set_sample_rate(self, RainParams_sample_rate(p));
     Rain_set_sample_position(self, RainParams_sample_position(p));
 
     var rng = rng_new(0);
+    if (garjan_is_err(rng) == 1) { return rng; }
     Rng_set_state(rng, RainParams_rng_state(p));
     Rng_set_inc(rng, RainParams_rng_inc(p));
     Rain_set_rng(self, rng);
 
     var dc = garjan_dcblocker_new(RainParams_sample_rate(p));
+    if (garjan_is_err(dc) == 1) { return dc; }
     DcBlocker_set_x_prev(dc, RainParams_dcb_x_prev(p));
     DcBlocker_set_y_prev(dc, RainParams_dcb_y_prev(p));
     DcBlocker_set_r(dc, RainParams_dcb_r(p));
@@ -276,12 +285,17 @@ fn thunder_new(distance_m, sample_rate) {
     if (garjan_is_err(e) == 1) { return e; }
     var dist = f64_max(distance_m, f64_from(10));
 
-    var self = alloc(sizeof(Thunder));
+    var self = garjan_alloc(sizeof(Thunder));
+    if (garjan_is_err(self) == 1) { return self; }
     Thunder_set_distance_m(self, dist);
     Thunder_set_sample_rate(self, sample_rate);
     Thunder_set_sample_position(self, 0);
-    Thunder_set_rng(self, rng_new(1337));
-    Thunder_set_dc_blocker(self, garjan_dcblocker_new(sample_rate));
+    var ga_rng3 = rng_new(1337);
+    if (garjan_is_err(ga_rng3) == 1) { return ga_rng3; }
+    Thunder_set_rng(self, ga_rng3);
+    var ga_dcb4 = garjan_dcblocker_new(sample_rate);
+    if (garjan_is_err(ga_dcb4) == 1) { return ga_dcb4; }
+    Thunder_set_dc_blocker(self, ga_dcb4);
     var b = thunder_build_naad(self);
     if (garjan_is_err(b) == 1) { return b; }
     return self;
@@ -371,7 +385,8 @@ fn thunder_synthesize(self, duration) {
 # ---- serde: snapshot live state -> ThunderParams -> JSON, and back. ----
 #must_use
 fn thunder_to_json(self, sb) {
-    var p = alloc(sizeof(ThunderParams));
+    var p = garjan_alloc(sizeof(ThunderParams));
+    if (garjan_is_err(p) == 1) { return p; }
     ThunderParams_set_distance_m(p, Thunder_distance_m(self));
     ThunderParams_set_sample_rate(p, Thunder_sample_rate(self));
     ThunderParams_set_sample_position(p, Thunder_sample_position(self));
@@ -389,17 +404,20 @@ fn thunder_to_json(self, sb) {
 #must_use
 fn thunder_from_json_str(json) {
     var p = ThunderParams_from_json_str(json);
-    var self = alloc(sizeof(Thunder));
+    var self = garjan_alloc(sizeof(Thunder));
+    if (garjan_is_err(self) == 1) { return self; }
     Thunder_set_distance_m(self, ThunderParams_distance_m(p));
     Thunder_set_sample_rate(self, ThunderParams_sample_rate(p));
     Thunder_set_sample_position(self, ThunderParams_sample_position(p));
 
     var rng = rng_new(0);
+    if (garjan_is_err(rng) == 1) { return rng; }
     Rng_set_state(rng, ThunderParams_rng_state(p));
     Rng_set_inc(rng, ThunderParams_rng_inc(p));
     Thunder_set_rng(self, rng);
 
     var dc = garjan_dcblocker_new(ThunderParams_sample_rate(p));
+    if (garjan_is_err(dc) == 1) { return dc; }
     DcBlocker_set_x_prev(dc, ThunderParams_dcb_x_prev(p));
     DcBlocker_set_y_prev(dc, ThunderParams_dcb_y_prev(p));
     DcBlocker_set_r(dc, ThunderParams_dcb_r(p));
@@ -472,13 +490,18 @@ fn wind_new(speed, gustiness, sample_rate) {
     var spd = f64_max(speed, 0);
     var gust = f64_clamp(gustiness, 0, F64_ONE);
 
-    var self = alloc(sizeof(Wind));
+    var self = garjan_alloc(sizeof(Wind));
+    if (garjan_is_err(self) == 1) { return self; }
     Wind_set_speed(self, spd);
     Wind_set_gustiness(self, gust);
     Wind_set_sample_rate(self, sample_rate);
     Wind_set_sample_position(self, 0);
-    Wind_set_rng(self, rng_new(4201));
-    Wind_set_dc_blocker(self, garjan_dcblocker_new(sample_rate));
+    var ga_rng5 = rng_new(4201);
+    if (garjan_is_err(ga_rng5) == 1) { return ga_rng5; }
+    Wind_set_rng(self, ga_rng5);
+    var ga_dcb6 = garjan_dcblocker_new(sample_rate);
+    if (garjan_is_err(ga_dcb6) == 1) { return ga_dcb6; }
+    Wind_set_dc_blocker(self, ga_dcb6);
     var b = wind_build_naad(self);
     if (garjan_is_err(b) == 1) { return b; }
     return self;
@@ -538,7 +561,8 @@ fn wind_synthesize(self, duration) {
 # ---- serde: snapshot live state -> WindParams -> JSON, and back. ----
 #must_use
 fn wind_to_json(self, sb) {
-    var p = alloc(sizeof(WindParams));
+    var p = garjan_alloc(sizeof(WindParams));
+    if (garjan_is_err(p) == 1) { return p; }
     WindParams_set_speed(p, Wind_speed(self));
     WindParams_set_gustiness(p, Wind_gustiness(self));
     WindParams_set_sample_rate(p, Wind_sample_rate(self));
@@ -557,18 +581,21 @@ fn wind_to_json(self, sb) {
 #must_use
 fn wind_from_json_str(json) {
     var p = WindParams_from_json_str(json);
-    var self = alloc(sizeof(Wind));
+    var self = garjan_alloc(sizeof(Wind));
+    if (garjan_is_err(self) == 1) { return self; }
     Wind_set_speed(self, WindParams_speed(p));
     Wind_set_gustiness(self, WindParams_gustiness(p));
     Wind_set_sample_rate(self, WindParams_sample_rate(p));
     Wind_set_sample_position(self, WindParams_sample_position(p));
 
     var rng = rng_new(0);
+    if (garjan_is_err(rng) == 1) { return rng; }
     Rng_set_state(rng, WindParams_rng_state(p));
     Rng_set_inc(rng, WindParams_rng_inc(p));
     Wind_set_rng(self, rng);
 
     var dc = garjan_dcblocker_new(WindParams_sample_rate(p));
+    if (garjan_is_err(dc) == 1) { return dc; }
     DcBlocker_set_x_prev(dc, WindParams_dcb_x_prev(p));
     DcBlocker_set_y_prev(dc, WindParams_dcb_y_prev(p));
     DcBlocker_set_r(dc, WindParams_dcb_r(p));

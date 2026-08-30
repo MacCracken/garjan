@@ -19,4 +19,10 @@ Decisions about garjan — what we chose, the context, and the consequences we a
 
 ## Index
 
-_No ADRs yet. Add the first as `0001-kebab-case-title.md`._
+- [0005 — Allocation failure is an error code, not an abort](0005-allocation-failure-is-an-error-code-not-an-abort.md) — Accepted, 2026-08-30.
+
+> **Numbering note.** 0001-0004 are taken by `adr-001`..`adr-004`, which live in
+> [`../architecture/`](../architecture/) under an older `adr-NNN-` scheme that
+> predates these conventions. They are decisions and belong here; they have not
+> been moved because "never renumber" makes relocation a separate, deliberate
+> change. New ADRs start at 0005 and follow the conventions above.

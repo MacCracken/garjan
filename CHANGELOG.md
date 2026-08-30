@@ -5,6 +5,61 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.3]
+
+Completes the allocation-failure hardening deferred from 2.0.2. No behavior
+change for valid input — all 33 suites pass unchanged, and the only new failure
+mode is one that previously corrupted memory instead.
+
+### Fixed — a failed allocation was indistinguishable from success
+
+The stdlib `alloc` signals exhaustion by returning `0`, `garjan_is_err` treats
+only `< 0` as an error, and `GARJAN_OK` **is** `0` — so `garjan_is_err(alloc(n))`
+was `0` on failure and every error check passed. Constructors write through
+their allocation on the very next line, so an OOM was a store to address 0.
+
+- **New `garjan_alloc(size)` guard** in `src/error.cyr`, mapping `alloc`'s `0`
+  onto the new `GARJAN_ERR_ALLOCATION` (`-4`) so the existing
+  `if (garjan_is_err(p) == 1) { return p; }` idiom catches it. Deliberately does
+  not log: `error.cyr` is L0 and the `aero`/`creature`/`rng`/`voice` test entries
+  include it *without* `logging.cyr`, and a reachable undefined function is a
+  hard build error since cyrius 6.5.36.
+- **All 85 direct allocation sites** routed through the guard and checked.
+- **~70 further sites** where a pointer-returning helper was consumed unchecked
+  — `rng_new`, `garjan_dcblocker_new`, `voice_slot_new`, `modal_modespec_new`,
+  `exciter_new`, `modal_bank_new`, `texture_band_mix`, `generate_modes` and the
+  `*_config` table builders. Nested uses like `Fire_set_rng(self, rng_new(6661))`
+  and `vec_push(slots, voice_slot_new())` were hoisted into checked locals; a
+  partial guard would have been worse than none, since it looks safe while OOM
+  still crashes elsewhere. 132 guards inserted in all.
+- `material.cyr`'s table dispatchers needed no change — they are bare
+  `return material_*_new(...)`, which already propagate.
+- `src/main.cyr` checks and reports rather than returning a raw negative code,
+  which would have become a bogus process exit status.
+
+**Invariant to preserve:** `src/*.cyr` contains no raw `alloc(` outside
+`garjan_alloc` itself. See ADR-0005 for the full rationale, including why
+aborting (which is what Rust actually does on OOM) was rejected.
+
+### Added
+
+- **ADR-0005** — *Allocation failure is an error code, not an abort*, in
+  `docs/adr/`, per CLAUDE.md's rule that divergence from the Rust oracle needs
+  one. Rust's allocator aborts the process and `GarjanError` has exactly three
+  variants, so adding a fourth is a real divergence rather than a bug fix.
+- Regression tests in `tests/error.tcyr` pinning the distinction between raw
+  `alloc` (undetectable failure) and `garjan_alloc` (detectable).
+  **472 assertions** across 33 suites (was 466).
+
+### Note on verification
+
+The guard is verified directly — `alloc(-1)` returns `0` with
+`garjan_is_err == 0`, while `garjan_alloc(-1)` returns `-4` with
+`garjan_is_err == 1` — and coverage is verified mechanically (no unguarded
+allocation or helper result remains in `src/`). End-to-end propagation under
+*real* heap exhaustion was **not** exercised, since inducing it would mean
+exhausting the machine's memory.
+
 ## [2.0.2]
 
 Security and hardening release from a P-1 audit sweep. The deserialization

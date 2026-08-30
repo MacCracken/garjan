@@ -20,7 +20,8 @@ struct PrecipitationBuilder {
 # Defaults: Hail, Medium, Gravel.
 #must_use
 fn precipitation_builder_new(sample_rate) {
-    var b = alloc(sizeof(PrecipitationBuilder));
+    var b = garjan_alloc(sizeof(PrecipitationBuilder));
+    if (garjan_is_err(b) == 1) { return b; }
     PrecipitationBuilder_set_sample_rate(b, sample_rate);
     PrecipitationBuilder_set_precip_type(b, PRECIP_HAIL);
     PrecipitationBuilder_set_stone_size(b, STONE_MEDIUM);
@@ -57,7 +58,8 @@ struct FootstepBuilder {
 # Defaults: Gravel, Walk.
 #must_use
 fn footstep_builder_new(sample_rate) {
-    var b = alloc(sizeof(FootstepBuilder));
+    var b = garjan_alloc(sizeof(FootstepBuilder));
+    if (garjan_is_err(b) == 1) { return b; }
     FootstepBuilder_set_sample_rate(b, sample_rate);
     FootstepBuilder_set_terrain(b, TERRAIN_GRAVEL);
     FootstepBuilder_set_movement(b, MOVEMENT_WALK);
@@ -89,7 +91,8 @@ struct FrictionBuilder {
 # Defaults: Scrape, Wood.
 #must_use
 fn friction_builder_new(sample_rate) {
-    var b = alloc(sizeof(FrictionBuilder));
+    var b = garjan_alloc(sizeof(FrictionBuilder));
+    if (garjan_is_err(b) == 1) { return b; }
     FrictionBuilder_set_sample_rate(b, sample_rate);
     FrictionBuilder_set_friction_type(b, FRICTION_SCRAPE);
     FrictionBuilder_set_surface(b, MATERIAL_WOOD);
