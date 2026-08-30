@@ -105,6 +105,46 @@ which is why `GARJAN_EPSILON` is deliberately `f32::EPSILON`.
 Corrected in `cyrius.cyml`, `docs/development/roadmap.md` and
 `docs/development/state.md`.
 
+### Fixed — port-audit claims re-verified
+
+Prompted by the ganita finding, every claim in the port audit was re-checked.
+Most held; three did not.
+
+- **Enum parity is now verified by VALUE, not just by name.** The original check
+  only confirmed a constant existed whose name ended with the variant name — it
+  never compared discriminants, and for five enums with colliding variant names
+  (`Small`/`Medium`/`Large`, `Moderate`/`Heavy`) it could have matched the wrong
+  family entirely. Re-checked: **all 106 variants ported, 103 preserving Rust's
+  exact discriminant**; the 3 exceptions are `GarjanError`, deliberately
+  remapped to negative codes. `StoneSize`, `UnderwaterDepth`, `BirdSize`,
+  `SurfIntensity`, `RainIntensity` and `Material` were pinned by exact prefix.
+- **The item-level audit silently skipped `integration/`.** Its extractor used
+  `glob('*.rs')` rather than `rglob`, so the reported "219 public items checked"
+  never covered `integration/soorat.rs`. Actual coverage is ~223 of 242; soorat
+  was known to be unported only from a separate file-existence check.
+- **The module count omitted the dropped fallback.** Beyond the 4 unported
+  files, **~232 lines of `#[cfg(not(feature = "naad-backend"))]` fallback across
+  19 ported modules** were also dropped — deliberately
+  ([ADR-0002](docs/adr/0002-dual-code-paths.md)), but "30 of 34 modules" implied
+  more completeness than that.
+- **`VoicePool::active_voices` is a genuine API-shape gap**, not the clean
+  equivalence originally implied: Rust returned an iterator of active
+  `(index, &VoiceSlot)` pairs and Cyrius has no iterators. Reachable by looping
+  `voice_pool_slot` + `VoiceSlot_active`. (`slot_mut` *is* properly covered —
+  `voice_pool_slot` is bounds-checked and returns 0, matching `.get_mut()`'s
+  `None`.)
+
+Confirmed sound on re-check: `lib.rs` contains no behavior (module declarations,
+a prelude, and a `#[cfg(test)]` Send+Sync assertion); `integration/mod.rs` is 7
+trivial lines; soorat is genuinely absent from the port; there are no
+`pub const`/`static`/`trait`, no manual trait impls and no `Default` derive, so
+the behavioural surface really is fns/structs/enums; and `DcBlocker`'s ported
+formula and clamp bounds are bit-exact (`0x3FECCCCCCCCCCCCD` == 0.9,
+`0x3FEFFF2E48E8A71E` == 0.9999).
+
+The [verification recipe](docs/development/roadmap.md#port-completeness) was
+rewritten around the checks that actually caught these.
+
 ### Deferred — output-vector pre-sizing is blocked upstream
 
 Every `*_synthesize` builds its output by pushing from capacity 16. Measured:

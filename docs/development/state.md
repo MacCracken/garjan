@@ -121,12 +121,21 @@ outstanding item pinned to a version. Immediate:
 
 ## Port completeness
 
-Verified 2026-08-30: **30 of 34** `rust-old/src` modules ported; **219** public
-items checked; **106 of 106** enum variants have a Cyrius constant. `lib.rs`
-(crate root) and `math.rs` (f32 shim — superseded by cycc's f64 intrinsics
-plus ganita's `f64_pow`, see architecture note
-[002](../architecture/002-where-the-transcendentals-come-from.md)) are correctly not
-ported. Re-run the check with the recipe in
-[`roadmap.md`](roadmap.md#port-completeness) after any upstream change — a
-missing `pub fn` fails the build, but a missing enum *variant* silently narrows
-the surface.
+**Re-verified 2026-08-30** after the first audit was found to have asserted
+things it had not checked. **All 106 enum variants ported, 103 preserving
+Rust's exact discriminant** (the 3 exceptions are `GarjanError`, deliberately
+remapped to negative codes). ~223 of 242 public items compared; the remainder
+is `math.rs` (superseded) and `soorat.rs` (deferred). No `pub const`/`trait`/
+manual trait impls exist, so the behavioural surface is fns/structs/enums only.
+
+Two corrections to the original audit: it reported "219 items" while its
+extractor used `glob` instead of `rglob` and **silently skipped
+`integration/`**; and its module count omitted **~232 lines of non-naad
+fallback dropped across 19 ported modules** ([ADR-0002](../adr/0002-dual-code-paths.md)).
+One genuine API-shape gap: `VoicePool::active_voices` returned an iterator and
+has no direct equivalent (reachable by looping `voice_pool_slot` +
+`VoiceSlot_active`).
+
+Re-run with the recipe in [`roadmap.md`](roadmap.md#port-completeness) — the
+enum-discriminant check is the one that matters, since a missing `pub fn` fails
+the build but a mis-valued enum variant fails silently.

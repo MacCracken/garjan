@@ -12,25 +12,61 @@
 
 ## Where the port actually stands
 
-Verified 2026-08-30 by diffing `rust-old/` against `src/` (see
-[Port completeness](#port-completeness) for method):
+Verified 2026-08-30 and **re-verified 2026-08-30** after the first pass was
+found to have asserted things it had not checked. Method in
+[Port completeness](#port-completeness).
 
-- **30 of 34** `rust-old/src` modules ported.
-- **219** public Rust items checked; **106 of 106** enum variants have a Cyrius
-  constant (`GarjanError::ComputationError` → `GARJAN_ERR_COMPUTATION` is a
-  name shortening, not a gap).
-- Not ported, **correctly**: `lib.rs` (crate root — 62 `use`/`mod` lines plus a
-  `Send + Sync` assertion test; Cyrius has a flat namespace and no module
-  system) and `math.rs` (an f32 `sin/cos/exp/sqrt/powf` shim over std/libm).
-  `math.rs`'s five functions are superseded by **cycc's f64 intrinsics**
-  (`f64_sin`/`cos`/`exp`/`sqrt`) plus **ganita's `f64_pow`** — not by ganita
-  wholesale, which supplies exactly one of the six transcendentals garjan calls.
-  Accuracy was measured rather than assumed; see architecture note
-  [002](../architecture/002-where-the-transcendentals-come-from.md).
-- Not ported, **outstanding** — these are scheduled below:
-  `integration/soorat.rs` (315 lines), `examples/` (5 programs),
-  `tests/integration.rs` (134 tests), and most of `benches/benchmarks.rs`
-  (26 benches vs 5 ported).
+- **30 of 34** `rust-old/src` modules have a `.cyr` counterpart.
+- **All 106 enum variants are ported, and 103 of them preserve Rust's exact
+  discriminant value.** This is the check that matters: Rust enums became
+  module-prefixed ints, so a variant that survived by *name* but landed on the
+  wrong *value* would silently return the wrong material/terrain/intensity
+  table with no compile error. The 3 exceptions are `GarjanError`'s variants,
+  deliberately remapped from 0/1/2 to negative codes (`GARJAN_ERR_*`) because
+  the port signals failure by sign.
+  - Five enums share variant names (`Small`/`Medium`/`Large`,
+    `Moderate`/`Heavy`), so `StoneSize`, `UnderwaterDepth`, `BirdSize`,
+    `SurfIntensity`, `RainIntensity` and `Material` were additionally pinned
+    against their exact constant prefix — a name-suffix match alone could have
+    matched the wrong family.
+- **~223 of 242** public `fn`/`struct`/`enum` items were compared. The
+  remainder is `math.rs` (10 — superseded, see architecture note
+  [002](../architecture/002-where-the-transcendentals-come-from.md)) and
+  `integration/soorat.rs` (9 — the known deferral).
+  - ⚠ The first pass reported "219 items" and implied full coverage. Its
+    extractor used `glob('*.rs')` rather than `rglob`, so it **silently skipped
+    `integration/` altogether**. soorat was known to be unported only from a
+    separate file-existence check. Use `rglob`.
+- **No `pub const`, `pub static`, `pub trait`, or manual `impl … for …`** exist
+  in `rust-old/src`, and no `Default` derive — so the behavioral surface really
+  is fns, structs and enums. One `pub type` (`Result<T>`), replaced by integer
+  error codes.
+- Not ported, **correctly**:
+  - `lib.rs` — verified to contain only `mod`/`pub mod` declarations, a
+    `prelude` of re-exports, and a `#[cfg(test)]` Send+Sync assertion. No
+    behavior. (Note `dsp`, `math` and `rng` were *private* modules in Rust; the
+    port exposes their functions in the flat namespace, so the port's surface
+    is slightly *wider* than the crate's.)
+  - `math.rs` — an f32 `sin/cos/exp/sqrt/powf` shim. Superseded by cycc's f64
+    intrinsics plus ganita's `f64_pow`; accuracy measured, see note 002.
+  - `integration/mod.rs` — 7 lines: a doc comment and a `#[cfg]`-gated
+    `pub mod soorat`.
+- **Also dropped, deliberately: ~232 lines of non-naad fallback code across 19
+  ported modules.** Rust carried dual code paths ([ADR-0002](../adr/0002-dual-code-paths.md));
+  the port always uses the naad backend and drops the `#[cfg(not(feature =
+  "naad-backend"))]` branch. The module-level "30 of 34" figure does not capture
+  this — the port is "30 of 34 files, minus the fallback branch in 19 of them".
+  Only 7 of those 19 modules say so in their header; the rest state it only
+  indirectly.
+- **`VoicePool::active_voices` has no direct equivalent.** Rust returned
+  `impl Iterator<Item = (usize, &VoiceSlot)>` filtered to active slots; Cyrius
+  has no iterators. The capability is reachable by looping `voice_pool_slot(p, i)`
+  and testing `VoiceSlot_active`, and `voice_pool_active_count` gives the count —
+  but it is an API-shape gap, not a like-for-like port. `slot_mut` *is* covered:
+  `voice_pool_slot` is bounds-checked and returns 0 for out-of-range, matching
+  `.get_mut()`'s `None`, and Cyrius pointers are mutable.
+- Outstanding: `integration/soorat.rs` (315 lines), and — until 2.1.0 —
+  `examples/` and `tests/integration.rs`.
 
 ## 2.x maturity criteria
 
@@ -191,18 +227,48 @@ Behavior changes where the port must knowingly differ from the oracle. Per
 
 ## Port completeness
 
-Method, so it can be re-run after any upstream change:
+Method, so it can be re-run after any upstream change. The first pass used a
+weaker version of this and reported completeness it had not established, so use
+these, not a name-existence check.
+
+**1. Module level** — note `rglob`, not `glob`; the first pass used `glob` and
+silently skipped `rust-old/src/integration/`:
 
 ```sh
-# module-level: every rust-old/src module has a .cyr counterpart
 find rust-old/src -name '*.rs' | while read f; do
   b=$(basename "$f" .rs); [ -f "src/$b.cyr" ] || echo "NO .cyr: $f"; done
-
-# symbol-level: enum variants must all have Cyrius constants, since Rust enums
-# were ported to module-prefixed ints and a dropped variant is invisible
-grep -rn 'pub enum' rust-old/src/
-grep -rhE '^var [A-Z][A-Z0-9_]*' src/*.cyr
 ```
 
-The enum check is the one that matters: a missing `pub fn` fails the build at
-its call site, but a missing enum *variant* just silently narrows the surface.
+**2. Enum discriminants — the check that matters.** A missing `pub fn` fails
+the build at its call site. A missing enum *variant* does not: Rust enums became
+module-prefixed ints, so a variant that is absent, or present but bound to the
+wrong value, silently returns a different table entry. Compare Rust's
+declaration order (implicit discriminants 0,1,2… unless explicit) against the
+Cyrius constant's value, and pin families whose variant names collide
+(`Small`/`Medium`/`Large`, `Moderate`/`Heavy`) by exact prefix rather than
+suffix match.
+
+**3. Surface beyond fn/struct/enum.** Confirm these stay empty, or the
+extractor is under-counting:
+
+```sh
+grep -rnE '^\s*pub\s+(const|static|trait|type)\s' rust-old/src/
+grep -rn ' for ' rust-old/src/ | grep -E '^\S+:[0-9]+:\s*impl'   # manual trait impls
+grep -rn 'derive(.*Default' rust-old/src/                          # non-zero defaults
+```
+
+**4. Account for the dropped fallback.** The module count alone overstates
+completeness: 19 modules also dropped their `#[cfg(not(feature =
+"naad-backend"))]` branch (~232 lines). Re-measure rather than trusting that
+number:
+
+```sh
+grep -rc 'cfg(not(feature = "naad-backend"))' rust-old/src/
+```
+
+**5. Do not confuse "a symbol exists" with "it does the same thing."** Verify
+formulas and constants, not just names — e.g. `DcBlocker`'s clamp bounds were
+checked as bit patterns (`0x3FECCCCCCCCCCCCD` == 0.9, `0x3FEFFF2E48E8A71E` ==
+0.9999) rather than read as decimals, and the transcendentals were measured
+against libm rather than assumed (note
+[002](../architecture/002-where-the-transcendentals-come-from.md)).
