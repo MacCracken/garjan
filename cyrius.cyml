@@ -5,7 +5,7 @@ description = "garjan — environmental & nature sound synthesis (thunder, rain,
 license = "GPL-3.0-only"
 repository = "https://github.com/MacCracken/garjan"
 language = "cyrius"
-cyrius = "6.3.44"
+cyrius = "6.5.36"
 
 [build]
 entry = "src/main.cyr"
@@ -83,21 +83,21 @@ stdlib = [
 # hisab + goonj + sakshi symbols, resolved from THIS manifest below.
 [deps.naad]
 git = "https://github.com/MacCracken/naad.git"
-tag = "2.1.0"
+tag = "2.2.2"
 modules = ["dist/naad.cyr"]
 
 # hisab — math/geometry. Referenced by naad's bundle (HVec3/HComplex/FFT/
 # ganita least-squares). Pinned to the tag naad itself consumes.
 [deps.hisab]
 git = "https://github.com/MacCracken/hisab.git"
-tag = "2.6.7"
+tag = "2.11.2"
 modules = ["dist/hisab.cyr"]
 
 # goonj — acoustics engine. Referenced by naad's acoustics/* modules
 # (present in the monolithic bundle). Pulls sakshi + hisab transitively.
 [deps.goonj]
 git = "https://github.com/MacCracken/goonj.git"
-tag = "2.0.0"
+tag = "2.0.4"
 modules = ["dist/goonj.cyr"]
 
 # sakshi — structured logging. garjan calls it directly (src/logging.cyr →
@@ -105,5 +105,5 @@ modules = ["dist/goonj.cyr"]
 # crate gated behind `tracing`. Also arrives transitively via hisab/goonj.
 [deps.sakshi]
 git = "https://github.com/MacCracken/sakshi.git"
-tag = "2.4.3"
+tag = "2.4.11"
 modules = ["dist/sakshi.cyr"]

@@ -77,13 +77,13 @@ fn texture_build_naad(self) {
     var sr = AmbientTexture_sample_rate(self);
 
     # low: brown noise through lowpass 300 Hz, Q 0.7.
-    var lf = filter_biquad_new(FILTER_LOWPASS, sr, f64_from(300), f64_div(f64_from(7), f64_from(10)));
+    var lf = filter_biquad_new(NAAD_FILTER_LOWPASS, sr, f64_from(300), f64_div(f64_from(7), f64_from(10)));
     if (garjan_is_err(lf) == 1) { return garjan_map_naad_error(lf); }
     # mid: pink noise through bandpass 1500 Hz, Q 1.0.
-    var mf = filter_biquad_new(FILTER_BANDPASS, sr, f64_from(1500), F64_ONE);
+    var mf = filter_biquad_new(NAAD_FILTER_BANDPASS, sr, f64_from(1500), F64_ONE);
     if (garjan_is_err(mf) == 1) { return garjan_map_naad_error(mf); }
     # high: white noise through highpass 4000 Hz, Q 0.7.
-    var hf = filter_biquad_new(FILTER_HIGHPASS, sr, f64_from(4000), f64_div(f64_from(7), f64_from(10)));
+    var hf = filter_biquad_new(NAAD_FILTER_HIGHPASS, sr, f64_from(4000), f64_div(f64_from(7), f64_from(10)));
     if (garjan_is_err(hf) == 1) { return garjan_map_naad_error(hf); }
 
     var rate = texture_mod_rate(AmbientTexture_texture_type(self));

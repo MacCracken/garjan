@@ -45,9 +45,9 @@ struct Fire {
 # negative code if a naad constructor rejects its params.
 fn fire_build_naad(self) {
     var sr = Fire_sample_rate(self);
-    var rf = filter_biquad_new(FILTER_LOWPASS, sr, f64_from(600), f64_div(f64_from(7), f64_from(10)));
+    var rf = filter_biquad_new(NAAD_FILTER_LOWPASS, sr, f64_from(600), f64_div(f64_from(7), f64_from(10)));
     if (garjan_is_err(rf) == 1) { return garjan_map_naad_error(rf); }
-    var cf = filter_biquad_new(FILTER_HIGHPASS, sr, f64_from(2000), F64_ONE);
+    var cf = filter_biquad_new(NAAD_FILTER_HIGHPASS, sr, f64_from(2000), F64_ONE);
     if (garjan_is_err(cf) == 1) { return garjan_map_naad_error(cf); }
     Fire_set_roar_filter(self, rf);
     Fire_set_crackle_filter(self, cf);

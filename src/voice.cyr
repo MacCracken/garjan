@@ -210,11 +210,11 @@ fn voice_pool_to_json(p, sb) {
     return 0;
 }
 
-# Uses the nesting-capable value-tree parser (bayan_json_v_parse_str) since
+# Uses the nesting-capable value-tree parser (bayan_json_v_parse_buf) since
 # the object has a nested slots array; v_obj_get keys are plain cstrings.
 #must_use
 fn voice_pool_from_json_str(json) {
-    var root = bayan_json_v_parse_str(json, strlen(json));
+    var root = bayan_json_v_parse_buf(json, strlen(json));
     var sp = bayan_json_v_int(bayan_json_v_obj_get(root, "steal_policy"));
     var mv = bayan_json_v_int(bayan_json_v_obj_get(root, "max_voices"));
     var p = voice_pool_new(mv, sp);

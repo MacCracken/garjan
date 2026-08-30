@@ -9,10 +9,15 @@ Measured on x86_64 Linux; 20 iterations per synth.
 | Synthesizer        | Time / 1 s audio | Real-time factor |
 |--------------------|------------------|------------------|
 | cloth (Flag)       | 1.03 ms          | ~970x            |
-| rain (Moderate)    | 3.84 ms          | ~260x            |
-| fire               | 4.94 ms          | ~200x            |
-| thunder (2 km)     | 5.65 ms          | ~180x            |
-| wind (15 m/s)      | 11.6 ms          | ~85x             |
+| rain (Moderate)    | 3.77 ms          | ~265x            |
+| fire               | 4.43 ms          | ~225x            |
+| thunder (2 km)     | 5.42 ms          | ~185x            |
+| wind (15 m/s)      | 11.0 ms          | ~91x             |
+
+Last measured on Cyrius 6.5.36 with naad 2.2.2 / hisab 2.11.2 / goonj 2.0.4
+(garjan 2.0.1); figures are the mean of two runs, which agreed to within 2%.
+Every synth came out marginally faster than the 6.3.44 / naad 2.1.0 numbers —
+codegen and upstream DSP improvements, not a change to garjan's own hot paths.
 
 Notes:
 

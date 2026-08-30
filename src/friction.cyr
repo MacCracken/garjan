@@ -91,7 +91,7 @@ fn friction_build_naad(self) {
 
     # Bandpass shape filter (naad), q = 1.5.
     var filter_freq = friction_filter_freq(friction_type);
-    var sf = filter_biquad_new(FILTER_BANDPASS, sr, filter_freq, f64_div(f64_from(15), f64_from(10)));
+    var sf = filter_biquad_new(NAAD_FILTER_BANDPASS, sr, filter_freq, f64_div(f64_from(15), f64_from(10)));
     if (garjan_is_err(sf) == 1) { return garjan_map_naad_error(sf); }
     Friction_set_shape_filter(self, sf);
 

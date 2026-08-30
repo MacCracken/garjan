@@ -74,7 +74,7 @@ struct Rain {
 # rain_from_json_str. Returns GARJAN_OK or a negative code on naad failure.
 fn rain_build_naad(self) {
     var sr = Rain_sample_rate(self);
-    var rf = filter_biquad_new(FILTER_BANDPASS, sr, f64_from(3000), F64_TWO);
+    var rf = filter_biquad_new(NAAD_FILTER_BANDPASS, sr, f64_from(3000), F64_TWO);
     if (garjan_is_err(rf) == 1) { return garjan_map_naad_error(rf); }
     Rain_set_rain_filter(self, rf);
     Rain_set_drop_noise(self, noise_new(NOISE_WHITE, 7919));
@@ -260,7 +260,7 @@ fn thunder_build_naad(self) {
     # cutoff = (5000 / (1 + distance_m*0.002)).clamp(60, 5000)
     var denom = f64_add(F64_ONE, f64_mul(distance_m, f64_div(f64_from(2), f64_from(1000))));
     var cutoff = f64_clamp(f64_div(f64_from(5000), denom), f64_from(60), f64_from(5000));
-    var rf = filter_biquad_new(FILTER_LOWPASS, sr, cutoff, f64_div(f64_from(7), f64_from(10)));
+    var rf = filter_biquad_new(NAAD_FILTER_LOWPASS, sr, cutoff, f64_div(f64_from(7), f64_from(10)));
     if (garjan_is_err(rf) == 1) { return garjan_map_naad_error(rf); }
     Thunder_set_rumble_filter(self, rf);
     Thunder_set_crack_noise(self, noise_new(NOISE_WHITE, 1337));

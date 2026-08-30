@@ -107,8 +107,8 @@ fn footstep_build_naad(self) {
     Footstep_set_noise_gen(self, noise_new(TerrainNoiseConfig_noise_type(noise_cfg), 8888));
 
     # Shape filter: highpass or lowpass per config.
-    var ft = FILTER_LOWPASS;
-    if (TerrainNoiseConfig_highpass(noise_cfg) == 1) { ft = FILTER_HIGHPASS; }
+    var ft = NAAD_FILTER_LOWPASS;
+    if (TerrainNoiseConfig_highpass(noise_cfg) == 1) { ft = NAAD_FILTER_HIGHPASS; }
     var sf = filter_biquad_new(ft, sr, TerrainNoiseConfig_filter_freq(noise_cfg),
                                TerrainNoiseConfig_filter_q(noise_cfg));
     if (garjan_is_err(sf) == 1) { return garjan_map_naad_error(sf); }

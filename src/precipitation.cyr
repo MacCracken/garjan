@@ -135,7 +135,7 @@ fn precipitation_build_naad(self) {
         filter_freq = TerrainNoiseConfig_filter_freq(cfg);
     }
 
-    var sf = filter_biquad_new(FILTER_BANDPASS, sr, filter_freq, f64_div(f64_from(15), f64_from(10)));
+    var sf = filter_biquad_new(NAAD_FILTER_BANDPASS, sr, filter_freq, f64_div(f64_from(15), f64_from(10)));
     if (garjan_is_err(sf) == 1) { return garjan_map_naad_error(sf); }
     Precipitation_set_noise_gen(self, noise_new(nt, 5050));
     Precipitation_set_shape_filter(self, sf);

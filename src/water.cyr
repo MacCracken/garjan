@@ -63,32 +63,32 @@ fn water_build_naad(self) {
 
     # Select naad params per water type (Rust match).
     var noise_type = NOISE_WHITE;
-    var filter_type = FILTER_LOWPASS;
+    var filter_type = NAAD_FILTER_LOWPASS;
     var filter_freq = f64_from(1000);
     var filter_q = F64_ONE;
     var lfo_rate = F64_ONE;
     if (wt == WATER_STREAM) {
         noise_type = NOISE_PINK;
-        filter_type = FILTER_BANDPASS;
+        filter_type = NAAD_FILTER_BANDPASS;
         filter_freq = f64_from(800);
         filter_q = f64_div(f64_from(3), f64_from(2));
         # 0.5 + intensity * 2.0
         lfo_rate = f64_add(F64_HALF, f64_mul(inten, F64_TWO));
     } elif (wt == WATER_DRIP) {
         noise_type = NOISE_WHITE;
-        filter_type = FILTER_BANDPASS;
+        filter_type = NAAD_FILTER_BANDPASS;
         filter_freq = f64_from(1200);
         filter_q = F64_TWO;
         lfo_rate = F64_ONE;
     } elif (wt == WATER_SPLASH) {
         noise_type = NOISE_WHITE;
-        filter_type = FILTER_LOWPASS;
+        filter_type = NAAD_FILTER_LOWPASS;
         filter_freq = f64_from(4000);
         filter_q = f64_div(f64_from(7), f64_from(10));
         lfo_rate = F64_ONE;
     } else {
         noise_type = NOISE_BROWN;
-        filter_type = FILTER_LOWPASS;
+        filter_type = NAAD_FILTER_LOWPASS;
         filter_freq = f64_from(500);
         filter_q = F64_HALF;
         lfo_rate = f64_div(f64_from(1), f64_from(10));

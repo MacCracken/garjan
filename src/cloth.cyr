@@ -76,7 +76,7 @@ fn cloth_build_naad(self) {
 
     # naad: white noise generator + bandpass shape filter (Q = 1.5).
     Cloth_set_noise_gen(self, noise_new(NOISE_WHITE, 6666));
-    var sf = filter_biquad_new(FILTER_BANDPASS, sr, Cloth_filter_freq(self), f64_div(f64_from(15), f64_from(10)));
+    var sf = filter_biquad_new(NAAD_FILTER_BANDPASS, sr, Cloth_filter_freq(self), f64_div(f64_from(15), f64_from(10)));
     if (garjan_is_err(sf) == 1) { return garjan_map_naad_error(sf); }
     Cloth_set_shape_filter(self, sf);
     return GARJAN_OK;

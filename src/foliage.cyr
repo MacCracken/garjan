@@ -89,7 +89,7 @@ fn foliage_build_naad(self) {
     } elif (ftype == FOLIAGE_GRASS_SWISH) {
         freq = f64_from(2000);
     }
-    var rf = filter_biquad_new(FILTER_BANDPASS, sr, freq, f64_div(f64_from(15), f64_from(10)));
+    var rf = filter_biquad_new(NAAD_FILTER_BANDPASS, sr, freq, f64_div(f64_from(15), f64_from(10)));
     if (garjan_is_err(rf) == 1) { return garjan_map_naad_error(rf); }
     Foliage_set_rustle_filter(self, rf);
     Foliage_set_rustle_noise(self, noise_new(NOISE_PINK, 4444));

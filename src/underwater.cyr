@@ -90,10 +90,10 @@ fn underwater_apply_config(self, depth) {
 fn underwater_build_naad(self) {
     var sr = Underwater_sample_rate(self);
     # rumble filter: lowpass @ 200 Hz, Q 0.5.
-    var rf = filter_biquad_new(FILTER_LOWPASS, sr, f64_from(200), F64_HALF);
+    var rf = filter_biquad_new(NAAD_FILTER_LOWPASS, sr, f64_from(200), F64_HALF);
     if (garjan_is_err(rf) == 1) { return garjan_map_naad_error(rf); }
     # surface filter: lowpass @ lp_cutoff, Q 0.7.
-    var sf = filter_biquad_new(FILTER_LOWPASS, sr, Underwater_lp_cutoff(self), f64_div(f64_from(7), f64_from(10)));
+    var sf = filter_biquad_new(NAAD_FILTER_LOWPASS, sr, Underwater_lp_cutoff(self), f64_div(f64_from(7), f64_from(10)));
     if (garjan_is_err(sf) == 1) { return garjan_map_naad_error(sf); }
     # mod LFO: sine @ 0.08 Hz.
     var lfo = modulation_lfo_new(MODULATION_LFO_SINE, f64_div(f64_from(8), f64_from(100)), sr);

@@ -70,11 +70,11 @@ struct Surf {
 fn surf_build_naad(self) {
     var sr = Surf_sample_rate(self);
 
-    var cf = filter_biquad_new(FILTER_BANDPASS, sr, f64_from(2000), f64_div(f64_from(8), f64_from(10)));
+    var cf = filter_biquad_new(NAAD_FILTER_BANDPASS, sr, f64_from(2000), f64_div(f64_from(8), f64_from(10)));
     if (garjan_is_err(cf) == 1) { return garjan_map_naad_error(cf); }
-    var wf = filter_biquad_new(FILTER_LOWPASS, sr, f64_from(3000), F64_HALF);
+    var wf = filter_biquad_new(NAAD_FILTER_LOWPASS, sr, f64_from(3000), F64_HALF);
     if (garjan_is_err(wf) == 1) { return garjan_map_naad_error(wf); }
-    var rf = filter_biquad_new(FILTER_LOWPASS, sr, f64_from(200), F64_HALF);
+    var rf = filter_biquad_new(NAAD_FILTER_LOWPASS, sr, f64_from(200), F64_HALF);
     if (garjan_is_err(rf) == 1) { return garjan_map_naad_error(rf); }
 
     Surf_set_crash_noise(self, noise_new(NOISE_WHITE, 8080));

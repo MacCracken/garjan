@@ -110,7 +110,7 @@ fn impact_build_naad(self) {
     var bandwidth = MaterialProperties_bandwidth(props);
     var q = f64_clamp(f64_div(resonance, f64_max(bandwidth, F64_ONE)),
                       f64_div(f64_from(1), f64_from(10)), f64_from(20));
-    var rf = filter_biquad_new(FILTER_BANDPASS, sr, resonance, q);
+    var rf = filter_biquad_new(NAAD_FILTER_BANDPASS, sr, resonance, q);
     if (garjan_is_err(rf) == 1) { return garjan_map_naad_error(rf); }
     Impact_set_resonance_filter(self, rf);
 

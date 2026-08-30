@@ -91,7 +91,7 @@ fn insect_build_naad(self) {
     var base = Insect_base_freq(self);
     # q = (base_freq / 200.0).clamp(1.0, 20.0)
     var q = f64_clamp(f64_div(base, f64_from(200)), F64_ONE, f64_from(20));
-    var sf = filter_biquad_new(FILTER_BANDPASS, sr, base, q);
+    var sf = filter_biquad_new(NAAD_FILTER_BANDPASS, sr, base, q);
     if (garjan_is_err(sf) == 1) { return garjan_map_naad_error(sf); }
     Insect_set_shape_filter(self, sf);
     Insect_set_noise_gen(self, noise_new(NOISE_WHITE, 9999));

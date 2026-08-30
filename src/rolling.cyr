@@ -85,7 +85,7 @@ fn rolling_build_naad(self) {
     var scale = f64_sub(F64_ONE, f64_mul(f64_div(f64_from(3), f64_from(10)), Rolling_mass_factor(self)));
     var base_cutoff = f64_mul(resonance, scale);
     var cutoff = f64_clamp(base_cutoff, f64_from(50), f64_from(8000));
-    var sf = filter_biquad_new(FILTER_BANDPASS, sr, cutoff, F64_ONE);
+    var sf = filter_biquad_new(NAAD_FILTER_BANDPASS, sr, cutoff, F64_ONE);
     if (garjan_is_err(sf) == 1) { return garjan_map_naad_error(sf); }
     Rolling_set_surface_filter(self, sf);
 

@@ -107,7 +107,7 @@ fn creak_build_naad(self) {
     var ng = noise_new(NOISE_PINK, 5555);
     Creak_set_noise_gen(self, ng);
     var ffreq = creak_shape_filter_freq(source);
-    var sf = filter_biquad_new(FILTER_LOWPASS, sr, ffreq, f64_div(f64_from(7), f64_from(10)));
+    var sf = filter_biquad_new(NAAD_FILTER_LOWPASS, sr, ffreq, f64_div(f64_from(7), f64_from(10)));
     if (garjan_is_err(sf) == 1) { return garjan_map_naad_error(sf); }
     Creak_set_shape_filter(self, sf);
     return GARJAN_OK;

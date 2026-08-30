@@ -63,12 +63,12 @@ fn whoosh_build_naad(self) {
     # hi_filter: highpass, freq = clamp(brightness*4000, 200, 8000), q = 0.7
     var hi_freq = f64_clamp(f64_mul(brightness, f64_from(4000)), f64_from(200), f64_from(8000));
     var hi_q = f64_div(f64_from(7), f64_from(10));
-    var hf = filter_biquad_new(FILTER_HIGHPASS, sr, hi_freq, hi_q);
+    var hf = filter_biquad_new(NAAD_FILTER_HIGHPASS, sr, hi_freq, hi_q);
     if (garjan_is_err(hf) == 1) { return garjan_map_naad_error(hf); }
 
     # lo_filter: lowpass, freq = clamp(300 + low_content*500, 100, 1000), q = 0.5
     var lo_freq = f64_clamp(f64_add(f64_from(300), f64_mul(low_content, f64_from(500))), f64_from(100), f64_from(1000));
-    var lf = filter_biquad_new(FILTER_LOWPASS, sr, lo_freq, F64_HALF);
+    var lf = filter_biquad_new(NAAD_FILTER_LOWPASS, sr, lo_freq, F64_HALF);
     if (garjan_is_err(lf) == 1) { return garjan_map_naad_error(lf); }
 
     Whoosh_set_hi_filter(self, hf);

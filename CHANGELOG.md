@@ -5,6 +5,52 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.1]
+
+Maintenance release: toolchain, dependency, and vendored-stdlib refresh. No
+intentional behavior change — the two source edits are mechanical renames
+forced by upstream, both verified value-for-value against the old bundles.
+
+### Changed
+- **Cyrius toolchain pin 6.3.44 → 6.5.36** (`cyrius.cyml [package].cyrius`).
+- **Dependencies bumped to latest releases** — naad 2.1.0 → **2.2.2**,
+  hisab 2.6.7 → **2.11.2**, goonj 2.0.0 → **2.0.4**, sakshi 2.4.3 → **2.4.11**.
+  The graph is self-consistent at these tags: naad 2.2.2 pins hisab 2.11.2 +
+  goonj 2.0.4, goonj 2.0.4 pins hisab 2.11.2, and hisab 2.11.2 pins
+  sakshi 2.4.11 — so garjan's transitive re-declarations match what each
+  dependency consumes upstream.
+- **Vendored stdlib re-synced** to the 6.5.36 snapshot; `lib/tagged.cyr` and
+  `lib/callback.cyr` are newly vendored (pulled in as leaf requirements by
+  naad 2.2.2 / hisab 2.11.2).
+
+### Fixed (upstream renames)
+- **`FILTER_*` → `NAAD_FILTER_*`** (30 call sites across 17 synth modules).
+  naad 2.1.3+ prefixed its filter-mode constants as part of its cross-library
+  de-collision work; the bare names were a hard compile error against 2.2.2.
+  Verified a pure rename: both bundles define LOWPASS/HIGHPASS/BANDPASS/NOTCH/
+  ALLPASS/LOWSHELF/HIGHSHELF/PEAK as 0-7 in that order, and
+  `filter_biquad_new(filter_type, sample_rate, frequency, q)` is byte-identical
+  — so no filter changes type or response.
+- **`bayan_json_v_parse_str` → `bayan_json_v_parse_buf`** (`src/voice.cyr`).
+  The stdlib renamed the cstr+len parse entry point because Cyrius routes
+  `X(str, ...)` to `X_str` when that symbol exists, which was silently
+  rewriting `bayan_json_v_parse(someStr)` into a 1-arg call to the 2-arg
+  function and returning 0 for valid JSON. Same signature, drop-in.
+
+### Verified
+- Build clean; **33 test suites / 460 assertions, all green**; fuzz harness
+  (`tests/garjan.fcyr`) passes; benchmarks re-measured (see `BENCHMARKS.md` —
+  every synth is marginally faster on the new toolchain).
+- `cyrius lint` 0 warnings across all 33 modules; `cyrius vet` clean;
+  `cyrius distlib --check` in sync.
+- **Symbol-collision audit**: garjan's 399 top-level `fn`/`var` symbols
+  intersect naad, hisab, goonj, sakshi, bayan, ganita and math at **zero** in
+  all directions. This matters because Cyrius emits no diagnostic for a
+  duplicate top-level `var`, so a collision would shadow silently.
+- **API drift audit**: every library function garjan calls was compared
+  old-bundle vs new-bundle — no arity changes, nothing removed, and the final
+  build emits no undefined-symbol warnings.
+
 ## [2.0.0] - Cyrius port
 
 Full port of the crate from Rust to the **Cyrius** language (AGNOS ecosystem

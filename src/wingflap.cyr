@@ -100,7 +100,7 @@ fn wingflap_build_naad(self) {
     var sr = WingFlap_sample_rate(self);
     # naad: pink noise generator + bandpass shape filter (Q = 1.0).
     WingFlap_set_noise_gen(self, noise_new(NOISE_PINK, 7070));
-    var sf = filter_biquad_new(FILTER_BANDPASS, sr, WingFlap_filter_freq(self), F64_ONE);
+    var sf = filter_biquad_new(NAAD_FILTER_BANDPASS, sr, WingFlap_filter_freq(self), F64_ONE);
     if (garjan_is_err(sf) == 1) { return garjan_map_naad_error(sf); }
     WingFlap_set_shape_filter(self, sf);
     return GARJAN_OK;
