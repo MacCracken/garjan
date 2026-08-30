@@ -217,6 +217,7 @@ fn whistle_from_json_str(json) {
     DcBlocker_set_r(dc, WhistleParams_dcb_r(p));
     Whistle_set_dc_blocker(self, dc);
 
-    whistle_build_naad(self);
+    var b = whistle_build_naad(self);
+    if (garjan_is_err(b) == 1) { return b; }
     return self;
 }

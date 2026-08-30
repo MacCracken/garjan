@@ -290,6 +290,7 @@ fn friction_from_json_str(json) {
     DcBlocker_set_r(dc, FrictionParams_dcb_r(p));
     Friction_set_dc_blocker(self, dc);
 
-    friction_build_naad(self);
+    var b = friction_build_naad(self);
+    if (garjan_is_err(b) == 1) { return b; }
     return self;
 }

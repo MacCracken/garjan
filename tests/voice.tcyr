@@ -70,6 +70,16 @@ fn main() {
     voice_pool_to_json(vp2, pb2);
     assert(memeq(pj, str_data(str_builder_build(pb2)), strlen(pj)) == 1, "VoicePool json roundtrip idempotent");
 
+    # --- 2.0.2 regression: pool is sized from the slots ARRAY, not max_voices ---
+    # Rust derives Deserialize on `slots: Vec<VoiceSlot>`, so serde allocates
+    # exactly as many slots as the array carries. Before 2.0.2 the port passed
+    # the raw max_voices scalar to voice_pool_new, so this ~40-byte document
+    # drove two billion VoiceSlot allocations against a never-freeing arena.
+    test_group("from_json bounds max_voices by slots array");
+    var hostile = voice_pool_from_json_str("{\"steal_policy\":0,\"max_voices\":2000000000,\"slots\":[]}");
+    assert(garjan_is_err(hostile) == 0, "hostile pool still constructs");
+    assert(voice_pool_max_voices(hostile) <= 1, "max_voices bounded by empty slots array");
+
     return assert_summary();
 }
 var ec = main();

@@ -86,9 +86,26 @@ that stays the consuming application's job.
 
 ## Cyrius toolchain + vendored stdlib
 
+**Status:** pinned to **6.5.36** — the current *released* Cyrius
+([tag `6.5.36`](https://github.com/MacCracken/cyrius/releases/tag/6.5.36),
+published 2026-08-28). The pin tracks published releases only; never pin to
+`main` or an unreleased tag, because CI installs the pin through the canonical
+upstream installer, which resolves release artifacts
+(`cyrius-<version>-<arch>-<os>.tar.gz` + `.sha256`). An unreleased pin makes CI
+unresolvable even when it builds locally.
+
+Check whether the pin is behind the newest release:
+
+```sh
+curl -s https://api.github.com/repos/MacCracken/cyrius/releases/latest | grep '"tag_name"'
+grep '^cyrius = ' cyrius.cyml
+```
+
 The `[package].cyrius` pin is the single source of truth; CI reads it and never
 hardcodes a version. `cyrius deps` re-vendors `lib/` from that pin, so a
-toolchain bump is a stdlib bump too.
+toolchain bump is a stdlib bump too — and stdlib bundles move fast (the 6.3.44
+→ 6.5.36 step rewrote ~12,700 lines of `lib/bayan.cyr` alone), so a toolchain
+bump always warrants the full upgrade checklist below, not just a rebuild.
 
 **Upgrade gotcha — the `_str` suffix is reserved.** Cyrius routes a call
 `X(a, ...)` to `X_str` whenever `a` is Str-typed at the call site and `X_str`
@@ -100,9 +117,22 @@ silently rewritten into a 1-arg call to the 2-arg function and returned 0 for
 valid JSON. garjan's `voice_pool_from_json_str` was updated at 2.0.1.
 
 **Watch the warnings, not just the errors.** An undefined *variable* is a hard
-error, but an undefined *function* is only a warning — it links as a null call
-and fails at runtime. After any bump, the build must be warning-clean, not
-merely `OK`.
+error. An undefined *function* is a warning — and, since 6.5.36, additionally a
+hard error *if the compiler can reach it* from the entry point:
+
+```
+warning: undefined function 'foo'
+error: refusing to emit binary with 1 reachable undefined function(s) (pass --allow-undef to downgrade)
+```
+
+That reachability gate is why an undefined function can still slip through here.
+garjan's entry (`src/main.cyr`) is a small smoke harness that does not call most
+of the library, so a symbol broken by an upstream rename stays *unreachable*,
+degrades to a bare warning, and the build reports `OK` — while every downstream
+consumer that actually calls it gets the failure. That is exactly how
+`bayan_json_v_parse_str` presented during the 2.0.1 bump: a lone warning next to
+a passing build. **So after any bump the build must be warning-CLEAN, not merely
+`OK`,** and never reach for `--allow-undef`.
 
 ## Upgrade checklist
 

@@ -275,6 +275,7 @@ fn wingflap_from_json_str(json) {
     DcBlocker_set_r(dc, WingFlapParams_dcb_r(p));
     WingFlap_set_dc_blocker(self, dc);
 
-    wingflap_build_naad(self);
+    var b = wingflap_build_naad(self);
+    if (garjan_is_err(b) == 1) { return b; }
     return self;
 }

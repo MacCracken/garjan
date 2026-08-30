@@ -301,6 +301,7 @@ fn creak_from_json_str(json) {
     DcBlocker_set_r(dc, CreakParams_dcb_r(p));
     Creak_set_dc_blocker(self, dc);
 
-    creak_build_naad(self);
+    var b = creak_build_naad(self);
+    if (garjan_is_err(b) == 1) { return b; }
     return self;
 }

@@ -345,6 +345,7 @@ fn precipitation_from_json_str(json) {
     DcBlocker_set_r(dc, PrecipitationParams_dcb_r(p));
     Precipitation_set_dc_blocker(self, dc);
 
-    precipitation_build_naad(self);
+    var b = precipitation_build_naad(self);
+    if (garjan_is_err(b) == 1) { return b; }
     return self;
 }

@@ -253,6 +253,7 @@ fn bubble_from_json_str(json) {
     DcBlocker_set_r(dc, BubbleParams_dcb_r(p));
     Bubble_set_dc_blocker(self, dc);
 
-    bubble_build_naad(self);
+    var b = bubble_build_naad(self);
+    if (garjan_is_err(b) == 1) { return b; }
     return self;
 }

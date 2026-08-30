@@ -343,6 +343,7 @@ fn impact_from_json_str(json) {
     DcBlocker_set_r(dc, ImpactParams_dcb_r(p));
     Impact_set_dc_blocker(self, dc);
 
-    impact_build_naad(self);
+    var b = impact_build_naad(self);
+    if (garjan_is_err(b) == 1) { return b; }
     return self;
 }

@@ -322,6 +322,7 @@ fn footstep_from_json_str(json) {
     DcBlocker_set_r(dc, FootstepParams_dcb_r(p));
     Footstep_set_dc_blocker(self, dc);
 
-    footstep_build_naad(self);
+    var b = footstep_build_naad(self);
+    if (garjan_is_err(b) == 1) { return b; }
     return self;
 }

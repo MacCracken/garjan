@@ -274,6 +274,7 @@ fn rolling_from_json_str(json) {
     DcBlocker_set_r(dc, RollingParams_dcb_r(p));
     Rolling_set_dc_blocker(self, dc);
 
-    rolling_build_naad(self);
+    var b = rolling_build_naad(self);
+    if (garjan_is_err(b) == 1) { return b; }
     return self;
 }

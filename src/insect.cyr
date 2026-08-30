@@ -319,7 +319,17 @@ fn insect_from_json_str(json) {
     Insect_set_chirp_rate(self, InsectParams_chirp_rate(p));
     Insect_set_amplitude(self, InsectParams_amplitude(p));
     Insect_set_intensity(self, InsectParams_intensity(p));
-    Insect_set_swarm_count(self, InsectParams_swarm_count(p));
+    # swarm_count carries a 1..8 invariant that insect_new_swarm enforces and
+    # that insect_detune's eight det0..det7 fields physically encode; restore it
+    # here too. Deserialize was the one path that set the field raw, and it is
+    # the bound of the per-sample inner voice loop (insect_process_block), so an
+    # unclamped value turned one process_block into an effectively unbounded
+    # loop -- with insect_detune saturating every index >= 7 to det7 rather than
+    # trapping, so nothing downstream noticed.
+    var sc = InsectParams_swarm_count(p);
+    if (sc < 1) { sc = 1; }
+    if (sc > 8) { sc = 8; }
+    Insect_set_swarm_count(self, sc);
     Insect_set_det0(self, InsectParams_det0(p));
     Insect_set_det1(self, InsectParams_det1(p));
     Insect_set_det2(self, InsectParams_det2(p));
@@ -340,6 +350,7 @@ fn insect_from_json_str(json) {
     DcBlocker_set_r(dc, InsectParams_dcb_r(p));
     Insect_set_dc_blocker(self, dc);
 
-    insect_build_naad(self);
+    var b = insect_build_naad(self);
+    if (garjan_is_err(b) == 1) { return b; }
     return self;
 }

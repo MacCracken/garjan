@@ -217,9 +217,18 @@ fn voice_pool_from_json_str(json) {
     var root = bayan_json_v_parse_buf(json, strlen(json));
     var sp = bayan_json_v_int(bayan_json_v_obj_get(root, "steal_policy"));
     var mv = bayan_json_v_int(bayan_json_v_obj_get(root, "max_voices"));
-    var p = voice_pool_new(mv, sp);
     var slots_val = bayan_json_v_obj_get(root, "slots");
     var n = bayan_json_v_arr_len(slots_val);
+    # The pool is sized from the `slots` ARRAY, never from the `max_voices`
+    # scalar. Rust derives Deserialize on `slots: Vec<VoiceSlot>`, so serde
+    # allocates exactly as many slots as the array carries and never calls
+    # VoicePool::new -- for a well-formed round-trip the two agree, so this
+    # clamp is a no-op there. It is not a no-op for a hostile document:
+    # `{"max_voices":2000000000,"slots":[]}` is ~40 bytes and used to drive
+    # voice_pool_new's push loop two billion times, one VoiceSlot alloc per
+    # iteration, against a bump allocator that never frees.
+    if (mv > n) { mv = n; }
+    var p = voice_pool_new(mv, sp);
     var dst = VoicePool_slots(p);
     var cap = vec_len(dst);
     var i = 0;

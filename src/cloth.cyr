@@ -287,6 +287,7 @@ fn cloth_from_json_str(json) {
     DcBlocker_set_r(dc, ClothParams_dcb_r(p));
     Cloth_set_dc_blocker(self, dc);
 
-    cloth_build_naad(self);
+    var b = cloth_build_naad(self);
+    if (garjan_is_err(b) == 1) { return b; }
     return self;
 }

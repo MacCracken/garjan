@@ -79,6 +79,23 @@ fn main() {
     assert_eq(Insect_swarm_count(g2), 3, "restored swarm_count 3");
     assert(f64_lt(f64_abs(f64_sub(Insect_det0(g), Insect_det0(g2))), GARJAN_EPSILON) == 1, "restored det0 preserved");
 
+    # --- 2.0.2 regression: swarm_count keeps its 1..8 invariant on deserialize ---
+    # swarm_count bounds the per-sample inner voice loop and is physically
+    # encoded by the eight det0..det7 fields. Deserialize was the one path that
+    # set it raw, so JSON could drive an unbounded loop with insect_detune
+    # saturating every index >= 7 to det7 rather than trapping.
+    test_group("from_json clamps swarm_count");
+    var huge = insect_from_json_str("{\"insect_type\":2,\"sample_rate\":44100.0,\"sample_position\":0,\"base_freq\":6000.0,\"mod_rate\":20.0,\"chirp_rate\":0.5,\"amplitude\":0.25,\"intensity\":1.0,\"swarm_count\":999999999,\"det0\":0.0,\"det1\":0.0,\"det2\":0.0,\"det3\":0.0,\"det4\":0.0,\"det5\":0.0,\"det6\":0.0,\"det7\":0.0,\"rng_state\":1,\"rng_inc\":19999,\"dcb_x_prev\":0.0,\"dcb_y_prev\":0.0,\"dcb_r\":0.9985752414269434}");
+    assert(garjan_is_err(huge) == 0, "hostile insect still constructs");
+    assert_eq(Insect_swarm_count(huge), 8, "swarm_count 999999999 clamped to 8");
+    # and the clamped synth is actually usable -- the per-sample voice loop
+    # runs 8 times, not 999999999 times.
+    var hout = vec_new();
+    var hi = 0;
+    while (hi < 32) { vec_push(hout, 0); hi = hi + 1; }
+    insect_process_block(huge, hout);
+    assert(garjan_is_finite(vec_get(hout, 31)) == 1, "clamped swarm renders finite audio");
+
     return assert_summary();
 }
 var ec = main();

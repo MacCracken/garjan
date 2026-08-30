@@ -5,6 +5,77 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.2]
+
+Security and hardening release from a P-1 audit sweep. The deserialization
+surface (`*_from_json_str`) was the weak point: it is the one set of entry
+points that takes fully attacker-controlled input, and it was skipping the
+validation its sibling constructors perform. No behavior changes for valid
+input — all 33 suites pass unchanged.
+
+### Fixed — security (all reachable from untrusted JSON)
+
+- **`*_from_json_str` discarded the `*_build_naad` error code — 20 of 21 sites.**
+  The `*_new` path has always checked it (`var b = X_build_naad(self); if
+  (garjan_is_err(b) == 1) { return b; }`); the deserialize path called it bare.
+  `*_build_naad` returns *before* assigning the naad component pointers when a
+  constructor rejects its input, and `*_from_json_str` never validates the
+  JSON-supplied `sample_rate` the way `*_new` does. So a well-formed document
+  with `"sample_rate":0.0` returned a **non-negative pointer** whose component
+  fields were left 0 — the caller's `garjan_is_err` check passed, and the first
+  `process_block` dereferenced null. Confirmed as a SIGSEGV against 2.0.1 and
+  re-confirmed as a clean `GARJAN_ERR_SYNTHESIS_FAILED` after the fix.
+  `foliage` was the single site that already did this correctly.
+- **`voice_pool_from_json_str` sized the pool from `max_voices`, not the slots
+  array.** Rust derives `Deserialize` on `slots: Vec<VoiceSlot>`, so serde
+  allocates exactly as many slots as the array carries and never calls
+  `VoicePool::new`. The port passed the raw `max_voices` scalar into
+  `voice_pool_new`, whose push loop allocates one `VoiceSlot` per unit against
+  an arena that never frees — so `{"max_voices":2000000000,"slots":[]}`, about
+  40 bytes, exhausted memory. Now bounded by the array length, which is a no-op
+  on any well-formed round-trip and restores parity with Rust.
+- **`insect_from_json_str` restored `swarm_count` without its 1..8 clamp.**
+  Every other path enforces that invariant, and the eight `det0..det7` fields
+  physically encode it. `swarm_count` bounds the per-sample inner voice loop, so
+  an unclamped value made one `process_block` effectively unbounded — with
+  `insect_detune` saturating every index >= 7 to `det7` instead of trapping, so
+  nothing downstream noticed.
+
+### Fixed — build hygiene
+
+- **`cyrius audit` failed its fmt gate.** Root cause: `cyrius fmt --check`
+  **false-negatives**. It reported `src/builder.cyr` clean while the formatter
+  itself rewrote 20 lines of it. Reformatted (whitespace only). Note for future
+  work: verify formatting by running the formatter into a scratch copy and
+  diffing, not by trusting `--check`.
+
+### Added
+
+- Regression tests for all three security fixes, in `tests/fire.tcyr`,
+  `tests/voice.tcyr` and `tests/insect.tcyr`, each driving a genuinely hostile
+  document rather than a round-tripped one. **466 assertions** across 33 suites
+  (was 460).
+
+### Known, deliberately not fixed here
+
+- **A failed allocation is indistinguishable from success.** `alloc` returns `0`
+  on exhaustion (`lib/alloc.cyr`), but `garjan_is_err` only treats `< 0` as an
+  error and `GARJAN_OK` *is* `0` — so `garjan_is_err(alloc(...)) == 0` on
+  failure. All ~85 `alloc(sizeof(X))` sites are unchecked and constructors write
+  through the result immediately, making OOM a null-pointer store rather than a
+  clean error. Reachability is low (it needs genuine memory exhaustion), and the
+  fix touches every constructor, so it is deferred rather than bundled into a
+  patch release. Tracked for 2.1.0.
+- **No upper bound on `duration` or `sample_rate`.** `validate_duration` accepts
+  any positive finite value, so 1e8 seconds sizes a 4.4-trillion-sample buffer.
+  This is *faithful* to the oracle — `rust-old/src/dsp.rs:39` validated only
+  positive-and-finite too — so adding a cap is a deliberate divergence and needs
+  an ADR rather than a unilateral patch.
+- **Per-sample hot-path hoisting** (loop-invariant constants rebuilt per sample
+  across ~17 modules, and the second DC-blocking pass in the block synths).
+  Behavior-preserving but broad; it belongs in its own change with before/after
+  benchmarks, not in a security release.
+
 ## [2.0.1]
 
 Maintenance release: toolchain, dependency, and vendored-stdlib refresh. No

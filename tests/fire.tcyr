@@ -46,6 +46,15 @@ fn main() {
     # restored synth resumes the SAME rng sequence
     assert_eq(rng_next_u32(Fire_rng(g)), rng_next_u32(Fire_rng(g2)), "restored fire resumes rng");
 
+    # --- 2.0.2 regression: hostile JSON must not yield a wild object ---
+    # sample_rate = 0 makes naad's filter_biquad_new fail, so fire_build_naad
+    # returns early WITHOUT assigning roar_filter/crackle_filter. Before 2.0.2
+    # fire_from_json_str discarded that error and handed back a non-negative
+    # pointer whose naad fields were 0, and the first process_block segfaulted.
+    test_group("from_json rejects bad sample_rate");
+    var evil = fire_from_json_str("{\"intensity\":0.5,\"crackle_rate\":20.0,\"sample_rate\":0.0,\"sample_position\":0,\"rng_state\":1,\"rng_inc\":1,\"dcb_x_prev\":0.0,\"dcb_y_prev\":0.0,\"dcb_r\":0.999}");
+    assert(garjan_is_err(evil) == 1, "fire_from_json_str rejects sample_rate=0");
+
     return assert_summary();
 }
 var ec = main();
