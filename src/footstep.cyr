@@ -95,8 +95,8 @@ fn footstep_build_naad(self) {
         var props = material_properties(mat);
         var mode_cfg = material_mode_config(mat);
         var specs = generate_modes(props, MaterialModeConfig_pattern(mode_cfg),
-                                   MaterialModeConfig_mode_count(mode_cfg),
-                                   MaterialModeConfig_damping_factor(mode_cfg));
+          MaterialModeConfig_mode_count(mode_cfg),
+          MaterialModeConfig_damping_factor(mode_cfg));
         var bank = modal_bank_new(specs, sr);
         if (garjan_is_err(bank) == 1) { return garjan_map_naad_error(bank); }
         Footstep_set_modal_bank(self, bank);
@@ -110,7 +110,7 @@ fn footstep_build_naad(self) {
     var ft = NAAD_FILTER_LOWPASS;
     if (TerrainNoiseConfig_highpass(noise_cfg) == 1) { ft = NAAD_FILTER_HIGHPASS; }
     var sf = filter_biquad_new(ft, sr, TerrainNoiseConfig_filter_freq(noise_cfg),
-                               TerrainNoiseConfig_filter_q(noise_cfg));
+      TerrainNoiseConfig_filter_q(noise_cfg));
     if (garjan_is_err(sf) == 1) { return garjan_map_naad_error(sf); }
     Footstep_set_shape_filter(self, sf);
     return GARJAN_OK;

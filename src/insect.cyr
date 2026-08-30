@@ -183,7 +183,7 @@ fn insect_synthesize_voice(self, t, freq, voice) {
     } elif (ty == INSECT_CRICKET_CHIRP) {
         # chirp_phase = (chirp_rate*t + phase_offset*0.1) % 1.0
         var cc_arg = f64_add(f64_mul(Insect_chirp_rate(self), t),
-                             f64_mul(phase_offset, f64_div(F64_ONE, f64_from(10))));
+          f64_mul(phase_offset, f64_div(F64_ONE, f64_from(10))));
         var cc_phase = f64_fmod(cc_arg, F64_ONE);
         if (f64_lt(cc_phase, f64_div(f64_from(4), f64_from(10))) == 1) {
             var cc_pulse = f64_sin(f64_add(f64_mul(F64_TAU, f64_mul(mod_rate, t)), phase_offset));

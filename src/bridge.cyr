@@ -90,7 +90,7 @@ fn bridge_weather_from_threat_level(level, out_dist, out_wind, out_rain) {
 #must_use
 fn bridge_thunder_distance_from_flash(time_since_flash_s, temperature_celsius) {
     var c = f64_add(f64_div(f64_from(3313), f64_from(10)),
-                    f64_mul(f64_div(f64_from(606), f64_from(1000)), temperature_celsius));
+      f64_mul(f64_div(f64_from(606), f64_from(1000)), temperature_celsius));
     return f64_mul(time_since_flash_s, c);
 }
 
@@ -128,7 +128,7 @@ fn bridge_fire_intensity_blended(flame_temp_k, convection_watts) {
     var thermal = bridge_fire_intensity_from_temperature(flame_temp_k);
     var convective = bridge_fire_intensity_from_convection(convection_watts);
     var blend = f64_add(f64_mul(f64_div(f64_from(6), f64_from(10)), thermal),
-                        f64_mul(f64_div(f64_from(4), f64_from(10)), convective));
+      f64_mul(f64_div(f64_from(4), f64_from(10)), convective));
     return f64_clamp(blend, 0, F64_ONE);
 }
 

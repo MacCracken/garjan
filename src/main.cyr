@@ -32,8 +32,8 @@ fn main() {
     var props = material_properties(MATERIAL_METAL);
     var mc = material_mode_config(MATERIAL_METAL);
     var specs = generate_modes(props, MaterialModeConfig_pattern(mc),
-                               MaterialModeConfig_mode_count(mc),
-                               MaterialModeConfig_damping_factor(mc));
+      MaterialModeConfig_mode_count(mc),
+      MaterialModeConfig_damping_factor(mc));
     var bank = modal_bank_new(specs, f64_from(44100));
     if (garjan_is_err(bank) == 1) { println("garjan: modal bank failed"); return 1; }
     var y = modal_bank_process_sample(bank, F64_ONE);

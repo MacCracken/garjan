@@ -77,23 +77,23 @@ fn material_mode_config(m) {
 #must_use
 fn material_properties(m) {
     if (m == MATERIAL_METAL)   { return material_properties_new(f64_from(2500), f64_from(200),  garjan_frac(15, 10),
-                                                                garjan_frac(9, 10),   garjan_frac(7, 10)); }
+          garjan_frac(9, 10),   garjan_frac(7, 10)); }
     if (m == MATERIAL_WOOD)    { return material_properties_new(f64_from(800),  f64_from(400),  garjan_frac(3, 10),
-                                                                garjan_frac(5, 10),   garjan_frac(6, 10)); }
+          garjan_frac(5, 10),   garjan_frac(6, 10)); }
     if (m == MATERIAL_STONE)   { return material_properties_new(f64_from(3000), f64_from(800),  garjan_frac(5, 100),
-                                                                garjan_frac(8, 10),   garjan_frac(9, 10)); }
+          garjan_frac(8, 10),   garjan_frac(9, 10)); }
     if (m == MATERIAL_EARTH)   { return material_properties_new(f64_from(200),  f64_from(300),  garjan_frac(2, 100),
-                                                                garjan_frac(1, 10),   garjan_frac(4, 10)); }
+          garjan_frac(1, 10),   garjan_frac(4, 10)); }
     if (m == MATERIAL_GLASS)   { return material_properties_new(f64_from(4000), f64_from(150),  garjan_frac(8, 10),
-                                                                garjan_frac(95, 100), F64_ONE); }
+          garjan_frac(95, 100), F64_ONE); }
     if (m == MATERIAL_FABRIC)  { return material_properties_new(f64_from(300),  f64_from(500),  garjan_frac(1, 100),
-                                                                garjan_frac(1, 10),   garjan_frac(2, 10)); }
+          garjan_frac(1, 10),   garjan_frac(2, 10)); }
     if (m == MATERIAL_LEAF)    { return material_properties_new(f64_from(1500), f64_from(1000), garjan_frac(2, 100),
-                                                                garjan_frac(6, 10),   garjan_frac(5, 10)); }
+          garjan_frac(6, 10),   garjan_frac(5, 10)); }
     if (m == MATERIAL_WATER)   { return material_properties_new(f64_from(600),  f64_from(400),  garjan_frac(1, 10),
-                                                                garjan_frac(4, 10),   garjan_frac(3, 10)); }
+          garjan_frac(4, 10),   garjan_frac(3, 10)); }
     if (m == MATERIAL_PLASTIC) { return material_properties_new(f64_from(1800), f64_from(600),  garjan_frac(15, 100),
-                                                                garjan_frac(5, 10),   garjan_frac(6, 10)); }
+          garjan_frac(5, 10),   garjan_frac(6, 10)); }
     return material_properties_new(f64_from(1200), f64_from(300), garjan_frac(4, 10), garjan_frac(7, 10),
-                                   garjan_frac(7, 10));   # Ceramic
+      garjan_frac(7, 10));   # Ceramic
 }

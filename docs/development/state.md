@@ -34,14 +34,12 @@ crate is preserved at `rust-old/` for parity reference (frozen, do not edit).
   Covers parity (incl. bit-exact PCG32), synthesis finiteness/energy, and
   serde roundtrips. `cyrius test` runs them; each also builds standalone.
 - Cleanliness: `cyrius lint` 0 warnings (33 modules), `cyrius vet` clean,
-  `cyrius distlib --check` in sync; `tests/garjan.fcyr` fuzz harness passes;
-  0 lines > 120 chars in `src/`.
-- ⚠ `cyrfmt --check` flags **17 files** under 6.5.36. Not a regression from any
-  source edit — the formatter's canonical continuation indent changed to 2
-  spaces per open paren (4 also accepted), and the port's paren-aligned style
-  matches neither. Reformatting is a ~116-line whitespace-only diff across
-  `src/`, deliberately deferred so it doesn't ride along with a version bump.
-  CI does not gate on fmt.
+  `cyrfmt --check` clean (33/33), `cyrius distlib --check` in sync;
+  `tests/garjan.fcyr` fuzz harness passes; 0 lines > 120 chars in `src/`.
+- Formatting follows the 6.5.36 canon: continuation lines indent 2 spaces per
+  open paren (4 also accepted), replacing the port's original paren-aligned
+  style. Adopted as a whitespace-only 48-line reindent across 17 `src/` files;
+  build and all 460 assertions unchanged. CI does not gate on fmt.
 - Benchmarks: `cyrius bench tests/garjan.bcyr` — see [`../../BENCHMARKS.md`](../../BENCHMARKS.md).
 
 ## Dependencies

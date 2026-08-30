@@ -188,7 +188,7 @@ fn surf_process_block(self, output) {
             wave_phase = f64_sub(wave_phase, F64_ONE);
             # New jitter per wave cycle: 1.0 + rng.next_f32_range(-0.1, 0.1)
             var jitter = f64_add(F64_ONE, rng_next_f32_range(rng, f64_neg(f64_div(F64_ONE, f64_from(10))),
-                                                             f64_div(F64_ONE, f64_from(10))));
+                f64_div(F64_ONE, f64_from(10))));
             period = f64_mul(f64_from(Surf_wave_period_samples(self)), jitter);
         }
 
@@ -200,7 +200,7 @@ fn surf_process_block(self, output) {
             rumble_env = f64_div(p, f64_div(f64_from(3), f64_from(10)));
         } elif (f64_lt(p, F64_HALF) == 1) {
             rumble_env = f64_sub(F64_ONE, f64_div(f64_sub(p, f64_div(f64_from(3), f64_from(10))),
-                                                  f64_div(f64_from(2), f64_from(10))));
+                f64_div(f64_from(2), f64_from(10))));
         }
 
         # Break crash: peaks at 0.35, sin^2 window over (0.25, 0.55), else 0.
@@ -223,7 +223,7 @@ fn surf_process_block(self, output) {
         # Noise layers (naad backend). rumble scaled by *0.5 extra.
         var rn = noise_next_sample(rumble_noise);
         var rumble = f64_mul(f64_mul(f64_mul(filter_biquad_process_sample(rumble_filter, rn), rumble_env), break_amp),
-                             F64_HALF);
+          F64_HALF);
         var cn = noise_next_sample(crash_noise);
         var crash = f64_mul(f64_mul(filter_biquad_process_sample(crash_filter, cn), crash_env), break_amp);
         var wn = noise_next_sample(wash_noise);

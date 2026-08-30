@@ -172,7 +172,7 @@ fn underwater_process_block(self, output) {
     while (i < num) {
         var rumble = f64_mul(filter_biquad_process_sample(rumble_filter, noise_next_sample(rumble_noise)), rumble_amp);
         var surface = f64_mul(filter_biquad_process_sample(surface_filter, noise_next_sample(surface_noise)),
-                              surface_amp);
+          surface_amp);
         var modulator = f64_add(lfo_base, f64_mul(lfo_depth, modulation_lfo_next_value(mod_lfo)));
         vec_set(output, i, f64_mul(f64_mul(f64_add(rumble, surface), inten), modulator));
         i = i + 1;
@@ -204,7 +204,7 @@ fn underwater_process_block(self, output) {
                 var freq = rng_next_f32_range(rng, f64_from(200), f64_from(800));
                 var omega = f64_div(f64_mul(F64_TAU, freq), sr);
                 var amp = f64_mul(inten, rng_next_f32_range(rng, f64_div(f64_from(5), f64_from(100)),
-                                                            f64_div(f64_from(15), f64_from(100))));
+                    f64_div(f64_from(15), f64_from(100))));
 
                 # span = decay.min(num - idx).
                 var span = decay;

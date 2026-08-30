@@ -99,8 +99,8 @@ fn impact_build_naad(self) {
     # Modal bank from the material's mode config + props.
     var mode_cfg = material_mode_config(material);
     var mode_specs = generate_modes(props, MaterialModeConfig_pattern(mode_cfg),
-                                    MaterialModeConfig_mode_count(mode_cfg),
-                                    MaterialModeConfig_damping_factor(mode_cfg));
+      MaterialModeConfig_mode_count(mode_cfg),
+      MaterialModeConfig_damping_factor(mode_cfg));
     var modal_bank = modal_bank_new(mode_specs, sr);
     if (garjan_is_err(modal_bank) == 1) { return modal_bank; }
     Impact_set_modal_bank(self, modal_bank);
@@ -109,7 +109,7 @@ fn impact_build_naad(self) {
     var resonance = MaterialProperties_resonance(props);
     var bandwidth = MaterialProperties_bandwidth(props);
     var q = f64_clamp(f64_div(resonance, f64_max(bandwidth, F64_ONE)),
-                      f64_div(f64_from(1), f64_from(10)), f64_from(20));
+      f64_div(f64_from(1), f64_from(10)), f64_from(20));
     var rf = filter_biquad_new(NAAD_FILTER_BANDPASS, sr, resonance, q);
     if (garjan_is_err(rf) == 1) { return garjan_map_naad_error(rf); }
     Impact_set_resonance_filter(self, rf);
@@ -206,7 +206,7 @@ fn impact_generate(self, impact_type, velocity, output) {
             var env = f64_sub(F64_ONE, f64_div(f64_from(abs_pos), f64_from(transient_len)));
             var noise = noise_next_sample(transient_noise);
             var contrib = f64_mul(f64_mul(f64_mul(filter_biquad_process_sample(resonance_filter, noise), env),
-                                          transient_amp), velocity);
+                transient_amp), velocity);
             vec_set(ebuf, i, f64_add(vec_get(ebuf, i), contrib));
         }
         i = i + 1;
@@ -225,7 +225,7 @@ fn impact_generate(self, impact_type, velocity, output) {
                 continue;
             }
             var debris_amp = f64_mul(velocity, rng_next_f32_range(rng, f64_div(f64_from(1), f64_from(10)),
-                                                                 f64_div(f64_from(4), f64_from(10))));
+                f64_div(f64_from(4), f64_from(10))));
             var debris_dur = f64_to(rng_next_f32_range(rng, f64_from(3), f64_from(15)));
             var span = debris_dur;
             if (num_samples - offset < span) { span = num_samples - offset; }
@@ -326,8 +326,8 @@ fn impact_from_json_str(json) {
     Impact_set_material(self, ImpactParams_material(p));
 
     var props = material_properties_new(ImpactParams_prop_resonance(p), ImpactParams_prop_bandwidth(p),
-                                        ImpactParams_prop_decay(p), ImpactParams_prop_brightness(p),
-                                        ImpactParams_prop_transient(p));
+      ImpactParams_prop_decay(p), ImpactParams_prop_brightness(p),
+      ImpactParams_prop_transient(p));
     Impact_set_props(self, props);
     Impact_set_sample_rate(self, ImpactParams_sample_rate(p));
     Impact_set_sample_position(self, ImpactParams_sample_position(p));

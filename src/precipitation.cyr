@@ -107,7 +107,7 @@ fn precipitation_build_naad(self) {
             var count = MaterialModeConfig_mode_count(mode_cfg);
             if (count > 4) { count = 4; }
             var specs = generate_modes(props, MaterialModeConfig_pattern(mode_cfg), count,
-                                       MaterialModeConfig_damping_factor(mode_cfg));
+              MaterialModeConfig_damping_factor(mode_cfg));
             var mb = modal_bank_new(specs, sr);
             if (garjan_is_err(mb) == 1) { return garjan_map_naad_error(mb); }
             bank = mb;
@@ -241,9 +241,9 @@ fn precipitation_process_block(self, output) {
             var idx = block_start + offset;
             if (idx < num_samples) {
                 var amp = f64_mul(f64_mul(amplitude, intensity),
-                                  rng_next_f32_range(rng, f64_div(f64_from(3), f64_from(10)), F64_ONE));
+                  rng_next_f32_range(rng, f64_div(f64_from(3), f64_from(10)), F64_ONE));
                 var this_decay = f64_to(f64_mul(rng_next_f32_range(rng, F64_HALF, f64_div(f64_from(15), f64_from(10))),
-                                                f64_from(decay_samples)));
+                    f64_from(decay_samples)));
                 var span = this_decay;
                 if (num_samples - idx < span) { span = num_samples - idx; }
                 var j = 0;

@@ -333,7 +333,7 @@ fn thunder_process_block(self, output) {
                 var rn = noise_next_sample(rumble_noise);
                 var filtered = filter_biquad_process_sample(rumble_filter, rn);
                 var contrib_rumble = f64_mul(f64_mul(f64_mul(amp, env_rumble), filtered),
-                                             f64_div(f64_from(6), f64_from(10)));
+                  f64_div(f64_from(6), f64_from(10)));
                 vec_set(output, i, f64_add(vec_get(output, i), contrib_rumble));
             }
             i = i + 1;

@@ -151,7 +151,7 @@ fn bubble_process_block(self, output) {
                 freq = f64_max(freq, f64_from(20));
                 var omega = f64_div(f64_mul(F64_TAU, freq), sr);
                 var amp = f64_mul(inten, rng_next_f32_range(rng, f64_div(f64_from(1), f64_from(10)),
-                                                            f64_div(f64_from(4), f64_from(10))));
+                    f64_div(f64_from(4), f64_from(10))));
 
                 # span = decay_samples.min(num - idx).
                 var span = decay_samples;
@@ -167,7 +167,7 @@ fn bubble_process_block(self, output) {
                     if (j < pop_len) {
                         var pop_env = f64_sub(F64_ONE, f64_div(f64_from(j), f64_from(pop_len)));
                         pop = f64_mul(f64_mul(f64_mul(noise_next_sample(noise_gen), pop_env), amp),
-                                      f64_div(f64_from(3), f64_from(10)));
+                          f64_div(f64_from(3), f64_from(10)));
                     }
                     vec_set(output, idx + j, f64_add(vec_get(output, idx + j), f64_add(tone, pop)));
                     j = j + 1;

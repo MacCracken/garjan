@@ -70,7 +70,7 @@ fn rolling_build_naad(self) {
         var count = MaterialModeConfig_mode_count(mode_cfg);
         if (count > 6) { count = 6; }
         var specs = generate_modes(props, MaterialModeConfig_pattern(mode_cfg), count,
-                                   MaterialModeConfig_damping_factor(mode_cfg));
+          MaterialModeConfig_damping_factor(mode_cfg));
         var bank = modal_bank_new(specs, sr);
         if (garjan_is_err(bank) == 1) { return garjan_map_naad_error(bank); }
         Rolling_set_modal_bank(self, bank);

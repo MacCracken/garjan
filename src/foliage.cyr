@@ -74,8 +74,8 @@ fn foliage_build_naad(self) {
         var props = material_properties(MATERIAL_WOOD);
         var mode_cfg = material_mode_config(MATERIAL_WOOD);
         var specs = generate_modes(props, MaterialModeConfig_pattern(mode_cfg),
-                                   MaterialModeConfig_mode_count(mode_cfg),
-                                   MaterialModeConfig_damping_factor(mode_cfg));
+          MaterialModeConfig_mode_count(mode_cfg),
+          MaterialModeConfig_damping_factor(mode_cfg));
         var mb = modal_bank_new(specs, sr);
         if (garjan_is_err(mb) == 1) { return garjan_map_naad_error(mb); }
         bank = mb;
@@ -218,7 +218,7 @@ fn foliage_process_rustle(self, output) {
                     var idx = block_start + offset;
                     if (idx < num_samples) {
                         var amp = rng_next_f32_range(rng, f64_div(f64_from(5), f64_from(100)),
-                                                     f64_div(f64_from(15), f64_from(100)));
+                          f64_div(f64_from(15), f64_from(100)));
                         var span = event_dur;
                         if (num_samples - idx < span) { span = num_samples - idx; }
                         var j = 0;

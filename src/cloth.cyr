@@ -67,8 +67,8 @@ fn cloth_build_naad(self) {
         var props = material_properties(MATERIAL_FABRIC);
         var mode_cfg = material_mode_config(MATERIAL_FABRIC);
         var specs = generate_modes(props, MaterialModeConfig_pattern(mode_cfg),
-                                   MaterialModeConfig_mode_count(mode_cfg),
-                                   MaterialModeConfig_damping_factor(mode_cfg));
+          MaterialModeConfig_mode_count(mode_cfg),
+          MaterialModeConfig_damping_factor(mode_cfg));
         bank = modal_bank_new(specs, sr);
         if (garjan_is_err(bank) == 1) { return bank; }
     }
@@ -177,8 +177,8 @@ fn cloth_process_block(self, output) {
                 # Each flap: noise burst with fast attack, medium decay.
                 var flap_amp = f64_mul(amplitude, f64_mul(wind, rng_next_f32_range(rng, F64_HALF, F64_ONE)));
                 var flap_dur = f64_to(f64_mul(sr, rng_next_f32_range(rng,
-                                                                     f64_div(f64_from(5), f64_from(1000)),
-                                                                     f64_div(f64_from(2), f64_from(100)))));
+                      f64_div(f64_from(5), f64_from(1000)),
+                      f64_div(f64_from(2), f64_from(100)))));
                 var span = flap_dur;
                 if (num - idx < span) { span = num - idx; }
                 var j = 0;
@@ -198,7 +198,7 @@ fn cloth_process_block(self, output) {
                     var out = exc;
                     if (modal_bank != 0) {
                         out = f64_add(modal_bank_process_sample(modal_bank, exc),
-                                      f64_mul(exc, f64_div(f64_from(3), f64_from(10))));
+                          f64_mul(exc, f64_div(f64_from(3), f64_from(10))));
                     }
                     vec_set(output, idx + j, f64_add(vec_get(output, idx + j), out));
                     j = j + 1;

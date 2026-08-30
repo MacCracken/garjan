@@ -389,25 +389,25 @@ fn material_mode_config(m) {
 #must_use
 fn material_properties(m) {
     if (m == MATERIAL_METAL)   { return material_properties_new(f64_from(2500), f64_from(200),  garjan_frac(15, 10),
-                                                                garjan_frac(9, 10),   garjan_frac(7, 10)); }
+          garjan_frac(9, 10),   garjan_frac(7, 10)); }
     if (m == MATERIAL_WOOD)    { return material_properties_new(f64_from(800),  f64_from(400),  garjan_frac(3, 10),
-                                                                garjan_frac(5, 10),   garjan_frac(6, 10)); }
+          garjan_frac(5, 10),   garjan_frac(6, 10)); }
     if (m == MATERIAL_STONE)   { return material_properties_new(f64_from(3000), f64_from(800),  garjan_frac(5, 100),
-                                                                garjan_frac(8, 10),   garjan_frac(9, 10)); }
+          garjan_frac(8, 10),   garjan_frac(9, 10)); }
     if (m == MATERIAL_EARTH)   { return material_properties_new(f64_from(200),  f64_from(300),  garjan_frac(2, 100),
-                                                                garjan_frac(1, 10),   garjan_frac(4, 10)); }
+          garjan_frac(1, 10),   garjan_frac(4, 10)); }
     if (m == MATERIAL_GLASS)   { return material_properties_new(f64_from(4000), f64_from(150),  garjan_frac(8, 10),
-                                                                garjan_frac(95, 100), F64_ONE); }
+          garjan_frac(95, 100), F64_ONE); }
     if (m == MATERIAL_FABRIC)  { return material_properties_new(f64_from(300),  f64_from(500),  garjan_frac(1, 100),
-                                                                garjan_frac(1, 10),   garjan_frac(2, 10)); }
+          garjan_frac(1, 10),   garjan_frac(2, 10)); }
     if (m == MATERIAL_LEAF)    { return material_properties_new(f64_from(1500), f64_from(1000), garjan_frac(2, 100),
-                                                                garjan_frac(6, 10),   garjan_frac(5, 10)); }
+          garjan_frac(6, 10),   garjan_frac(5, 10)); }
     if (m == MATERIAL_WATER)   { return material_properties_new(f64_from(600),  f64_from(400),  garjan_frac(1, 10),
-                                                                garjan_frac(4, 10),   garjan_frac(3, 10)); }
+          garjan_frac(4, 10),   garjan_frac(3, 10)); }
     if (m == MATERIAL_PLASTIC) { return material_properties_new(f64_from(1800), f64_from(600),  garjan_frac(15, 100),
-                                                                garjan_frac(5, 10),   garjan_frac(6, 10)); }
+          garjan_frac(5, 10),   garjan_frac(6, 10)); }
     return material_properties_new(f64_from(1200), f64_from(300), garjan_frac(4, 10), garjan_frac(7, 10),
-                                   garjan_frac(7, 10));   # Ceramic
+      garjan_frac(7, 10));   # Ceramic
 }
 
 # --- modal.cyr ---
@@ -1424,7 +1424,7 @@ fn fire_process_block(self, output) {
             var idx = block_start + offset;
             if (idx < num) {
                 var crackle_amp = f64_mul(inten, rng_next_f32_range(rng, f64_div(f64_from(1), f64_from(10)),
-                                                                    f64_div(f64_from(6), f64_from(10))));
+                    f64_div(f64_from(6), f64_from(10))));
                 var decay_len = f64_to(rng_next_f32_range(rng, f64_from(5), f64_from(30)));
                 var span = decay_len;
                 if (num - idx < span) { span = num - idx; }
@@ -1851,7 +1851,7 @@ fn thunder_process_block(self, output) {
                 var rn = noise_next_sample(rumble_noise);
                 var filtered = filter_biquad_process_sample(rumble_filter, rn);
                 var contrib_rumble = f64_mul(f64_mul(f64_mul(amp, env_rumble), filtered),
-                                             f64_div(f64_from(6), f64_from(10)));
+                  f64_div(f64_from(6), f64_from(10)));
                 vec_set(output, i, f64_add(vec_get(output, i), contrib_rumble));
             }
             i = i + 1;
@@ -2241,7 +2241,7 @@ fn water_process_stream(self, output) {
         var filtered = filter_biquad_process_sample(shape_filter, noise);
         # modulator = 0.7 + 0.3 * lfo
         var modulator = f64_add(f64_div(f64_from(7), f64_from(10)),
-                            f64_mul(f64_div(f64_from(3), f64_from(10)), modulation_lfo_next_value(mod_lfo)));
+          f64_mul(f64_div(f64_from(3), f64_from(10)), modulation_lfo_next_value(mod_lfo)));
         vec_set(output, i, f64_mul(f64_mul(filtered, amp), modulator));
         i = i + 1;
     }
@@ -2512,7 +2512,7 @@ fn precipitation_build_naad(self) {
             var count = MaterialModeConfig_mode_count(mode_cfg);
             if (count > 4) { count = 4; }
             var specs = generate_modes(props, MaterialModeConfig_pattern(mode_cfg), count,
-                                       MaterialModeConfig_damping_factor(mode_cfg));
+              MaterialModeConfig_damping_factor(mode_cfg));
             var mb = modal_bank_new(specs, sr);
             if (garjan_is_err(mb) == 1) { return garjan_map_naad_error(mb); }
             bank = mb;
@@ -2646,9 +2646,9 @@ fn precipitation_process_block(self, output) {
             var idx = block_start + offset;
             if (idx < num_samples) {
                 var amp = f64_mul(f64_mul(amplitude, intensity),
-                                  rng_next_f32_range(rng, f64_div(f64_from(3), f64_from(10)), F64_ONE));
+                  rng_next_f32_range(rng, f64_div(f64_from(3), f64_from(10)), F64_ONE));
                 var this_decay = f64_to(f64_mul(rng_next_f32_range(rng, F64_HALF, f64_div(f64_from(15), f64_from(10))),
-                                                f64_from(decay_samples)));
+                    f64_from(decay_samples)));
                 var span = this_decay;
                 if (num_samples - idx < span) { span = num_samples - idx; }
                 var j = 0;
@@ -2909,7 +2909,7 @@ fn bubble_process_block(self, output) {
                 freq = f64_max(freq, f64_from(20));
                 var omega = f64_div(f64_mul(F64_TAU, freq), sr);
                 var amp = f64_mul(inten, rng_next_f32_range(rng, f64_div(f64_from(1), f64_from(10)),
-                                                            f64_div(f64_from(4), f64_from(10))));
+                    f64_div(f64_from(4), f64_from(10))));
 
                 # span = decay_samples.min(num - idx).
                 var span = decay_samples;
@@ -2925,7 +2925,7 @@ fn bubble_process_block(self, output) {
                     if (j < pop_len) {
                         var pop_env = f64_sub(F64_ONE, f64_div(f64_from(j), f64_from(pop_len)));
                         pop = f64_mul(f64_mul(f64_mul(noise_next_sample(noise_gen), pop_env), amp),
-                                      f64_div(f64_from(3), f64_from(10)));
+                          f64_div(f64_from(3), f64_from(10)));
                     }
                     vec_set(output, idx + j, f64_add(vec_get(output, idx + j), f64_add(tone, pop)));
                     j = j + 1;
@@ -3118,8 +3118,8 @@ fn impact_build_naad(self) {
     # Modal bank from the material's mode config + props.
     var mode_cfg = material_mode_config(material);
     var mode_specs = generate_modes(props, MaterialModeConfig_pattern(mode_cfg),
-                                    MaterialModeConfig_mode_count(mode_cfg),
-                                    MaterialModeConfig_damping_factor(mode_cfg));
+      MaterialModeConfig_mode_count(mode_cfg),
+      MaterialModeConfig_damping_factor(mode_cfg));
     var modal_bank = modal_bank_new(mode_specs, sr);
     if (garjan_is_err(modal_bank) == 1) { return modal_bank; }
     Impact_set_modal_bank(self, modal_bank);
@@ -3128,7 +3128,7 @@ fn impact_build_naad(self) {
     var resonance = MaterialProperties_resonance(props);
     var bandwidth = MaterialProperties_bandwidth(props);
     var q = f64_clamp(f64_div(resonance, f64_max(bandwidth, F64_ONE)),
-                      f64_div(f64_from(1), f64_from(10)), f64_from(20));
+      f64_div(f64_from(1), f64_from(10)), f64_from(20));
     var rf = filter_biquad_new(NAAD_FILTER_BANDPASS, sr, resonance, q);
     if (garjan_is_err(rf) == 1) { return garjan_map_naad_error(rf); }
     Impact_set_resonance_filter(self, rf);
@@ -3225,7 +3225,7 @@ fn impact_generate(self, impact_type, velocity, output) {
             var env = f64_sub(F64_ONE, f64_div(f64_from(abs_pos), f64_from(transient_len)));
             var noise = noise_next_sample(transient_noise);
             var contrib = f64_mul(f64_mul(f64_mul(filter_biquad_process_sample(resonance_filter, noise), env),
-                                          transient_amp), velocity);
+                transient_amp), velocity);
             vec_set(ebuf, i, f64_add(vec_get(ebuf, i), contrib));
         }
         i = i + 1;
@@ -3244,7 +3244,7 @@ fn impact_generate(self, impact_type, velocity, output) {
                 continue;
             }
             var debris_amp = f64_mul(velocity, rng_next_f32_range(rng, f64_div(f64_from(1), f64_from(10)),
-                                                                 f64_div(f64_from(4), f64_from(10))));
+                f64_div(f64_from(4), f64_from(10))));
             var debris_dur = f64_to(rng_next_f32_range(rng, f64_from(3), f64_from(15)));
             var span = debris_dur;
             if (num_samples - offset < span) { span = num_samples - offset; }
@@ -3345,8 +3345,8 @@ fn impact_from_json_str(json) {
     Impact_set_material(self, ImpactParams_material(p));
 
     var props = material_properties_new(ImpactParams_prop_resonance(p), ImpactParams_prop_bandwidth(p),
-                                        ImpactParams_prop_decay(p), ImpactParams_prop_brightness(p),
-                                        ImpactParams_prop_transient(p));
+      ImpactParams_prop_decay(p), ImpactParams_prop_brightness(p),
+      ImpactParams_prop_transient(p));
     Impact_set_props(self, props);
     Impact_set_sample_rate(self, ImpactParams_sample_rate(p));
     Impact_set_sample_position(self, ImpactParams_sample_position(p));
@@ -3465,8 +3465,8 @@ fn footstep_build_naad(self) {
         var props = material_properties(mat);
         var mode_cfg = material_mode_config(mat);
         var specs = generate_modes(props, MaterialModeConfig_pattern(mode_cfg),
-                                   MaterialModeConfig_mode_count(mode_cfg),
-                                   MaterialModeConfig_damping_factor(mode_cfg));
+          MaterialModeConfig_mode_count(mode_cfg),
+          MaterialModeConfig_damping_factor(mode_cfg));
         var bank = modal_bank_new(specs, sr);
         if (garjan_is_err(bank) == 1) { return garjan_map_naad_error(bank); }
         Footstep_set_modal_bank(self, bank);
@@ -3480,7 +3480,7 @@ fn footstep_build_naad(self) {
     var ft = NAAD_FILTER_LOWPASS;
     if (TerrainNoiseConfig_highpass(noise_cfg) == 1) { ft = NAAD_FILTER_HIGHPASS; }
     var sf = filter_biquad_new(ft, sr, TerrainNoiseConfig_filter_freq(noise_cfg),
-                               TerrainNoiseConfig_filter_q(noise_cfg));
+      TerrainNoiseConfig_filter_q(noise_cfg));
     if (garjan_is_err(sf) == 1) { return garjan_map_naad_error(sf); }
     Footstep_set_shape_filter(self, sf);
     return GARJAN_OK;
@@ -3784,7 +3784,7 @@ fn friction_build_naad(self) {
     var count = MaterialModeConfig_mode_count(mode_cfg);
     if (count > 6) { count = 6; }
     var specs = generate_modes(props, MaterialModeConfig_pattern(mode_cfg), count,
-                               MaterialModeConfig_damping_factor(mode_cfg));
+      MaterialModeConfig_damping_factor(mode_cfg));
     var bank = modal_bank_new(specs, sr);
     if (garjan_is_err(bank) == 1) { return garjan_map_naad_error(bank); }
     Friction_set_modal_bank(self, bank);
@@ -4377,7 +4377,7 @@ fn rolling_build_naad(self) {
         var count = MaterialModeConfig_mode_count(mode_cfg);
         if (count > 6) { count = 6; }
         var specs = generate_modes(props, MaterialModeConfig_pattern(mode_cfg), count,
-                                   MaterialModeConfig_damping_factor(mode_cfg));
+          MaterialModeConfig_damping_factor(mode_cfg));
         var bank = modal_bank_new(specs, sr);
         if (garjan_is_err(bank) == 1) { return garjan_map_naad_error(bank); }
         Rolling_set_modal_bank(self, bank);
@@ -4663,8 +4663,8 @@ fn foliage_build_naad(self) {
         var props = material_properties(MATERIAL_WOOD);
         var mode_cfg = material_mode_config(MATERIAL_WOOD);
         var specs = generate_modes(props, MaterialModeConfig_pattern(mode_cfg),
-                                   MaterialModeConfig_mode_count(mode_cfg),
-                                   MaterialModeConfig_damping_factor(mode_cfg));
+          MaterialModeConfig_mode_count(mode_cfg),
+          MaterialModeConfig_damping_factor(mode_cfg));
         var mb = modal_bank_new(specs, sr);
         if (garjan_is_err(mb) == 1) { return garjan_map_naad_error(mb); }
         bank = mb;
@@ -4807,7 +4807,7 @@ fn foliage_process_rustle(self, output) {
                     var idx = block_start + offset;
                     if (idx < num_samples) {
                         var amp = rng_next_f32_range(rng, f64_div(f64_from(5), f64_from(100)),
-                                                     f64_div(f64_from(15), f64_from(100)));
+                          f64_div(f64_from(15), f64_from(100)));
                         var span = event_dur;
                         if (num_samples - idx < span) { span = num_samples - idx; }
                         var j = 0;
@@ -5514,8 +5514,8 @@ fn cloth_build_naad(self) {
         var props = material_properties(MATERIAL_FABRIC);
         var mode_cfg = material_mode_config(MATERIAL_FABRIC);
         var specs = generate_modes(props, MaterialModeConfig_pattern(mode_cfg),
-                                   MaterialModeConfig_mode_count(mode_cfg),
-                                   MaterialModeConfig_damping_factor(mode_cfg));
+          MaterialModeConfig_mode_count(mode_cfg),
+          MaterialModeConfig_damping_factor(mode_cfg));
         bank = modal_bank_new(specs, sr);
         if (garjan_is_err(bank) == 1) { return bank; }
     }
@@ -5624,8 +5624,8 @@ fn cloth_process_block(self, output) {
                 # Each flap: noise burst with fast attack, medium decay.
                 var flap_amp = f64_mul(amplitude, f64_mul(wind, rng_next_f32_range(rng, F64_HALF, F64_ONE)));
                 var flap_dur = f64_to(f64_mul(sr, rng_next_f32_range(rng,
-                                                                     f64_div(f64_from(5), f64_from(1000)),
-                                                                     f64_div(f64_from(2), f64_from(100)))));
+                      f64_div(f64_from(5), f64_from(1000)),
+                      f64_div(f64_from(2), f64_from(100)))));
                 var span = flap_dur;
                 if (num - idx < span) { span = num - idx; }
                 var j = 0;
@@ -5645,7 +5645,7 @@ fn cloth_process_block(self, output) {
                     var out = exc;
                     if (modal_bank != 0) {
                         out = f64_add(modal_bank_process_sample(modal_bank, exc),
-                                      f64_mul(exc, f64_div(f64_from(3), f64_from(10))));
+                          f64_mul(exc, f64_div(f64_from(3), f64_from(10))));
                     }
                     vec_set(output, idx + j, f64_add(vec_get(output, idx + j), out));
                     j = j + 1;
@@ -5925,7 +5925,7 @@ fn insect_synthesize_voice(self, t, freq, voice) {
     } elif (ty == INSECT_CRICKET_CHIRP) {
         # chirp_phase = (chirp_rate*t + phase_offset*0.1) % 1.0
         var cc_arg = f64_add(f64_mul(Insect_chirp_rate(self), t),
-                             f64_mul(phase_offset, f64_div(F64_ONE, f64_from(10))));
+          f64_mul(phase_offset, f64_div(F64_ONE, f64_from(10))));
         var cc_phase = f64_fmod(cc_arg, F64_ONE);
         if (f64_lt(cc_phase, f64_div(f64_from(4), f64_from(10))) == 1) {
             var cc_pulse = f64_sin(f64_add(f64_mul(F64_TAU, f64_mul(mod_rate, t)), phase_offset));
@@ -6545,7 +6545,7 @@ fn underwater_process_block(self, output) {
     while (i < num) {
         var rumble = f64_mul(filter_biquad_process_sample(rumble_filter, noise_next_sample(rumble_noise)), rumble_amp);
         var surface = f64_mul(filter_biquad_process_sample(surface_filter, noise_next_sample(surface_noise)),
-                              surface_amp);
+          surface_amp);
         var modulator = f64_add(lfo_base, f64_mul(lfo_depth, modulation_lfo_next_value(mod_lfo)));
         vec_set(output, i, f64_mul(f64_mul(f64_add(rumble, surface), inten), modulator));
         i = i + 1;
@@ -6577,7 +6577,7 @@ fn underwater_process_block(self, output) {
                 var freq = rng_next_f32_range(rng, f64_from(200), f64_from(800));
                 var omega = f64_div(f64_mul(F64_TAU, freq), sr);
                 var amp = f64_mul(inten, rng_next_f32_range(rng, f64_div(f64_from(5), f64_from(100)),
-                                                            f64_div(f64_from(15), f64_from(100))));
+                    f64_div(f64_from(15), f64_from(100))));
 
                 # span = decay.min(num - idx).
                 var span = decay;
@@ -6867,7 +6867,7 @@ fn surf_process_block(self, output) {
             wave_phase = f64_sub(wave_phase, F64_ONE);
             # New jitter per wave cycle: 1.0 + rng.next_f32_range(-0.1, 0.1)
             var jitter = f64_add(F64_ONE, rng_next_f32_range(rng, f64_neg(f64_div(F64_ONE, f64_from(10))),
-                                                             f64_div(F64_ONE, f64_from(10))));
+                f64_div(F64_ONE, f64_from(10))));
             period = f64_mul(f64_from(Surf_wave_period_samples(self)), jitter);
         }
 
@@ -6879,7 +6879,7 @@ fn surf_process_block(self, output) {
             rumble_env = f64_div(p, f64_div(f64_from(3), f64_from(10)));
         } elif (f64_lt(p, F64_HALF) == 1) {
             rumble_env = f64_sub(F64_ONE, f64_div(f64_sub(p, f64_div(f64_from(3), f64_from(10))),
-                                                  f64_div(f64_from(2), f64_from(10))));
+                f64_div(f64_from(2), f64_from(10))));
         }
 
         # Break crash: peaks at 0.35, sin^2 window over (0.25, 0.55), else 0.
@@ -6902,7 +6902,7 @@ fn surf_process_block(self, output) {
         # Noise layers (naad backend). rumble scaled by *0.5 extra.
         var rn = noise_next_sample(rumble_noise);
         var rumble = f64_mul(f64_mul(f64_mul(filter_biquad_process_sample(rumble_filter, rn), rumble_env), break_amp),
-                             F64_HALF);
+          F64_HALF);
         var cn = noise_next_sample(crash_noise);
         var crash = f64_mul(f64_mul(filter_biquad_process_sample(crash_filter, cn), crash_env), break_amp);
         var wn = noise_next_sample(wash_noise);
@@ -7359,7 +7359,7 @@ fn bridge_weather_from_threat_level(level, out_dist, out_wind, out_rain) {
 #must_use
 fn bridge_thunder_distance_from_flash(time_since_flash_s, temperature_celsius) {
     var c = f64_add(f64_div(f64_from(3313), f64_from(10)),
-                    f64_mul(f64_div(f64_from(606), f64_from(1000)), temperature_celsius));
+      f64_mul(f64_div(f64_from(606), f64_from(1000)), temperature_celsius));
     return f64_mul(time_since_flash_s, c);
 }
 
@@ -7397,7 +7397,7 @@ fn bridge_fire_intensity_blended(flame_temp_k, convection_watts) {
     var thermal = bridge_fire_intensity_from_temperature(flame_temp_k);
     var convective = bridge_fire_intensity_from_convection(convection_watts);
     var blend = f64_add(f64_mul(f64_div(f64_from(6), f64_from(10)), thermal),
-                        f64_mul(f64_div(f64_from(4), f64_from(10)), convective));
+      f64_mul(f64_div(f64_from(4), f64_from(10)), convective));
     return f64_clamp(blend, 0, F64_ONE);
 }
 

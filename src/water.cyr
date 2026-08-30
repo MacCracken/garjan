@@ -143,7 +143,7 @@ fn water_process_stream(self, output) {
         var filtered = filter_biquad_process_sample(shape_filter, noise);
         # modulator = 0.7 + 0.3 * lfo
         var modulator = f64_add(f64_div(f64_from(7), f64_from(10)),
-                            f64_mul(f64_div(f64_from(3), f64_from(10)), modulation_lfo_next_value(mod_lfo)));
+          f64_mul(f64_div(f64_from(3), f64_from(10)), modulation_lfo_next_value(mod_lfo)));
         vec_set(output, i, f64_mul(f64_mul(filtered, amp), modulator));
         i = i + 1;
     }

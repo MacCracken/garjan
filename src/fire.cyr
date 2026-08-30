@@ -114,7 +114,7 @@ fn fire_process_block(self, output) {
             var idx = block_start + offset;
             if (idx < num) {
                 var crackle_amp = f64_mul(inten, rng_next_f32_range(rng, f64_div(f64_from(1), f64_from(10)),
-                                                                    f64_div(f64_from(6), f64_from(10))));
+                    f64_div(f64_from(6), f64_from(10))));
                 var decay_len = f64_to(rng_next_f32_range(rng, f64_from(5), f64_from(30)));
                 var span = decay_len;
                 if (num - idx < span) { span = num - idx; }
