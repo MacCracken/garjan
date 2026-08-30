@@ -1,0 +1,54 @@
+# logging.cyr -- structured logging from garjan.
+#
+# Ports rust-old/examples/logging.rs, with two substantive differences.
+#
+# 1. No feature gate. In Rust, logging sat behind the `logging` feature and
+#    emitted `tracing` events; garjan depended on `tracing` but NOT on
+#    `tracing-subscriber`, so the application had to install a subscriber
+#    before anything appeared. The Cyrius port always compiles src/logging.cyr
+#    (sakshi) in, and there is no subscriber to install.
+#
+# 2. You gate at RUNTIME, with sakshi_set_level.
+#
+# The level is a VERBOSITY CEILING, not a filter floor: sakshi emits an event
+# when `event_level <= configured_level`, and the levels run
+# SK_FATAL=0, SK_ERROR=1, SK_WARN=2, SK_INFO=3, SK_DEBUG=4, SK_TRACE=5.
+# So a LOWER number is QUIETER, and SK_TRACE (5) is the loudest setting.
+# The default is SK_INFO (3), which already shows garjan's validator warnings.
+#
+# Build + run:
+#   cyrius build docs/examples/logging.cyr build/logging
+#   ./build/logging
+
+include "dist/garjan.cyr"
+
+fn main() {
+    alloc_init();
+    var sr = f64_from(44100);
+
+    # garjan's validators log a WARN (level 2) before returning their error
+    # code, so a deliberately bad call is the simplest way to see the layer.
+    println("=== SK_ERROR (1): quieter than the WARN we are about to provoke ===");
+    sakshi_set_level(SK_ERROR);
+    var quiet = fire_new(F64_HALF, 0);
+    print("fire_new(0.5, 0) -> ", 20); println_int(quiet);
+    println("(no log line: WARN is level 2, the ceiling is 1)");
+
+    println("");
+    println("=== SK_WARN (2): the warning now clears the ceiling ===");
+    sakshi_set_level(SK_WARN);
+    var loud = fire_new(F64_HALF, 0);
+    print("fire_new(0.5, 0) -> ", 20); println_int(loud);
+    println("(same error code either way -- the level gates OUTPUT, not behaviour)");
+
+    println("");
+    println("=== the happy path is silent at any level ===");
+    sakshi_set_level(SK_TRACE);
+    var f = fire_new(F64_HALF, sr);
+    if (garjan_is_err(f) == 1) { println("unexpected failure"); return 1; }
+    var buf = fire_synthesize(f, f64_div(F64_ONE, f64_from(10)));
+    if (garjan_is_err(buf) == 1) { println("unexpected synth failure"); return 1; }
+    print("synthesized samples: ", 21); println_int(vec_len(buf));
+    println("(nothing logged above, even at SK_TRACE: garjan only logs faults)");
+    return 0;
+}

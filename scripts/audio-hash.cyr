@@ -50,7 +50,7 @@ fn report(name, h) { println(name); println_int(h); return 0; }
 
 fn main() {
     alloc_init();
-    sakshi_set_level(5);
+    sakshi_set_level(SK_ERROR);   # lower = quieter (SK_TRACE=5 is the loudest)
     var sr = f64_from(44100);
     var N = 4096;
 

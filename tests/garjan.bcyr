@@ -1,65 +1,223 @@
 # garjan.bcyr -- synthesis-throughput benchmarks.
 # Run: cyrius bench tests/garjan.bcyr
-# Each op = process_block of one second of audio (44_100 samples) at 44.1 kHz,
-# so the reported per-op time is "time to synthesize 1 s of sound" (compare to
-# the Rust perf table in README.md). The whole library + its deps come from the
-# dist bundle (auto-prepended stdlib/naad/hisab/goonj/sakshi).
+#
+# Mirrors rust-old/benches/benchmarks.rs (26 benchmarks). Each 1s op is a
+# process_block over 44,100 samples at 44.1 kHz, so the reported per-op time is
+# "time to synthesize 1 s of sound" -- compare against the Rust perf table.
+#
+# Event-driven synths are given their driving parameter (wind speed, velocity,
+# pressure, tension, intensity) BEFORE timing. Without it they take the silent
+# fast-path and the benchmark measures an early return rather than synthesis.
+#
+# The whole library + deps come from the dist bundle.
 
 include "dist/garjan.cyr"
 
-# A reusable 1-second f64 buffer.
 #must_use
-fn _one_sec_buf() {
+fn _buf(n) {
     var v = vec_new();
     var i = 0;
-    while (i < 44100) { vec_push(v, 0); i = i + 1; }
+    while (i < n) { vec_push(v, 0); i = i + 1; }
     return v;
 }
 
 fn main() {
     alloc_init();
+    sakshi_set_level(SK_ERROR);   # lower = quieter; drop WARN noise while timing
     var sr = f64_from(44100);
-    var buf = _one_sec_buf();
-
-    var fire = fire_new(F64_HALF, sr);
-    var bf = bench_new("fire_1s");
-    bench_batch_start(bf);
+    var buf = _buf(44100);
+    var buf512 = _buf(512);
     var i = 0;
-    while (i < 20) { fire_process_block(fire, buf); i = i + 1; }
-    bench_batch_stop(bf, 20);
-    bench_report(bf);
+
+    # ---- weather ----
+    var fire = fire_new(F64_HALF, sr);
+    var b1 = bench_new("fire_1s");
+    bench_batch_start(b1);
+    i = 0; while (i < 20) { fire_process_block(fire, buf); i = i + 1; }
+    bench_batch_stop(b1, 20); bench_report(b1);
 
     var thunder = thunder_new(f64_from(2000), sr);
-    var bt = bench_new("thunder_1s");
-    bench_batch_start(bt);
-    i = 0;
-    while (i < 20) { thunder_process_block(thunder, buf); i = i + 1; }
-    bench_batch_stop(bt, 20);
-    bench_report(bt);
+    var b2 = bench_new("thunder_1s");
+    bench_batch_start(b2);
+    i = 0; while (i < 20) { thunder_process_block(thunder, buf); i = i + 1; }
+    bench_batch_stop(b2, 20); bench_report(b2);
 
     var rain = rain_new(RAIN_INTENSITY_MODERATE, sr);
-    var br = bench_new("rain_moderate_1s");
-    bench_batch_start(br);
-    i = 0;
-    while (i < 20) { rain_process_block(rain, buf); i = i + 1; }
-    bench_batch_stop(br, 20);
-    bench_report(br);
+    var b3 = bench_new("rain_moderate_1s");
+    bench_batch_start(b3);
+    i = 0; while (i < 20) { rain_process_block(rain, buf); i = i + 1; }
+    bench_batch_stop(b3, 20); bench_report(b3);
 
     var wind = wind_new(f64_from(15), F64_HALF, sr);
-    var bw = bench_new("wind_1s");
-    bench_batch_start(bw);
-    i = 0;
-    while (i < 20) { wind_process_block(wind, buf); i = i + 1; }
-    bench_batch_stop(bw, 20);
-    bench_report(bw);
+    var b4 = bench_new("wind_1s");
+    bench_batch_start(b4);
+    i = 0; while (i < 20) { wind_process_block(wind, buf); i = i + 1; }
+    bench_batch_stop(b4, 20); bench_report(b4);
 
-    var cloth = cloth_new(CLOTH_FLAG, sr);
-    var bc = bench_new("cloth_flag_1s");
-    bench_batch_start(bc);
+    var b5 = bench_new("process_block_wind_512");
+    bench_batch_start(b5);
+    i = 0; while (i < 200) { wind_process_block(wind, buf512); i = i + 1; }
+    bench_batch_stop(b5, 200); bench_report(b5);
+
+    # ---- water ----
+    var wstream = water_new(WATER_STREAM, F64_HALF, sr);
+    var b6 = bench_new("water_stream_1s");
+    bench_batch_start(b6);
+    i = 0; while (i < 20) { water_process_block(wstream, buf); i = i + 1; }
+    bench_batch_stop(b6, 20); bench_report(b6);
+
+    var wwaves = water_new(WATER_WAVES, F64_HALF, sr);
+    var b7 = bench_new("water_waves_1s");
+    bench_batch_start(b7);
+    i = 0; while (i < 20) { water_process_block(wwaves, buf); i = i + 1; }
+    bench_batch_stop(b7, 20); bench_report(b7);
+
+    # ---- ambience ----
+    var tex = texture_new(TEXTURE_TYPE_FOREST, F64_HALF, sr);
+    var b8 = bench_new("forest_texture_1s");
+    bench_batch_start(b8);
+    i = 0; while (i < 20) { texture_process_block(tex, buf); i = i + 1; }
+    bench_batch_stop(b8, 20); bench_report(b8);
+
+    # ---- modal core ----
+    var props = material_properties(MATERIAL_WOOD);
+    var mcfg = material_mode_config(MATERIAL_WOOD);
+    var specs = generate_modes(props, MaterialModeConfig_pattern(mcfg), 8,
+      MaterialModeConfig_damping_factor(mcfg));
+    var bank = modal_bank_new(specs, sr);
+    var b9 = bench_new("modal_bank_8_modes_512");
+    bench_batch_start(b9);
     i = 0;
-    while (i < 20) { cloth_process_block(cloth, buf); i = i + 1; }
-    bench_batch_stop(bc, 20);
-    bench_report(bc);
+    while (i < 200) {
+        var k = 0;
+        while (k < 512) { vec_set(buf512, k, modal_bank_process_sample(bank, F64_ONE)); k = k + 1; }
+        i = i + 1;
+    }
+    bench_batch_stop(b9, 200); bench_report(b9);
+
+    # ---- impacts ----
+    var imw = impact_new(MATERIAL_WOOD, sr);
+    var b10 = bench_new("impact_wood_strike");
+    bench_batch_start(b10);
+    i = 0; while (i < 20) { impact_process_block(imw, IMPACT_STRIKE, buf); i = i + 1; }
+    bench_batch_stop(b10, 20); bench_report(b10);
+
+    var imm = impact_new(MATERIAL_METAL, sr);
+    var b11 = bench_new("impact_metal_strike");
+    bench_batch_start(b11);
+    i = 0; while (i < 20) { impact_process_block(imm, IMPACT_STRIKE, buf); i = i + 1; }
+    bench_batch_stop(b11, 20); bench_report(b11);
+
+    var img = impact_new(MATERIAL_GLASS, sr);
+    var b12 = bench_new("impact_glass_shatter");
+    bench_batch_start(b12);
+    i = 0; while (i < 20) { impact_process_block(img, IMPACT_SHATTER, buf); i = i + 1; }
+    bench_batch_stop(b12, 20); bench_report(b12);
+
+    # ---- contact ----
+    var fs = footstep_new(TERRAIN_GRAVEL, MOVEMENT_WALK, sr);
+    var b13 = bench_new("footstep_gravel_walk_1s");
+    bench_batch_start(b13);
+    i = 0; while (i < 20) { footstep_process_block(fs, buf); i = i + 1; }
+    bench_batch_stop(b13, 20); bench_report(b13);
+
+    var fr = friction_new(FRICTION_SCRAPE, MATERIAL_METAL, sr);
+    friction_set_velocity(fr, f64_from(2));
+    friction_set_pressure(fr, F64_HALF);
+    var b14 = bench_new("friction_scrape_metal_1s");
+    bench_batch_start(b14);
+    i = 0; while (i < 20) { friction_process_block(fr, buf); i = i + 1; }
+    bench_batch_stop(b14, 20); bench_report(b14);
+
+    var ck = creak_new(CREAK_DOOR, sr);
+    creak_set_tension(ck, F64_HALF);
+    creak_set_speed(ck, F64_HALF);
+    var b15 = bench_new("creak_door_1s");
+    bench_batch_start(b15);
+    i = 0; while (i < 20) { creak_process_block(ck, buf); i = i + 1; }
+    bench_batch_stop(b15, 20); bench_report(b15);
+
+    var rl = rolling_new(ROLLING_WHEEL, MATERIAL_WOOD, sr);
+    rolling_set_velocity(rl, f64_from(3));
+    var b16 = bench_new("rolling_wheel_wood_1s");
+    bench_batch_start(b16);
+    i = 0; while (i < 20) { rolling_process_block(rl, buf); i = i + 1; }
+    bench_batch_stop(b16, 20); bench_report(b16);
+
+    var fo = foliage_new(FOLIAGE_LEAF_RUSTLE, sr);
+    foliage_set_wind_speed(fo, f64_from(8));
+    foliage_set_contact_intensity(fo, F64_HALF);
+    var b17 = bench_new("foliage_rustle_1s");
+    bench_batch_start(b17);
+    i = 0; while (i < 20) { foliage_process_block(fo, buf); i = i + 1; }
+    bench_batch_stop(b17, 20); bench_report(b17);
+
+    # ---- creatures ----
+    var ins = insect_new_swarm(INSECT_CICADA_DRONE, 8, sr);
+    insect_set_intensity(ins, F64_ONE);
+    var b18 = bench_new("insect_swarm_1s");
+    bench_batch_start(b18);
+    i = 0; while (i < 20) { insect_process_block(ins, buf); i = i + 1; }
+    bench_batch_stop(b18, 20); bench_report(b18);
+
+    var wf = wingflap_new(BIRD_SIZE_MEDIUM, sr);
+    wingflap_set_intensity(wf, F64_ONE);
+    var b19 = bench_new("wingflap_medium_1s");
+    bench_batch_start(b19);
+    i = 0; while (i < 20) { wingflap_process_block(wf, buf); i = i + 1; }
+    bench_batch_stop(b19, 20); bench_report(b19);
+
+    var bb = bubble_new(BUBBLE_BOILING, sr);
+    bubble_set_intensity(bb, F64_ONE);
+    var b20 = bench_new("bubble_boiling_1s");
+    bench_batch_start(b20);
+    i = 0; while (i < 20) { bubble_process_block(bb, buf); i = i + 1; }
+    bench_batch_stop(b20, 20); bench_report(b20);
+
+    # ---- aero ----
+    var wh = whoosh_new(WHOOSH_SWING, sr);
+    whoosh_set_speed(wh, f64_from(20));
+    var b21 = bench_new("whoosh_swing");
+    bench_batch_start(b21);
+    i = 0;
+    while (i < 20) { whoosh_trigger(wh); whoosh_process_block(wh, buf); i = i + 1; }
+    bench_batch_stop(b21, 20); bench_report(b21);
+
+    var wi = whistle_new(WHISTLE_PIPE, sr);
+    whistle_set_wind_speed(wi, f64_from(15));
+    var b22 = bench_new("whistle_pipe_1s");
+    bench_batch_start(b22);
+    i = 0; while (i < 20) { whistle_process_block(wi, buf); i = i + 1; }
+    bench_batch_stop(b22, 20); bench_report(b22);
+
+    var cl = cloth_new(CLOTH_FLAG, sr);
+    cloth_set_wind_speed(cl, f64_from(12));
+    var b23 = bench_new("cloth_flag_1s");
+    bench_batch_start(b23);
+    i = 0; while (i < 20) { cloth_process_block(cl, buf); i = i + 1; }
+    bench_batch_stop(b23, 20); bench_report(b23);
+
+    # ---- precipitation / underwater / surf ----
+    var pr = precipitation_new(PRECIP_HAIL, STONE_MEDIUM, MATERIAL_METAL, sr);
+    precipitation_set_intensity(pr, F64_HALF);
+    var b24 = bench_new("precipitation_hail_1s");
+    bench_batch_start(b24);
+    i = 0; while (i < 20) { precipitation_process_block(pr, buf); i = i + 1; }
+    bench_batch_stop(b24, 20); bench_report(b24);
+
+    var uw = underwater_new(f64_from(25), sr);
+    underwater_set_intensity(uw, F64_HALF);
+    var b25 = bench_new("underwater_medium_1s");
+    bench_batch_start(b25);
+    i = 0; while (i < 20) { underwater_process_block(uw, buf); i = i + 1; }
+    bench_batch_stop(b25, 20); bench_report(b25);
+
+    var buf2s = _buf(88200);
+    var sf = surf_new(F64_HALF, sr);
+    var b26 = bench_new("surf_moderate_2s");
+    bench_batch_start(b26);
+    i = 0; while (i < 20) { surf_process_block(sf, buf2s); i = i + 1; }
+    bench_batch_stop(b26, 20); bench_report(b26);
 
     return 0;
 }

@@ -31,17 +31,15 @@ Verified 2026-08-30 by diffing `rust-old/` against `src/` (see
 ## 2.x maturity criteria
 
 - [x] Rust → Cyrius surface parity verified (function-level diff against `rust-old/`)
-- [ ] Test coverage adequate for the surface area — **not met**: the
-      cross-module suite `tests/garjan.tcyr` is a **two-assertion** placeholder
-      against Rust's 134 integration tests
+- [x] Test coverage adequate for the surface area — 2.1.0 replaced the
+      two-assertion placeholder with a 288-assertion cross-module suite (764
+      total), and benchmarks now cover all 26 ops rather than 5
 - [x] Benchmarks captured — in [`BENCHMARKS.md`](../../BENCHMARKS.md) at the
       repo root (the old criterion said `docs/benchmarks.md`; the root file is
       the real one and the criterion was corrected, not the file moved)
 - [ ] At least one downstream consumer green — **none yet**
 - [x] CHANGELOG complete from 2.0.0 onward
-- [ ] Security audit written up under `docs/audit/` — the sweep was **done**
-      (2.0.2/2.0.3, three JSON-reachable defects plus the allocation guard) but
-      never written up as an audit document
+- [x] Security audit written up — [`docs/audit/2026-08-30-audit.md`](../audit/2026-08-30-audit.md)
 
 ---
 
@@ -83,9 +81,9 @@ a tag of its own.
 
 ---
 
-## 2.1.x — parity completion
+## 2.1.x — parity completion ✅ shipped 2.1.0
 
-Everything Rust shipped that the port has not. Additive; no behavior change to
+Everything Rust shipped that the port had not. Additive; no behavior change to
 existing APIs.
 
 - ✅ **Ported `tests/integration.rs` → `tests/garjan.tcyr`.** The placeholder
@@ -104,18 +102,24 @@ existing APIs.
   The variant sweeps matter most: Rust enums became module-prefixed ints, so a
   dropped variant produces no compile error — it silently falls into the final
   `else`.
-- **Port `examples/` (5 programs) → `docs/examples/`**, which currently holds
-  only `.gitkeep` while `CLAUDE.md` advertises it: `forest_ambience`,
-  `weather_scene`, `combat_impacts`, `error_handling`, `logging`.
-- **Expand `tests/garjan.bcyr`** from 5 benchmarks toward Rust's 26, so
-  optimization work has coverage beyond the five currently-measured synths.
-  2.0.5 could only measure a fifth of the surface it changed.
-- **Write up `docs/audit/2026-08-30-audit.md`** from the 2.0.2/2.0.3 findings —
-  satisfies the maturity criterion and records the refuted findings too.
-- **Pre-size `*_synthesize` output vectors.** Each builds its buffer by pushing
-  from capacity 16 — about a dozen doubling reallocations per second of audio,
-  every intermediate permanently retained by the non-freeing arena.
-  Behavior-neutral.
+- ✅ **Ported `examples/` (5 programs) → `docs/examples/`** with a README —
+  `weather_scene`, `forest_ambience`, `combat_impacts`, `error_handling`,
+  `logging`. All build and run.
+- ✅ **Expanded `tests/garjan.bcyr` from 5 to all 26 benchmarks.** This
+  overturned the optimization priority: **`insect` (swarm of 8) is the hot spot
+  at ~20x real-time**, five times slower than the next synth, while `wind` —
+  which the old five-benchmark set named as the worst target — is mid-table.
+  It also revealed the old `cloth` number was measuring a silent fast-path.
+- ✅ **Wrote [`docs/audit/2026-08-30-audit.md`](../audit/2026-08-30-audit.md)**,
+  including the refuted findings.
+- ⛔ **Pre-size `*_synthesize` output vectors — BLOCKED UPSTREAM.** Measured:
+  1,048,472 bytes retained per second of audio against an ideal 352,824 (~3x
+  overhead, ~695 KB wasted per call, never reclaimed). Cannot be fixed from
+  garjan: the Cyrius stdlib has no `vec_with_capacity` / `vec_reserve`, and
+  `vec_new()` hardcodes capacity 16. Hand-building the vector header would
+  couple garjan to `lib/vec.cyr`'s private `[data][len][cap]` layout — silent
+  corruption on any upstream change — and `CLAUDE.md` forbids modifying `lib/`.
+  **Needs a stdlib addition.** Moved to the gated section.
 
 ---
 
@@ -144,10 +148,14 @@ Behavior changes where the port must knowingly differ from the oracle. Per
 
 ## 2.3.x — performance
 
-- **naad-level per-sample work.** 2.0.5 took the garjan-side hoisting wins
-  (−5.6% on the worst synth). Profiling now points into the naad bundle's
-  per-sample noise generation and biquad/SVF filtering. Needs upstream work or
-  an algorithmic change, not more hoisting.
+- **`insect` swarm is the real hot spot** — 50.3 ms/s of audio, ~20x
+  real-time, five times slower than anything else. Its per-sample loop runs
+  once per swarm voice, so cost scales linearly with `swarm_count` (max 8).
+  This only became visible when the benchmark set went from 5 ops to 26 in
+  2.1.0. Start here, not with `wind`.
+- **naad-level per-sample work.** 2.0.5 took the garjan-side hoisting wins.
+  Profiling points into the naad bundle's per-sample noise generation and
+  biquad/SVF filtering. Needs upstream or algorithmic work, not more hoisting.
 - Remaining garjan-side per-event conversions in `bubble`, `foliage`,
   `precipitation`, `insect`, `whoosh`, `impact` — small, individually.
 - Gate every change on `scripts/audio-hash.cyr` staying bit-identical.
@@ -156,6 +164,11 @@ Behavior changes where the port must knowingly differ from the oracle. Per
 
 ## Gated — not scheduled
 
+- **`vec_with_capacity` in the Cyrius stdlib.** Without it, every
+  `*_synthesize` wastes ~695 KB per second of audio to doubling reallocation,
+  permanently. garjan cannot fix this without coupling to `lib/vec.cyr`'s
+  private layout. Blocked on an upstream addition; see the 2.1.x entry for the
+  measurement.
 - **Port `integration/soorat.rs`** (315 lines: `PrecipitationField`,
   `FireEmitter`, `WindField` — visualization data for downstream rendering).
   **Blocked**: soorat has not landed in Cyrius. Feature-gated `soorat-compat`

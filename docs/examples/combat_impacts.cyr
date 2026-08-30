@@ -1,0 +1,75 @@
+# combat_impacts.cyr -- sword swing, metal-on-metal, glass shatter, and a
+# voice pool managing the concurrent one-shots.
+#
+# Ports rust-old/examples/combat_impacts.rs.
+# Build + run:
+#   cyrius build docs/examples/combat_impacts.cyr build/combat_impacts
+#   ./build/combat_impacts
+
+include "dist/garjan.cyr"
+
+#must_use
+fn energy_of(v) {
+    var e = 0;
+    var i = 0;
+    while (i < vec_len(v)) {
+        var s = vec_get(v, i);
+        e = f64_add(e, f64_mul(s, s));
+        i = i + 1;
+    }
+    return e;
+}
+
+fn main() {
+    alloc_init();
+    var sr = f64_from(44100);
+
+    # Up to 8 concurrent impact sounds; steal the lowest-priority voice.
+    var pool = voice_pool_new(8, STEAL_LOWEST_PRIORITY);
+    if (garjan_is_err(pool) == 1) { println("voice pool init failed"); return 1; }
+
+    # Weapon whoosh (sword swing).
+    var whoosh = whoosh_new(WHOOSH_SWING, sr);
+    if (garjan_is_err(whoosh) == 1) { println("whoosh init failed"); return 1; }
+    whoosh_set_speed(whoosh, f64_div(f64_from(9), f64_from(10)));
+    var whoosh_audio = whoosh_synthesize(whoosh, f64_div(f64_from(4), f64_from(10)));
+    if (garjan_is_err(whoosh_audio) == 1) { println("whoosh synth failed"); return 1; }
+
+    # Metal-on-metal (sword hitting armour).
+    var metal = impact_new_interaction(MATERIAL_METAL, MATERIAL_METAL, sr);
+    if (garjan_is_err(metal) == 1) { println("metal impact init failed"); return 1; }
+    var metal_audio = impact_synthesize(metal, IMPACT_CRASH);
+    if (garjan_is_err(metal_audio) == 1) { println("metal synth failed"); return 1; }
+
+    # Glass shatter (potion bottle).
+    var glass = impact_new(MATERIAL_GLASS, sr);
+    if (garjan_is_err(glass) == 1) { println("glass impact init failed"); return 1; }
+    var glass_audio = impact_synthesize(glass, IMPACT_SHATTER);
+    if (garjan_is_err(glass_audio) == 1) { println("glass synth failed"); return 1; }
+
+    # Velocity-sensitive hit: light tap vs heavy blow on the same synth.
+    var wood = impact_new(MATERIAL_WOOD, sr);
+    if (garjan_is_err(wood) == 1) { println("wood impact init failed"); return 1; }
+    var light = impact_synthesize_velocity(wood, IMPACT_STRIKE, f64_div(f64_from(2), f64_from(10)));
+    var heavy = impact_synthesize_velocity(wood, IMPACT_STRIKE, F64_ONE);
+    if (garjan_is_err(light) == 1) { println("light hit failed"); return 1; }
+    if (garjan_is_err(heavy) == 1) { println("heavy hit failed"); return 1; }
+
+    # Allocate voices: (priority, tag).
+    var v1 = voice_pool_allocate(pool, 5, 1);   # whoosh
+    var v2 = voice_pool_allocate(pool, 8, 2);   # metal crash, high priority
+    var v3 = voice_pool_allocate(pool, 3, 3);   # glass shatter
+    voice_pool_tick(pool);
+
+    println("Combat impacts synthesized:");
+    print("  whoosh        samples = ", 26); println_int(vec_len(whoosh_audio));
+    print("  metal crash   samples = ", 26); println_int(vec_len(metal_audio));
+    print("  glass shatter samples = ", 26); println_int(vec_len(glass_audio));
+    print("  light hit     samples = ", 26); println_int(vec_len(light));
+    print("                energy  = ", 26); fmt_float(energy_of(light), 4); println("");
+    print("  heavy hit     samples = ", 26); println_int(vec_len(heavy));
+    print("                energy  = ", 26); fmt_float(energy_of(heavy), 4); println("");
+    print("  active voices         = ", 26); println_int(voice_pool_active_count(pool));
+    print("  max voices            = ", 26); println_int(voice_pool_max_voices(pool));
+    return 0;
+}

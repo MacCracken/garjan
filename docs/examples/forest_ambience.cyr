@@ -1,0 +1,69 @@
+# forest_ambience.cyr -- layering ambient texture, foliage, insects and a
+# one-shot bird wing flap into a forest scene.
+#
+# Ports rust-old/examples/forest_ambience.rs.
+# Build + run:
+#   cyrius build docs/examples/forest_ambience.cyr build/forest_ambience
+#   ./build/forest_ambience
+
+include "dist/garjan.cyr"
+
+fn main() {
+    alloc_init();
+    var sr = f64_from(44100);
+    var dur = f64_from(5);
+
+    # Continuous layers.
+    var texture = texture_new(TEXTURE_TYPE_FOREST, f64_div(f64_from(4), f64_from(10)), sr);
+    if (garjan_is_err(texture) == 1) { println("texture init failed"); return 1; }
+    var foliage = foliage_new(FOLIAGE_LEAF_RUSTLE, sr);
+    if (garjan_is_err(foliage) == 1) { println("foliage init failed"); return 1; }
+    foliage_set_wind_speed(foliage, f64_div(f64_from(3), f64_from(10)));
+    foliage_set_contact_intensity(foliage, f64_div(f64_from(2), f64_from(10)));
+    var insects = insect_new_swarm(INSECT_CRICKET_CHIRP, 3, sr);
+    if (garjan_is_err(insects) == 1) { println("insect init failed"); return 1; }
+    insect_set_intensity(insects, f64_div(f64_from(4), f64_from(10)));
+
+    # One-shot: a bird wing flap layered in at t = 2 s.
+    var wings = wingflap_new(BIRD_SIZE_MEDIUM, sr);
+    if (garjan_is_err(wings) == 1) { println("wingflap init failed"); return 1; }
+    wingflap_set_intensity(wings, f64_div(f64_from(6), f64_from(10)));
+
+    var texture_audio = texture_synthesize(texture, dur);
+    var foliage_audio = foliage_synthesize(foliage, dur);
+    var insect_audio = insect_synthesize(insects, dur);
+    var wing_audio = wingflap_synthesize(wings, F64_ONE);
+    if (garjan_is_err(texture_audio) == 1) { println("texture synth failed"); return 1; }
+    if (garjan_is_err(foliage_audio) == 1) { println("foliage synth failed"); return 1; }
+    if (garjan_is_err(insect_audio) == 1) { println("insect synth failed"); return 1; }
+    if (garjan_is_err(wing_audio) == 1) { println("wingflap synth failed"); return 1; }
+
+    var num = f64_to(f64_mul(sr, dur));
+    var wing_offset = f64_to(f64_mul(sr, F64_TWO));
+    var w_tex = f64_div(f64_from(3), f64_from(10));
+    var w_fol = f64_div(f64_from(25), f64_from(100));
+    var w_ins = f64_div(f64_from(2), f64_from(10));
+    var w_win = f64_div(f64_from(25), f64_from(100));
+
+    var peak = 0;
+    var i = 0;
+    while (i < num) {
+        var s = f64_add(f64_add(f64_mul(vec_get(texture_audio, i), w_tex),
+            f64_mul(vec_get(foliage_audio, i), w_fol)),
+          f64_mul(vec_get(insect_audio, i), w_ins));
+        if (i >= wing_offset) {
+            var wi = i - wing_offset;
+            if (wi < vec_len(wing_audio)) {
+                s = f64_add(s, f64_mul(vec_get(wing_audio, wi), w_win));
+            }
+        }
+        var a = f64_abs(s);
+        if (f64_gt(a, peak) == 1) { peak = a; }
+        i = i + 1;
+    }
+
+    print("Forest ambience: ", 17);
+    println_int(num);
+    print("  peak = ", 10); fmt_float(peak, 4); println("");
+    return 0;
+}

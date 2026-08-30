@@ -1,0 +1,60 @@
+# weather_scene.cyr -- layering thunder, rain and wind into one scene.
+#
+# Ports rust-old/examples/weather_scene.rs.
+# Build + run:
+#   cyrius build docs/examples/weather_scene.cyr build/weather_scene
+#   ./build/weather_scene
+#
+# Mixing here is a plain weighted sum for illustration. In production, mixing,
+# buses and scheduling belong to dhvani -- garjan only makes the sources
+# (see docs/adr/0003-scope-boundaries.md).
+
+include "dist/garjan.cyr"
+
+fn main() {
+    alloc_init();
+    var sr = f64_from(44100);
+    var dur = f64_from(5);
+
+    var thunder = thunder_new(f64_from(800), sr);
+    if (garjan_is_err(thunder) == 1) { println("thunder init failed"); return 1; }
+    var rain = rain_new(RAIN_INTENSITY_HEAVY, sr);
+    if (garjan_is_err(rain) == 1) { println("rain init failed"); return 1; }
+    var wind = wind_new(f64_from(18), f64_div(f64_from(7), f64_from(10)), sr);
+    if (garjan_is_err(wind) == 1) { println("wind init failed"); return 1; }
+
+    var thunder_audio = thunder_synthesize(thunder, dur);
+    var rain_audio = rain_synthesize(rain, dur);
+    var wind_audio = wind_synthesize(wind, dur);
+    if (garjan_is_err(thunder_audio) == 1) { println("thunder synth failed"); return 1; }
+    if (garjan_is_err(rain_audio) == 1) { println("rain synth failed"); return 1; }
+    if (garjan_is_err(wind_audio) == 1) { println("wind synth failed"); return 1; }
+
+    var num = vec_len(thunder_audio);
+    if (vec_len(rain_audio) < num) { num = vec_len(rain_audio); }
+    if (vec_len(wind_audio) < num) { num = vec_len(wind_audio); }
+
+    var w_thunder = F64_HALF;
+    var w_rain = f64_div(f64_from(3), f64_from(10));
+    var w_wind = f64_div(f64_from(2), f64_from(10));
+
+    var peak = 0;
+    var sumsq = 0;
+    var i = 0;
+    while (i < num) {
+        var s = f64_add(f64_add(f64_mul(vec_get(thunder_audio, i), w_thunder),
+            f64_mul(vec_get(rain_audio, i), w_rain)),
+          f64_mul(vec_get(wind_audio, i), w_wind));
+        var a = f64_abs(s);
+        if (f64_gt(a, peak) == 1) { peak = a; }
+        sumsq = f64_add(sumsq, f64_mul(s, s));
+        i = i + 1;
+    }
+    var rms = f64_sqrt(f64_div(sumsq, f64_from(num)));
+
+    print("Weather scene: ", 15);
+    println_int(num);
+    print("  peak = ", 10); fmt_float(peak, 4); println("");
+    print("  rms  = ", 10); fmt_float(rms, 4); println("");
+    return 0;
+}

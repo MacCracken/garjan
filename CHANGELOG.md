@@ -5,6 +5,95 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.0]
+
+Parity completion — everything Rust shipped that the port had not. Additive
+only: no behavior change to any existing API, and `scripts/audio-hash.cyr`
+confirms every synthesizer's output is bit-identical to 2.0.5.
+
+### Added — cross-module integration suite
+
+`tests/garjan.tcyr` was a **two-assertion placeholder** (`assert(1, "true is
+true")`) standing in for Rust's 134 integration tests. It is now a real suite:
+**2 → 288 assertions**, taking the project from 478 to **764**.
+
+Scoped deliberately rather than transcribing all 134. Many of Rust's tests are
+per-type serde round-trips and per-synth constructor checks that the 33
+per-module suites already cover; re-porting those would duplicate, not add.
+This file owns what no per-module suite *can* assert:
+
+- the **uniform validation contract** across all 21 constructors — a synth that
+  forgets `garjan_validate_sample_rate` is invisible to its own module suite if
+  that suite only tests the happy path;
+- **exhaustive enum variant sweeps** — all 10 materials, all 32 terrain ×
+  movement pairs, every intensity / type / size. This is the highest-value part:
+  Rust enums became module-prefixed ints, so a dropped variant produces **no
+  compile error**, it silently falls into the final `else`;
+- **cross-synth relative invariants** — heavier rain louder than light, closer
+  thunder louder than distant;
+- uniform silence gates, empty-buffer and multi-block streaming, determinism
+  replay, builder-vs-direct equivalence, bridge→synth wiring, LOD monotonicity,
+  and voice-pool stealing.
+
+### Added — benchmarks, 5 → 26
+
+`tests/garjan.bcyr` now mirrors `rust-old/benches/benchmarks.rs` in full. The
+expanded set **overturns the previous optimization priority**:
+
+- **`insect` (swarm of 8) is the hot spot at 50.3 ms/s of audio (~20x
+  real-time)** — five times slower than the next-worst synth. The old
+  five-benchmark set named `wind` as the worst target; `wind` is mid-table.
+- **The old `cloth` figure was measuring near-silence.** Cloth takes a silent
+  fast-path until `cloth_set_wind_speed` is called, which the previous harness
+  never did — 1.02 ms was an early return, not synthesis. With wind blowing it
+  is 2.02 ms. The harness now sets every event-driven synth's driving parameter
+  before timing.
+
+See [`BENCHMARKS.md`](BENCHMARKS.md) for the full table.
+
+### Added — examples and audit write-up
+
+- **Five runnable examples** in `docs/examples/`, which previously held only
+  `.gitkeep` while `CLAUDE.md` advertised it: `weather_scene`,
+  `forest_ambience`, `combat_impacts`, `error_handling`, `logging`, plus a
+  README. All build and run.
+- **[`docs/audit/2026-08-30-audit.md`](docs/audit/2026-08-30-audit.md)** — the
+  2.0.2/2.0.3 sweep written up, satisfying a maturity criterion. It records the
+  **refuted** findings too (no undersized stack buffers exist; zero symbol
+  collisions with the dependency bundles; no API drift across the 2.0.1 bump),
+  since "we checked and it was fine" is worth keeping.
+
+### Fixed — log level semantics were inverted
+
+`sakshi_set_level` is a verbosity **ceiling**: sakshi emits when
+`event_level <= configured_level`, and the levels run `SK_FATAL=0` … `SK_TRACE=5`,
+so **lower is quieter**. Four call sites used `sakshi_set_level(5)` intending
+"quiet" and were in fact selecting the *loudest* setting. Corrected to
+`SK_ERROR` in `tests/garjan.tcyr`, `tests/garjan.bcyr`,
+`scripts/audio-hash.cyr` and the `error_handling` example; the `logging`
+example, which had the semantics backwards in its narrative, was rewritten to
+demonstrate them correctly.
+
+Also fixed: `scripts/audio-hash.cyr` passed a `MATERIAL_*` id where
+`footstep_new` takes a `TERRAIN_*`. Only the footstep hash changes; the other
+20 synths are unaffected.
+
+### Deferred — output-vector pre-sizing is blocked upstream
+
+Every `*_synthesize` builds its output by pushing from capacity 16. Measured:
+**1,048,472 bytes retained to produce one second of audio, against an ideal of
+352,824** — ~3x overhead, ~695 KB wasted per call, permanently (the arena never
+frees). That growth *is* the entire allocation cost of a `synthesize`.
+
+It is **not fixed here**, because it cannot be fixed cleanly from garjan. The
+Cyrius stdlib has no `vec_with_capacity` or `vec_reserve` — `lib/vec.cyr`
+exposes only `vec_new()`, which hardcodes capacity 16. The alternative is to
+hand-construct the vector header from garjan, which means coupling to
+`lib/vec.cyr`'s private `[data][len][cap]` layout; an upstream layout change
+would then corrupt silently, and `CLAUDE.md` forbids modifying `lib/`. The
+right fix is a stdlib addition. Recorded with the measurement so the case for
+it is concrete.
+
 ## [2.0.5]
 
 Per-sample hot-path optimization. **Every change is bit-exactness-preserving**,

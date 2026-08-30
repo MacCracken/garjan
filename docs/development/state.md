@@ -5,6 +5,12 @@
 
 ## Version
 
+**2.1.0** (2026-08-30) — parity completion: the cross-module integration suite
+(2 → 288 assertions, 764 total), all 26 benchmarks (was 5), 5 runnable examples,
+and the audit write-up. The expanded benchmarks overturned the perf priority —
+`insect` is the hot spot at ~20x real-time, not `wind`. Output-vector pre-sizing
+is blocked on a missing stdlib `vec_with_capacity`.
+
 **2.0.5** (2026-08-30) — per-sample hot-path optimization: loop-invariant work
 hoisted across 9 modules, and the redundant second DC-blocking pass folded into
 generation for `wind` and `texture`. Bit-exact, verified with
@@ -68,7 +74,10 @@ crate is preserved at `rust-old/` for parity reference (frozen, do not edit).
   open paren (4 also accepted), replacing the port's original paren-aligned
   style. Adopted as a whitespace-only 48-line reindent across 17 `src/` files;
   build and all 460 assertions unchanged. CI does not gate on fmt.
-- Benchmarks: `cyrius bench tests/garjan.bcyr` — see [`../../BENCHMARKS.md`](../../BENCHMARKS.md).
+- Benchmarks: **26 ops**, `cyrius bench tests/garjan.bcyr` — see
+  [`../../BENCHMARKS.md`](../../BENCHMARKS.md). `insect` (swarm of 8) is the
+  slowest at ~20x real-time.
+- Examples: 5 runnable programs in [`../examples/`](../examples/).
 
 ## Dependencies
 
@@ -102,11 +111,9 @@ outstanding item pinned to a version. Immediate:
   [001](../architecture/001-deserialize-does-not-restore-dsp-state.md);
   `CLAUDE.md`'s `## Goal` filled from ADR-0003; architecture index populated;
   ADRs 1-4 relocated to `docs/adr/` under the four-digit convention.
-- **2.1.x (parity completion, in progress)** — ✅ integration suite ported
-  (2 → 288 assertions). Remaining: the 5 examples (`docs/examples/` holds only
-  `.gitkeep`), benchmark coverage (5 of 26), the `docs/audit/` write-up, and
-  pre-sizing the `*_synthesize` output vectors. **Not tagged yet** — `VERSION`
-  stays 2.0.5 until 2.1.0 ships.
+- ✅ **2.1.x shipped as 2.1.0** — integration suite, 26 benchmarks, 5 examples,
+  audit write-up. Output-vector pre-sizing is ⛔ blocked on a missing stdlib
+  `vec_with_capacity` (~695 KB wasted per second of synthesized audio).
 - **2.2.x (needs ADRs)** — serde live-state round-trip parity, duration /
   sample-rate caps, out-of-range enum ids.
 - **Gated** — `integration/soorat.rs` (315 lines) is the one genuinely unported

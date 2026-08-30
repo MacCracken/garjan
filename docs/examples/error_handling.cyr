@@ -1,0 +1,76 @@
+# error_handling.cyr -- how garjan reports failures, and how to handle them.
+#
+# Ports rust-old/examples/error_handling.rs. Rust returned Result<T, GarjanError>;
+# the Cyrius port returns either a heap pointer / GARJAN_OK, or a NEGATIVE error
+# code. `garjan_is_err(x)` tests it and `garjan_err_name(x)` names it.
+#
+# Build + run:
+#   cyrius build docs/examples/error_handling.cyr build/error_handling
+#   ./build/error_handling
+
+include "dist/garjan.cyr"
+
+# The `?`-propagation pattern: check, and return the code unchanged so the
+# caller sees the original cause.
+#must_use
+fn run_synthesis(sr) {
+    var fire = fire_new(f64_div(f64_from(7), f64_from(10)), sr);
+    if (garjan_is_err(fire) == 1) { return fire; }
+    var samples = fire_synthesize(fire, F64_ONE);
+    if (garjan_is_err(samples) == 1) { return samples; }
+    println("Fire synthesis OK");
+    return GARJAN_OK;
+}
+
+fn report(label, code) {
+    print(label, strlen(label));
+    print(" -> ", 4);
+    print(garjan_err_name(code), strlen(garjan_err_name(code)));
+    print(" (code ", 7);
+    print_num(code);
+    println(")");
+    return 0;
+}
+
+fn main() {
+    alloc_init();
+    # These failures are deliberate. sakshi emits when level <= the
+    # configured level, so LOWER is quieter -- SK_ERROR (1) drops the
+    # WARN (2) lines the validators emit.
+    sakshi_set_level(SK_ERROR);
+    var sr = f64_from(44100);
+
+    # Invalid sample rate: 0 is rejected by every constructor.
+    var t = thunder_new(f64_from(500), 0);
+    if (garjan_is_err(t) == 0) { println("BUG: sample_rate 0 was accepted"); return 1; }
+    report("thunder_new(500, 0)", t);
+
+    # Invalid duration: negative.
+    var wind = wind_new(f64_from(10), F64_HALF, sr);
+    if (garjan_is_err(wind) == 1) { println("wind init failed"); return 1; }
+    var bad = wind_synthesize(wind, f64_neg(F64_ONE));
+    if (garjan_is_err(bad) == 0) { println("BUG: negative duration was accepted"); return 1; }
+    report("wind_synthesize(-1.0)", bad);
+
+    # NaN sample rate is rejected too -- validate_sample_rate checks finiteness,
+    # not just sign, because NaN compares false against every bound.
+    var r = rain_new(RAIN_INTENSITY_HEAVY, 0x7FF8000000000000);
+    if (garjan_is_err(r) == 0) { println("BUG: NaN sample_rate was accepted"); return 1; }
+    report("rain_new(Heavy, NaN)", r);
+
+    # Dispatching on the specific code.
+    if (r == GARJAN_ERR_INVALID_PARAMETER) {
+        println("  -> handled as: bad parameter, fix the caller");
+    } elif (r == GARJAN_ERR_SYNTHESIS_FAILED) {
+        println("  -> handled as: backend failure, retry or degrade");
+    } elif (r == GARJAN_ERR_ALLOCATION) {
+        println("  -> handled as: out of memory, shed load");
+    }
+
+    # Propagation through a helper.
+    var ok = run_synthesis(sr);
+    if (garjan_is_err(ok) == 1) { report("run_synthesis", ok); return 1; }
+
+    println("All errors reported as expected.");
+    return 0;
+}

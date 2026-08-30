@@ -103,7 +103,10 @@ fn renders_ok(self, buf, label) {
 
 fn main() {
     alloc_init();
-    sakshi_set_level(5);          # quiet: these tests deliberately pass bad input
+    # Quiet the deliberate bad-input warnings. sakshi emits when
+    # level <= the configured level, so LOWER is quieter: SK_ERROR (1)
+    # keeps real errors and drops the WARN (2) lines these tests provoke.
+    sakshi_set_level(SK_ERROR);
     SR = f64_from(44100);
 
     # =====================================================================
@@ -560,7 +563,7 @@ fn main() {
     assert(lod_scale_modes(QUALITY_REDUCED, 16) >= lod_scale_modes(QUALITY_MINIMAL, 16),
       "reduced quality >= minimal modes");
     assert(f64_ge(lod_scale_rate(QUALITY_FULL, f64_from(100)),
-      lod_scale_rate(QUALITY_MINIMAL, f64_from(100))) == 1, "full rate >= minimal rate");
+        lod_scale_rate(QUALITY_MINIMAL, f64_from(100))) == 1, "full rate >= minimal rate");
 
     # =====================================================================
     # Voice pool under real allocation pressure.
