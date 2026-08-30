@@ -186,14 +186,19 @@ Behavior changes where the port must knowingly differ from the oracle. Per
   Across 19 synths that is a large, format-breaking change whose only benefit is
   exact mid-stream session snapshotting, for which there is no consumer yet.
 
-  Options: (a) implement it for full parity; (b) implement it only for the
-  synths where restore fidelity matters; (c) keep reconstruct-on-deserialize and
-  document it as a permanent divergence (note 001 already does). **Recommend
-  (c) until a consumer needs (a).**
-- **Upper bounds on `duration` / `sample_rate`.** `validate_duration` accepts
-  any positive finite value, so 1e8 s sizes a 4.4-trillion-sample buffer.
-  `rust-old/src/dsp.rs:39` validated only positive-and-finite too, so a cap is a
-  divergence and needs both an ADR and an agreed limit.
+  **Decided: implement full parity (option a).** Tractable after all — the
+  `*Params` structs are flat `#derive(Serialize)` types and every piece of naad
+  state is an `f64`/`i64`, including pink noise's 16 octaves, so it is verbose
+  but mechanical and needs no hand-rolled JSON. Plan: a shared set of
+  state-transfer helpers (biquad `z1`/`z2`, SVF `ic1eq`/`ic2eq`, LFO
+  `phase`/`sh_value`, noise rng + `pink_counter`/`pink_running_sum`/16 octaves/
+  `brown_prev`), proven end-to-end on one synth with a round-trip test that
+  asserts continued output matches, then rolled out to the remaining 18.
+  **Next up.**
+- ✅ **Upper bounds on `duration` / `sample_rate` — shipped 2.4.0**
+  ([ADR-0007](../adr/0007-bounded-duration-and-sample-rate.md)). 600 s,
+  1 Hz-768 kHz, and a 44.1 M **sample-count** cap which is the binding
+  constraint — neither input alone catches 600 s at 768 kHz.
 - **Out-of-range enum ids.** Rust's exhaustive `match` over closed enums is
   ported as `if/elif` chains whose final `else` silently absorbs any invalid
   integer, yielding the last variant's table rather than an error. Decide
@@ -201,13 +206,18 @@ Behavior changes where the port must knowingly differ from the oracle. Per
 
 ---
 
-## 2.3.x — performance
+## 2.3.x — performance ✅ 2.3.0 shipped
 
-- **`insect` swarm is the real hot spot** — 50.3 ms/s of audio, ~20x
-  real-time, five times slower than anything else. Its per-sample loop runs
-  once per swarm voice, so cost scales linearly with `swarm_count` (max 8).
-  This only became visible when the benchmark set went from 5 ops to 26 in
-  2.1.0. Start here, not with `wind`.
+- ✅ **`insect` swarm — done in 2.3.0.** 49.9 -> 42.6 ms (wing-buzz -25%,
+  cricket -24%, cicada -14%), bit-identical. Per-voice invariants hoisted, the
+  type branched on once outside the loop, and `TAU*mod_rate*t` computed per
+  sample instead of per voice. **What remains is mostly irreducible**: measured
+  per 352,800 voice-calls, biquad 11.9 ms + `f64_sin` 10.6 ms + noise 7.1 ms is
+  ~30 of the 42.6 ms. Going further needs an algorithmic change (a recurrence
+  oscillator rather than a `sin` per voice per sample) that would not be
+  bit-exact.
+- **Do not hoist constants for speed** — cycc already folds them (measured at
+  empty-loop cost). Hoist accessor reads (~0.54 ms per 352,800) instead.
 - **naad-level per-sample work.** 2.0.5 took the garjan-side hoisting wins.
   Profiling points into the naad bundle's per-sample noise generation and
   biquad/SVF filtering. Needs upstream or algorithmic work, not more hoisting.

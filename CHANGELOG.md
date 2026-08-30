@@ -5,6 +5,101 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.4.0]
+
+Bounds the size parameters that drive allocation. See
+[ADR-0007](docs/adr/0007-bounded-duration-and-sample-rate.md).
+
+### Fixed — unbounded duration / sample rate
+
+`rust-old/src/dsp.rs:39` validated a duration as **positive and finite** and
+nothing more, and the port copied that faithfully — so `1e8` seconds passed
+validation, then sized a **4.4-trillion-sample** buffer and killed the process
+allocating it. The 2.0.2 audit found this and deliberately left it, because
+capping is a divergence from the oracle rather than a bug fix.
+
+Three bounds now, in `src/dsp.cyr`:
+
+```cyrius
+var GARJAN_MIN_SAMPLE_RATE_HZ = 1;          # below this is not audio
+var GARJAN_MAX_SAMPLE_RATE_HZ = 768000;     # highest standard hi-res rate
+var GARJAN_MAX_DURATION_S     = 600;        # 10 minutes per synthesize call
+var GARJAN_MAX_SAMPLES        = 44100000;   # 1000 s at 44.1 kHz
+```
+
+**The sample count is the binding constraint, and it needs its own check** —
+neither input alone is sufficient. 600 s is unremarkable at 44.1 kHz (26.5 M
+samples) and ruinous at 768 kHz (461 M), so a pair of individually-legal inputs
+could still produce an illegal buffer. A new `garjan_validate_sample_count` is
+applied at all 20 `*_synthesize` sites right after the count is computed;
+`garjan_validate_sample_rate` and `garjan_validate_duration` gained range checks
+so every constructor and synthesize inherits them.
+
+`GARJAN_MAX_SAMPLES` was chosen against the allocator rather than by taste:
+44.1 M f64 samples is ~353 MB ideally and ~1.05 GB as actually built, because
+`*_synthesize` grows its vector by doubling from capacity 16 (~3x overhead,
+measured — blocked on a missing stdlib `vec_with_capacity`). That leaves
+headroom inside `ALLOC_MAX` (2 GiB).
+
+Deliberately generous — real calls are seconds, not minutes. The bounds are
+named constants and the tests reference the names, not literals, so tightening
+them later is a one-line change.
+
+**12 new assertions** (791 total), including the composite case: 600 s at
+768 kHz is rejected although both inputs are individually in range.
+
+## [2.3.0]
+
+Performance: the `insect` hot spot the 2.1.0 benchmark expansion exposed.
+**Bit-identical output** — verified across all 21 synths and, additionally, all
+3 insect types at every swarm count 1..8.
+
+### Changed — insect per-sample loop
+
+`insect_process_block` runs its inner loop once per swarm voice: 352,800 times
+per second of audio at swarm 8. Three layers of redundant work removed, all of
+it pure hoisting — no floating-point reassociation.
+
+- **Per-voice invariants hoisted out of the sample loop.** `freq` and
+  `phase_offset` depend only on the voice index, yet were recomputed every
+  sample — including an 8-branch `insect_detune` chain. Worse, the CicadaDrone
+  branch never reads `freq` at all, so that was pure waste on the slowest type.
+  Now computed once per block into two 8-slot stack buffers.
+- **The insect type is branched on once, outside the loop**, into three
+  specialized loops. This removes a per-voice-per-sample function call and lets
+  each branch hoist its own accessor reads (`insect_type`, `mod_rate`,
+  `chirp_rate`, `noise_gen`, `shape_filter`).
+- **`TAU * mod_rate * t` is voice-invariant** but was rebuilt for all 8 voices
+  every sample; likewise `chirp_rate * t` in the cricket branch. Computed once
+  per sample now.
+
+| type (swarm 8) | before | after | change |
+|---|---|---|---|
+| wing buzz | 36.4 ms | 27.4 ms | −24.7% |
+| cricket chirp | 24.3 ms | 18.4 ms | −24.3% |
+| cicada drone | 49.6 ms | 42.5 ms | −14.3% |
+
+Cicada gains least because it is the type dominated by naad rather than by
+garjan's arithmetic.
+
+### Measured, not guessed
+
+The first attempt — hoisting per-voice invariants alone — bought only 2-3%, so
+the components were profiled directly before going further. Per 352,800 calls,
+against an empty-loop baseline of 0.88 ms: **biquad 11.9 ms, `f64_sin`
+10.6 ms, noise 7.1 ms, one accessor read 0.54 ms, and constant construction
+~0 ms.**
+
+Two things fell out of that:
+
+- **cycc already constant-folds** `f64_div(f64_from(6), f64_from(10))` — it
+  costs the same as an empty loop. Hoisting constants for speed is pointless;
+  hoisting accessor reads and invariant sub-expressions is not. This is recorded
+  in `BENCHMARKS.md` so the next optimization pass does not repeat it.
+- ~30 of the remaining 42.6 ms is per-voice DSP the algorithm genuinely
+  requires. Further gains need an algorithmic change (a recurrence oscillator
+  rather than a `sin` per voice per sample), which would not be bit-exact.
+
 ## [2.2.0]
 
 First of the deliberate-divergence items: out-of-range enum ids are now

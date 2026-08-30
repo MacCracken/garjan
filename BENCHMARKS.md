@@ -32,7 +32,7 @@ Linux; 20 iterations per synth (200 for the 512-sample ops).
 | surf (Moderate, 2 s op)    | 15.67 ms         | ~64x             |
 | texture (Forest)           | 16.77 ms         | ~60x             |
 | creak (Door)               | 18.68 ms         | ~54x             |
-| **insect (swarm of 8)**    | **49.91 ms**     | **~20x**         |
+| **insect (swarm of 8)**    | **42.57 ms**     | **~23x**         |
 
 Sub-block ops:
 
@@ -56,12 +56,20 @@ noise.
 
 ## Notes
 
-- **`insect` (swarm of 8) is the hot spot at ~20x real-time**, five times
-  slower than the next-worst synth. Its per-sample loop runs once per swarm
-  voice, so cost scales linearly with `swarm_count` (capped at 8). This was
-  invisible before 2.1.0: the benchmark set covered only fire, thunder, rain,
-  wind and cloth, and named `wind` as the worst target. It is not — **`wind` is
-  mid-table.** Optimization priority should follow this table, not the old one.
+- **`insect` (swarm of 8) remains the hot spot at ~23x real-time**, though
+  2.3.0 took it from 49.9 ms to 42.6 ms (−15%; wing-buzz and cricket gained
+  ~25%). Its per-sample loop runs once per swarm voice, so cost scales linearly
+  with `swarm_count` (capped at 8): measured 7.5 / 12.7 / 23.5 / 42.7 ms at
+  swarm 1 / 2 / 4 / 8.
+  **Most of what remains is irreducible.** Measured per 352,800 voice-calls —
+  one second of audio at swarm 8 — against an empty-loop baseline of 0.88 ms:
+  biquad 11.9 ms, `f64_sin` 10.6 ms, noise 7.1 ms. That is ~30 of the 42.6 ms
+  in per-voice DSP the algorithm genuinely requires. Further gains need an
+  algorithmic change (e.g. a recurrence oscillator instead of a `sin` per voice
+  per sample), which would **not** be bit-exact.
+  This was invisible before 2.1.0: the benchmark set covered only fire, thunder,
+  rain, wind and cloth, and named `wind` as the worst target. It is not —
+  **`wind` is mid-table.**
 - **The old `cloth` figure (1.02 ms) was measuring near-silence.** Cloth takes
   the silent fast-path until `cloth_set_wind_speed` is called, which the
   previous harness never did. With wind actually blowing it is 2.02 ms. Any
@@ -75,6 +83,10 @@ noise.
 - Most remaining time is inside naad, in per-sample noise generation and
   biquad/SVF filtering, not in garjan's own arithmetic. 2.0.5 took the
   garjan-side hoisting wins; further gains need naad-level or algorithmic work.
+- **Do not hoist constants for speed.** cycc already constant-folds
+  `f64_div(f64_from(6), f64_from(10))` — measured at the same cost as an empty
+  loop. Hoist *accessor reads* (~0.54 ms per 352,800 calls) and per-voice or
+  per-sample invariant sub-expressions instead.
 - Benchmark an event-driven synth with its **enum id**, not a plausible-looking
   float. Nothing in the toolchain distinguishes them, and before 2.2.0 a wrong
   id produced believable numbers for the wrong configuration.

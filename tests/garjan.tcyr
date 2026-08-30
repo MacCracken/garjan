@@ -634,6 +634,33 @@ fn main() {
     assert_eq(okm, 10, "all 10 material ids accepted");
 
 
+    # =====================================================================
+    # Size caps (2.4.0). rust-old/src/dsp.rs validated duration and sample_rate
+    # as positive-and-finite ONLY, so 1e8 s passed validation and then sized a
+    # 4.4-trillion-sample buffer. See ADR-0007.
+    # =====================================================================
+    test_group("duration and sample-rate caps");
+    var cf = fire_new(F64_HALF, SR);
+    assert(garjan_is_err(fire_synthesize(cf, f64_from(100000000))) == 1, "1e8 s duration rejected");
+    assert(garjan_is_err(fire_synthesize(cf, f64_from(GARJAN_MAX_DURATION_S + 1))) == 1, "duration above cap rejected");
+    assert(garjan_is_err(fire_synthesize(cf, f64_from(GARJAN_MAX_DURATION_S))) == 0, "duration at the cap accepted");
+    assert(garjan_is_err(fire_new(F64_HALF, f64_from(GARJAN_MAX_SAMPLE_RATE_HZ + 1))) == 1, "sample_rate above cap rejected");
+    assert(garjan_is_err(fire_new(F64_HALF, f64_from(GARJAN_MAX_SAMPLE_RATE_HZ))) == 0, "sample_rate at the cap accepted");
+    assert(garjan_is_err(fire_new(F64_HALF, F64_HALF)) == 1, "sub-1 Hz sample_rate rejected");
+    assert(garjan_is_err(fire_new(F64_HALF, f64_from(8000))) == 0, "8 kHz still accepted");
+
+    # The product is the binding constraint: each input can be in range while
+    # the buffer they imply is not.
+    test_group("sample-count cap is the binding constraint");
+    var chi = fire_new(F64_HALF, f64_from(GARJAN_MAX_SAMPLE_RATE_HZ));
+    assert(garjan_is_err(chi) == 0, "768 kHz synth constructs");
+    assert(garjan_is_err(fire_synthesize(chi, f64_from(600))) == 1,
+      "600 s at 768 kHz rejected though both inputs are individually legal");
+    assert(garjan_is_err(fire_synthesize(chi, f64_from(50))) == 0, "50 s at 768 kHz accepted");
+    assert_eq(garjan_validate_sample_count(GARJAN_MAX_SAMPLES), GARJAN_OK, "sample count at cap ok");
+    assert(garjan_is_err(garjan_validate_sample_count(GARJAN_MAX_SAMPLES + 1)) == 1, "one over the cap rejected");
+
+
     return assert_summary();
 }
 

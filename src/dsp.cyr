@@ -46,6 +46,25 @@ fn garjan_dcblocker_process(self, x) {
 # Validators -- GARJAN_OK if positive and finite, else log + ERR code.
 # Port validate_duration / validate_sample_rate (Result<()> -> code).
 # ================================================================
+# ================================================================
+# Upper bounds on caller-supplied size parameters.
+#
+# rust-old/src/dsp.rs validated duration and sample_rate as positive-and-finite
+# ONLY, so these caps are a deliberate divergence from the oracle -- ADR-0007.
+# Without them a positive, finite duration of 1e8 s sizes a 4.4-trillion-sample
+# buffer and the process dies allocating it.
+#
+# The binding constraint is the SAMPLE COUNT, not either input alone: 600 s is
+# fine at 44.1 kHz (26.5 M samples) and ruinous at 768 kHz (461 M). Chosen so
+# the worst case stays inside ALLOC_MAX (2 GiB) even with the ~3x overhead the
+# vec doubling costs -- 44.1 M samples is ~353 MB ideal, ~1.05 GB as built.
+# Generous for real use; tighten freely.
+# ================================================================
+var GARJAN_MIN_SAMPLE_RATE_HZ = 1;          # below this is not audio
+var GARJAN_MAX_SAMPLE_RATE_HZ = 768000;     # highest standard hi-res rate
+var GARJAN_MAX_DURATION_S     = 600;        # 10 minutes per synthesize call
+var GARJAN_MAX_SAMPLES        = 44100000;   # 1000 s at 44.1 kHz
+
 #must_use
 fn garjan_validate_duration(duration) {
     if (f64_le(duration, 0) == 1) {
@@ -54,6 +73,10 @@ fn garjan_validate_duration(duration) {
     }
     if (garjan_is_finite(duration) == 0) {
         garjan_log_warn("garjan: invalid duration (must be positive and finite)");
+        return GARJAN_ERR_INVALID_PARAMETER;
+    }
+    if (f64_gt(duration, f64_from(GARJAN_MAX_DURATION_S)) == 1) {
+        garjan_log_warn("garjan: duration exceeds GARJAN_MAX_DURATION_S");
         return GARJAN_ERR_INVALID_PARAMETER;
     }
     return GARJAN_OK;
@@ -67,6 +90,30 @@ fn garjan_validate_sample_rate(sample_rate) {
     }
     if (garjan_is_finite(sample_rate) == 0) {
         garjan_log_warn("garjan: invalid sample_rate (must be positive and finite)");
+        return GARJAN_ERR_INVALID_PARAMETER;
+    }
+    if (f64_lt(sample_rate, f64_from(GARJAN_MIN_SAMPLE_RATE_HZ)) == 1) {
+        garjan_log_warn("garjan: sample_rate below GARJAN_MIN_SAMPLE_RATE_HZ");
+        return GARJAN_ERR_INVALID_PARAMETER;
+    }
+    if (f64_gt(sample_rate, f64_from(GARJAN_MAX_SAMPLE_RATE_HZ)) == 1) {
+        garjan_log_warn("garjan: sample_rate above GARJAN_MAX_SAMPLE_RATE_HZ");
+        return GARJAN_ERR_INVALID_PARAMETER;
+    }
+    return GARJAN_OK;
+}
+
+# Guard the buffer size a synthesize call is about to allocate. duration and
+# sample_rate are each individually in range, but their PRODUCT is what gets
+# allocated, so it needs its own bound.
+#must_use
+fn garjan_validate_sample_count(num) {
+    if (num < 0) {
+        garjan_log_warn("garjan: negative sample count");
+        return GARJAN_ERR_INVALID_PARAMETER;
+    }
+    if (num > GARJAN_MAX_SAMPLES) {
+        garjan_log_warn("garjan: sample count exceeds GARJAN_MAX_SAMPLES");
         return GARJAN_ERR_INVALID_PARAMETER;
     }
     return GARJAN_OK;

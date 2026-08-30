@@ -5,6 +5,14 @@
 
 ## Version
 
+**2.4.0** (2026-08-30) — duration / sample-rate / sample-count caps
+([ADR-0007](../adr/0007-bounded-duration-and-sample-rate.md)); the
+4.4-trillion-sample DoS is closed.
+
+**2.3.0** (2026-08-30) — `insect` hot spot: 49.9 -> 42.6 ms (wing-buzz -25%,
+cricket -24%), bit-identical. ~30 of the remaining 42.6 ms is irreducible
+per-voice DSP.
+
 **2.2.0** (2026-08-30) — out-of-range enum ids are rejected rather than
 silently selecting the last variant's table
 ([ADR-0006](../adr/0006-out-of-range-enum-ids-are-rejected.md)). Caught a live
@@ -70,7 +78,7 @@ crate is preserved at `rust-old/` for parity reference (frozen, do not edit).
 
 ## Tests
 
-- **33 module suites** in `tests/*.tcyr`, **779 assertions, all green**.
+- **33 module suites** in `tests/*.tcyr`, **791 assertions, all green**.
   `tests/garjan.tcyr` is the cross-module integration suite (288 of those),
   ported from `rust-old/tests/integration.rs`.
   Covers parity (incl. bit-exact PCG32), synthesis finiteness/energy, and
@@ -122,11 +130,12 @@ outstanding item pinned to a version. Immediate:
 - ✅ **2.1.x shipped as 2.1.0** — integration suite, 26 benchmarks, 5 examples,
   audit write-up. Output-vector pre-sizing is ⛔ blocked on a missing stdlib
   `vec_with_capacity` (~695 KB wasted per second of synthesized audio).
-- ✅ **2.2.0 shipped** — out-of-range enum ids rejected (ADR-0006). Still open
-  in 2.2.x: serde live-state round-trip parity (**sized, needs your decision** —
-  ~70 new `*Params` fields for `AmbientTexture` alone; recommend documenting the
-  divergence rather than implementing) and duration / sample-rate caps (**needs
-  a cap value from you**).
+- ✅ **2.2.0 / 2.3.0 / 2.4.0 shipped** — enum-id rejection, the insect hot
+  spot, and the size caps.
+- **Next: serde live-state round-trip parity.** Decided to implement in full.
+  Verbose (pink noise carries 16 octave values) but mechanical — every piece of
+  naad state is a flat `f64`/`i64`, so the existing `#derive(Serialize)`
+  `*Params` structs can carry it without hand-rolled JSON.
 - **Gated** — `integration/soorat.rs` (315 lines) is the one genuinely unported
   *feature*; blocked until soorat lands in Cyrius.
 

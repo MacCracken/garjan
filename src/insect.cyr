@@ -174,9 +174,13 @@ fn insect_set_intensity(self, intensity) {
 # Synthesizes one voice's contribution at time `t` and frequency `freq`.
 # Mirrors Rust synthesize_voice (naad path for CicadaDrone).
 #must_use
-fn insect_synthesize_voice(self, t, freq, voice) {
-    # phase_offset = voice as f32 * 0.37
-    var phase_offset = f64_mul(f64_from(voice), f64_div(f64_from(37), f64_from(100)));
+# `phase_offset` and `freq` are per-VOICE invariants -- they do not vary with
+# `t` -- so insect_process_block computes them once per block and passes them
+# in. Recomputing them here cost an 8-branch insect_detune plus a divide and
+# two multiplies on every sample of every voice: at swarm 8 that is 352,800
+# redundant evaluations per second of audio, and the CicadaDrone branch does
+# not even read `freq`.
+fn insect_synthesize_voice(self, t, freq, phase_offset) {
     var ty = Insect_insect_type(self);
     var mod_rate = Insect_mod_rate(self);
 
@@ -243,23 +247,107 @@ fn insect_process_block(self, output) {
     # inv_swarm = 1.0 / swarm_count
     var inv_swarm = f64_div(F64_ONE, f64_from(swarm_count));
 
+    # Per-voice invariants, computed once per block instead of once per sample.
+    # 64 bytes = 8 f64 slots; swarm_count is clamped to 1..8 on every path that
+    # sets it (insect_new_swarm, and insect_from_json_str since 2.0.2).
+    var freqs[64];
+    var phases[64];
+    var phase_step = f64_div(f64_from(37), f64_from(100));
+    var v = 0;
+    while (v < swarm_count) {
+        # detune = 1.0 + swarm_detunings[voice]; freq = base_freq * detune
+        var detune = f64_add(F64_ONE, insect_detune(self, v));
+        store64(&freqs + v * 8, f64_mul(base_freq, detune));
+        store64(&phases + v * 8, f64_mul(f64_from(v), phase_step));
+        v = v + 1;
+    }
+
+    # The inner loop runs once per voice per sample -- 352,800 times per second
+    # of audio at swarm 8 -- so the insect type is branched on ONCE here rather
+    # than inside it, and every accessor read is hoisted. Measured: an accessor
+    # read costs ~0.54 ms per 352,800 calls, so the four that used to sit in the
+    # inner loop were ~2 ms/s on their own. (Constant construction is NOT
+    # hoisted: cycc already constant-folds `f64_div(f64_from(6), f64_from(10))`,
+    # measured at the same cost as an empty loop.)
+    #
+    # The three branches reproduce insect_synthesize_voice exactly, term for
+    # term; that function is retained as the readable reference.
+    var ty = Insect_insect_type(self);
+    var mod_rate = Insect_mod_rate(self);
+
     var i = 0;
-    while (i < num) {
-        # t = (sample_position + i) as f32 / sample_rate
-        var t = f64_div(f64_from(pos + i), sr);
-        var out = 0;
-        var voice = 0;
-        while (voice < swarm_count) {
-            # detune = 1.0 + swarm_detunings[voice]; freq = base_freq * detune
-            var detune = f64_add(F64_ONE, insect_detune(self, voice));
-            var freq = f64_mul(base_freq, detune);
-            out = f64_add(out, insect_synthesize_voice(self, t, freq, voice));
-            voice = voice + 1;
+    if (ty == INSECT_WING_BUZZ) {
+        while (i < num) {
+            var t = f64_div(f64_from(pos + i), sr);
+            # voice-invariant within this sample; was rebuilt once per voice
+            var mod_arg = f64_mul(F64_TAU, f64_mul(mod_rate, t));
+            var out = 0;
+            var voice = 0;
+            while (voice < swarm_count) {
+                var ph = load64(&phases + voice * 8);
+                var fq = load64(&freqs + voice * 8);
+                var carrier = f64_sin(f64_add(f64_mul(F64_TAU, f64_mul(fq, t)), ph));
+                var ms = f64_sin(f64_add(mod_arg, f64_mul(ph, F64_TWO)));
+                out = f64_add(out, f64_mul(carrier, f64_add(F64_HALF, f64_mul(F64_HALF, ms))));
+                voice = voice + 1;
+            }
+            var scaled = f64_mul(f64_mul(f64_mul(out, amplitude), intensity), inv_swarm);
+            vec_set(output, i, garjan_dcblocker_process(dc, scaled));
+            i = i + 1;
         }
-        # sample = out * amplitude * intensity * inv_swarm
-        var scaled = f64_mul(f64_mul(f64_mul(out, amplitude), intensity), inv_swarm);
-        vec_set(output, i, garjan_dcblocker_process(dc, scaled));
-        i = i + 1;
+    } elif (ty == INSECT_CRICKET_CHIRP) {
+        var chirp_rate = Insect_chirp_rate(self);
+        while (i < num) {
+            var t = f64_div(f64_from(pos + i), sr);
+            # both voice-invariant within this sample
+            var mod_arg = f64_mul(F64_TAU, f64_mul(mod_rate, t));
+            var chirp_t = f64_mul(chirp_rate, t);
+            var out = 0;
+            var voice = 0;
+            while (voice < swarm_count) {
+                var ph = load64(&phases + voice * 8);
+                var fq = load64(&freqs + voice * 8);
+                var arg = f64_add(chirp_t,
+                  f64_mul(ph, f64_div(F64_ONE, f64_from(10))));
+                var phase = f64_fmod(arg, F64_ONE);
+                if (f64_lt(phase, f64_div(f64_from(4), f64_from(10))) == 1) {
+                    var pulse = f64_sin(f64_add(mod_arg, ph));
+                    var carrier = f64_sin(f64_add(f64_mul(F64_TAU, f64_mul(fq, t)), ph));
+                    var gate = 0;
+                    if (f64_gt(pulse, 0) == 1) { gate = pulse; }
+                    out = f64_add(out, f64_mul(carrier, gate));
+                }
+                voice = voice + 1;
+            }
+            var scaled = f64_mul(f64_mul(f64_mul(out, amplitude), intensity), inv_swarm);
+            vec_set(output, i, garjan_dcblocker_process(dc, scaled));
+            i = i + 1;
+        }
+    } else {
+        # CicadaDrone -- the slowest type, and the one the benchmark measures.
+        # noise_gen and shape_filter are shared across voices (as in Rust), so
+        # each voice advances the same streams; the order is preserved exactly.
+        var noise_gen = Insect_noise_gen(self);
+        var shape_filter = Insect_shape_filter(self);
+        while (i < num) {
+            var t = f64_div(f64_from(pos + i), sr);
+            # voice-invariant within this sample; was rebuilt for all 8 voices
+            var mod_arg = f64_mul(F64_TAU, f64_mul(mod_rate, t));
+            var out = 0;
+            var voice = 0;
+            while (voice < swarm_count) {
+                var ph = load64(&phases + voice * 8);
+                var ms = f64_sin(f64_add(mod_arg, ph));
+                var md = f64_add(f64_div(f64_from(6), f64_from(10)),
+                  f64_mul(f64_div(f64_from(4), f64_from(10)), ms));
+                var filt = filter_biquad_process_sample(shape_filter, noise_next_sample(noise_gen));
+                out = f64_add(out, f64_mul(filt, md));
+                voice = voice + 1;
+            }
+            var scaled = f64_mul(f64_mul(f64_mul(out, amplitude), intensity), inv_swarm);
+            vec_set(output, i, garjan_dcblocker_process(dc, scaled));
+            i = i + 1;
+        }
     }
     Insect_set_sample_position(self, pos + num);
     return 0;
@@ -272,6 +360,8 @@ fn insect_synthesize(self, duration) {
     var e = garjan_validate_duration(duration);
     if (garjan_is_err(e) == 1) { return e; }
     var num = f64_to(f64_mul(Insect_sample_rate(self), duration));
+    var ga_ncheck = garjan_validate_sample_count(num);
+    if (garjan_is_err(ga_ncheck) == 1) { return ga_ncheck; }
     var output = vec_new();
     var i = 0;
     while (i < num) {
