@@ -106,26 +106,32 @@ fn fire_process_block(self, output) {
     var block_size = f64_to(f64_mul(sr, f64_div(f64_from(1), f64_from(100))));   # sr*0.01
     if (block_size < 1) { block_size = 1; }
     var crackles_per_block = f64_mul(Fire_crackle_rate(self), f64_div(f64_from(1), f64_from(100)));
+    # Crackle amplitude range, hoisted: rebuilt once per crackle before.
+    var amp_lo = f64_div(f64_from(1), f64_from(10));
+    var amp_hi = f64_div(f64_from(6), f64_from(10));
 
     var block_start = 0;
     while (block_start < num) {
         var block_end = block_start + block_size;
         if (block_end > num) { block_end = num; }
         var n_crackles = rng_poisson(rng, crackles_per_block);
+        # Block width is fixed for the whole crackle loop below.
+        var width = f64_from(block_end - block_start);
         var c = 0;
         while (c < n_crackles) {
-            var width = f64_from(block_end - block_start);
             var offset = f64_to(rng_next_f32_range(rng, 0, width));
             var idx = block_start + offset;
             if (idx < num) {
-                var crackle_amp = f64_mul(inten, rng_next_f32_range(rng, f64_div(f64_from(1), f64_from(10)),
-                    f64_div(f64_from(6), f64_from(10))));
+                var crackle_amp = f64_mul(inten, rng_next_f32_range(rng, amp_lo, amp_hi));
                 var decay_len = f64_to(rng_next_f32_range(rng, f64_from(5), f64_from(30)));
+                # decay_len is fixed for this crackle's decay loop; converting it
+                # once instead of on every sample of the tail.
+                var decay_len_f = f64_from(decay_len);
                 var span = decay_len;
                 if (num - idx < span) { span = num - idx; }
                 var j = 0;
                 while (j < span) {
-                    var env = f64_sub(F64_ONE, f64_div(f64_from(j), f64_from(decay_len)));
+                    var env = f64_sub(F64_ONE, f64_div(f64_from(j), decay_len_f));
                     var cn = noise_next_sample(crackle_noise);
                     var contrib = f64_mul(crackle_amp, f64_mul(env, filter_biquad_process_sample(crackle_filter, cn)));
                     vec_set(output, idx + j, f64_add(vec_get(output, idx + j), contrib));

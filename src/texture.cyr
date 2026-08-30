@@ -130,12 +130,12 @@ fn ambient_texture_new(texture_type, level, sample_rate) {
     return texture_new(texture_type, level, sample_rate);
 }
 
-# Band mix ratios (low, mid, high) for a texture type, returned via a small
-# 3-slot buffer. Ports the band_mix match. Slot 0=low, 1=mid, 2=high.
-#must_use
-fn texture_band_mix(texture_type) {
-    var m = garjan_alloc(24);
-    if (garjan_is_err(m) == 1) { return m; }
+# Band mix ratios (low, mid, high) for a texture type, written into the
+# caller's 24-byte buffer (three f64 slots at +0/+8/+16). Ports the band_mix
+# match. Allocation-free, so the streaming path can call it per block against
+# a stack buffer -- the arena never frees, and this is called once per
+# process_block.
+fn texture_band_mix_into(out, texture_type) {
     var low = f64_div(f64_from(2), f64_from(10));
     var mid = F64_HALF;
     var high = f64_div(f64_from(3), f64_from(10));
@@ -164,9 +164,19 @@ fn texture_band_mix(texture_type) {
         mid = f64_div(f64_from(2), f64_from(10));
         high = f64_div(f64_from(15), f64_from(100));
     }
-    store64(m, low);
-    store64(m + 8, mid);
-    store64(m + 16, high);
+    store64(out, low);
+    store64(out + 8, mid);
+    store64(out + 16, high);
+    return 0;
+}
+
+# Owning form: the same table in a freshly allocated 3-slot buffer. Retained
+# for callers that want an owned buffer; the hot path uses the _into form.
+#must_use
+fn texture_band_mix(texture_type) {
+    var m = garjan_alloc(24);
+    if (garjan_is_err(m) == 1) { return m; }
+    texture_band_mix_into(m, texture_type);
     return m;
 }
 
@@ -183,16 +193,21 @@ fn texture_process_block(self, output) {
     var lfo = AmbientTexture_mod_lfo(self);
     var level = AmbientTexture_level(self);
 
-    var mix = texture_band_mix(AmbientTexture_texture_type(self));
-    if (garjan_is_err(mix) == 1) { return mix; }
-    var low_mix = load64(mix);
-    var mid_mix = load64(mix + 8);
-    var high_mix = load64(mix + 16);
+    # 24 bytes = three f64 slots. Stack, not arena: this runs once per block.
+    var mixbuf[24];
+    texture_band_mix_into(&mixbuf, AmbientTexture_texture_type(self));
+    var low_mix = load64(&mixbuf);
+    var mid_mix = load64(&mixbuf + 8);
+    var high_mix = load64(&mixbuf + 16);
 
     # 0.7 and 0.3 for the modulator: modulator = 0.7 + 0.3*lfo.
     var mod_base = f64_div(f64_from(7), f64_from(10));
     var mod_depth = f64_div(f64_from(3), f64_from(10));
 
+    # DC-blocked inline rather than in a second pass: the loop writes each index
+    # exactly once, in order, so the blocker sees identical inputs in identical
+    # order. Bit-identical, minus a vec_get + vec_set per sample.
+    var dc = AmbientTexture_dc_blocker(self);
     var i = 0;
     while (i < num) {
         var modulator = f64_add(mod_base, f64_mul(mod_depth, modulation_lfo_next_value(lfo)));
@@ -202,17 +217,10 @@ fn texture_process_block(self, output) {
         var high = filter_biquad_process_sample(high_filter, noise_next_sample(high_noise));
 
         var mixed = f64_add(f64_add(f64_mul(low, low_mix), f64_mul(mid, mid_mix)), f64_mul(high, high_mix));
-        vec_set(output, i, f64_mul(f64_mul(mixed, level), modulator));
+        vec_set(output, i, garjan_dcblocker_process(dc, f64_mul(f64_mul(mixed, level), modulator)));
         i = i + 1;
     }
 
-    # DC-block the whole buffer, then advance the sample cursor.
-    var dc = AmbientTexture_dc_blocker(self);
-    i = 0;
-    while (i < num) {
-        vec_set(output, i, garjan_dcblocker_process(dc, vec_get(output, i)));
-        i = i + 1;
-    }
     AmbientTexture_set_sample_position(self, AmbientTexture_sample_position(self) + num);
     return 0;
 }

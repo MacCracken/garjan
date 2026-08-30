@@ -179,6 +179,11 @@ fn rolling_process_block(self, output) {
     var amp03 = f64_div(f64_from(3), f64_from(10));         # 0.3
     var amp02 = f64_div(f64_from(2), f64_from(10));         # 0.2
     var amp01 = f64_div(f64_from(1), f64_from(10));         # 0.1
+    # velocity, radius and sr are all fixed before the loop, so the rotation
+    # rate and the per-sample phase increment are too -- two divides and a
+    # multiply that were being redone on every sample.
+    var rotation_rate = f64_div(velocity, f64_mul(F64_TAU, radius));
+    var phase_inc = f64_div(rotation_rate, sr);
 
     var i = 0;
     while (i < num) {
@@ -186,9 +191,8 @@ fn rolling_process_block(self, output) {
             vec_set(output, i, 0);
             garjan_dcblocker_process(dc, 0);
         } else {
-            # Rotation rate from velocity and radius; advance phase, wrap at 1.
-            var rotation_rate = f64_div(velocity, f64_mul(F64_TAU, radius));
-            var phase = f64_add(Rolling_rotation_phase(self), f64_div(rotation_rate, sr));
+            # Advance phase, wrap at 1.
+            var phase = f64_add(Rolling_rotation_phase(self), phase_inc);
             if (f64_ge(phase, F64_ONE) == 1) { phase = f64_sub(phase, F64_ONE); }
             Rolling_set_rotation_phase(self, phase);
 

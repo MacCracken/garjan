@@ -191,10 +191,13 @@ fn friction_process_block(self, output) {
     var half_c = F64_HALF;
     var micro_c = f64_div(f64_from(2), f64_from(100));       # 0.02
 
+    # Neither field is written anywhere in the loop, so read them once instead
+    # of through an accessor call on every sample.
+    var velocity = Friction_velocity(self);
+    var pressure = Friction_pressure(self);
+
     var i = 0;
     while (i < num) {
-        var velocity = Friction_velocity(self);
-        var pressure = Friction_pressure(self);
         if (f64_lt(velocity, vel_floor) == 1) {
             vec_set(output, i, 0);
             garjan_dcblocker_process(dc, 0);

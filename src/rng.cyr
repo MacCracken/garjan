@@ -38,12 +38,23 @@ fn rng_next_u32(self) {
 fn rng_new(seed) {
     var self = garjan_alloc(sizeof(Rng));
     if (garjan_is_err(self) == 1) { return self; }
+    rng_seed(self, seed);
+    return self;
+}
+
+# Re-seed an EXISTING Rng in place, reproducing exactly the state rng_new(seed)
+# would have produced. Factored out of rng_new so a caller can restart a
+# sequence without allocating -- the arena never frees, so a hot path that
+# wanted a fresh Rng per call had no way to ask for one cheaply. Any change
+# here changes rng_new too, which is the point: one definition of the seeding
+# sequence keeps them bit-identical.
+fn rng_seed(self, seed) {
     Rng_set_state(self, 0);
     Rng_set_inc(self, (seed << 1) | 1);
     rng_next_u32(self);
     Rng_set_state(self, Rng_state(self) + seed);   # wrapping_add
     rng_next_u32(self);
-    return self;
+    return 0;
 }
 
 # Value in [-1.0, 1.0]. bits = (next_u32 >> 1), scaled by 1/i32::MAX.

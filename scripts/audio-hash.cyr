@@ -1,0 +1,156 @@
+# audio-hash.cyr -- bit-exactness oracle for optimization work.
+#
+# Build + run:
+#   cyrius build scripts/audio-hash.cyr build/audio-hash && ./build/audio-hash
+#
+# Prints one rolling hash per synthesizer over three successive process_block
+# calls. The hash folds the RAW f64 bit patterns, so ANY change -- a last-ulp
+# difference, a +0.0/-0.0 flip -- moves it.
+#
+# Use it like this when touching a hot path:
+#   1. capture the hashes BEFORE the change  (./build/audio-hash > before.txt)
+#   2. make the change
+#   3. cyrius distlib && rebuild, then diff after.txt against before.txt
+# An empty diff means the optimization was genuinely behaviour-preserving.
+# The suite passing does NOT establish this: the per-module tests assert
+# finiteness, energy and serde round-trips, not exact sample values.
+#
+# Three blocks, not one: a change that breaks filter/rng state carry-over shows
+# up in block 2, not block 1. Event-driven synths are excited first (wind speed,
+# tension, trigger) -- an unexcited synth outputs silence and hashes to 0,
+# which would make the oracle vacuously "pass".
+#
+# NOTE the hashes are not committed as golden values. They pin a specific
+# toolchain + dep set on one architecture; f64 transcendentals come from
+# ganita, so cross-arch equality is likely but unverified. Capture a fresh
+# baseline immediately before each change instead.
+
+include "dist/garjan.cyr"
+
+# FNV-ish rolling hash over the raw f64 bit patterns, so any change in any
+# sample -- including a sign-of-zero or last-ulp difference -- shows up.
+fn hbuf(h, v) {
+    var i = 0;
+    var acc = h;
+    while (i < vec_len(v)) {
+        acc = acc * 1000003 + vec_get(v, i);
+        i = i + 1;
+    }
+    return acc;
+}
+
+fn mkbuf(n) {
+    var v = vec_new();
+    var i = 0;
+    while (i < n) { vec_push(v, 0); i = i + 1; }
+    return v;
+}
+
+fn report(name, h) { println(name); println_int(h); return 0; }
+
+fn main() {
+    alloc_init();
+    sakshi_set_level(5);
+    var sr = f64_from(44100);
+    var N = 4096;
+
+    # 3 successive blocks per synth: catches state-carry bugs, not just block 1.
+    var b = mkbuf(N);
+    var h = 0; var k = 0;
+    var fire = fire_new(F64_HALF, sr);
+    k = 0; h = 0; while (k < 3) { fire_process_block(fire, b); h = hbuf(h, b); k = k + 1; }
+    report("fire", h);
+
+    var thunder = thunder_new(f64_from(10), sr);   # close, so the crack lands in-window
+    k = 0; h = 0; while (k < 3) { thunder_process_block(thunder, b); h = hbuf(h, b); k = k + 1; }
+    report("thunder", h);
+
+    var rain = rain_new(RAIN_INTENSITY_MODERATE, sr);
+    k = 0; h = 0; while (k < 3) { rain_process_block(rain, b); h = hbuf(h, b); k = k + 1; }
+    report("rain", h);
+
+    var wind = wind_new(f64_from(15), F64_HALF, sr);
+    k = 0; h = 0; while (k < 3) { wind_process_block(wind, b); h = hbuf(h, b); k = k + 1; }
+    report("wind", h);
+
+    var cloth = cloth_new(CLOTH_FLAG, sr);
+    cloth_set_wind_speed(cloth, f64_from(12));
+    k = 0; h = 0; while (k < 3) { cloth_process_block(cloth, b); h = hbuf(h, b); k = k + 1; }
+    report("cloth", h);
+
+    var surf = surf_new(F64_HALF, sr);
+    k = 0; h = 0; while (k < 3) { surf_process_block(surf, b); h = hbuf(h, b); k = k + 1; }
+    report("surf", h);
+
+    var tex = texture_new(TEXTURE_TYPE_FOREST, F64_HALF, sr);
+    k = 0; h = 0; while (k < 3) { texture_process_block(tex, b); h = hbuf(h, b); k = k + 1; }
+    report("texture", h);
+
+    var roll = rolling_new(MATERIAL_WOOD, MATERIAL_STONE, sr);
+    rolling_set_velocity(roll, f64_from(3));
+    k = 0; h = 0; while (k < 3) { rolling_process_block(roll, b); h = hbuf(h, b); k = k + 1; }
+    report("rolling", h);
+
+    var wtr = water_new(WATER_STREAM, F64_HALF, sr);
+    k = 0; h = 0; while (k < 3) { water_process_block(wtr, b); h = hbuf(h, b); k = k + 1; }
+    report("water", h);
+
+    var wh = whoosh_new(WHOOSH_SWING, sr);
+    whoosh_set_speed(wh, f64_from(20));
+    whoosh_trigger(wh);
+    k = 0; h = 0; while (k < 3) { whoosh_process_block(wh, b); h = hbuf(h, b); k = k + 1; }
+    report("whoosh", h);
+
+    var pr = precipitation_new(PRECIP_HAIL, STONE_MEDIUM, MATERIAL_STONE, sr);
+    k = 0; h = 0; while (k < 3) { precipitation_process_block(pr, b); h = hbuf(h, b); k = k + 1; }
+    report("precipitation", h);
+
+    var fo = foliage_new(FOLIAGE_LEAF_RUSTLE, sr);
+    foliage_set_wind_speed(fo, f64_from(8));
+    foliage_set_contact_intensity(fo, F64_HALF);
+    k = 0; h = 0; while (k < 3) { foliage_process_block(fo, b); h = hbuf(h, b); k = k + 1; }
+    report("foliage", h);
+
+    var bu = bubble_new(BUBBLE_UNDERWATER, sr);
+    k = 0; h = 0; while (k < 3) { bubble_process_block(bu, b); h = hbuf(h, b); k = k + 1; }
+    report("bubble", h);
+
+    var fr = friction_new(FRICTION_SLIDE, MATERIAL_WOOD, sr);
+    friction_set_velocity(fr, f64_from(2));
+    friction_set_pressure(fr, F64_HALF);
+    k = 0; h = 0; while (k < 3) { friction_process_block(fr, b); h = hbuf(h, b); k = k + 1; }
+    report("friction", h);
+
+    var ft = footstep_new(MATERIAL_STONE, MOVEMENT_WALK, sr);
+    k = 0; h = 0; while (k < 3) { footstep_process_block(ft, b); h = hbuf(h, b); k = k + 1; }
+    report("footstep", h);
+
+    var im = impact_new(MATERIAL_METAL, sr);
+    k = 0; h = 0; while (k < 3) { impact_process_block(im, IMPACT_STRIKE, b); h = hbuf(h, b); k = k + 1; }
+    report("impact", h);
+
+    var ins = insect_new_swarm(INSECT_CICADA_DRONE, 3, sr);
+    k = 0; h = 0; while (k < 3) { insect_process_block(ins, b); h = hbuf(h, b); k = k + 1; }
+    report("insect", h);
+
+    var uw = underwater_new(f64_from(10), sr);
+    k = 0; h = 0; while (k < 3) { underwater_process_block(uw, b); h = hbuf(h, b); k = k + 1; }
+    report("underwater", h);
+
+    var cr = creak_new(MATERIAL_WOOD, sr);
+    creak_set_tension(cr, F64_HALF);
+    creak_set_speed(cr, F64_HALF);
+    k = 0; h = 0; while (k < 3) { creak_process_block(cr, b); h = hbuf(h, b); k = k + 1; }
+    report("creak", h);
+
+    var wf = wingflap_new(BIRD_SIZE_MEDIUM, sr);
+    k = 0; h = 0; while (k < 3) { wingflap_process_block(wf, b); h = hbuf(h, b); k = k + 1; }
+    report("wingflap", h);
+
+    var wi = whistle_new(WHISTLE_PIPE, sr);
+    whistle_set_wind_speed(wi, f64_from(15));
+    k = 0; h = 0; while (k < 3) { whistle_process_block(wi, b); h = hbuf(h, b); k = k + 1; }
+    report("whistle", h);
+
+    return 0;
+}

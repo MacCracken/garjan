@@ -172,34 +172,42 @@ fn cloth_process_block(self, output) {
     var step = block_size;
     if (step < 1) { step = 1; }
 
+    # Flap-envelope constants, hoisted: the duration range was rebuilt per flap
+    # and the attack/decay/dry-mix terms on every sample of every flap tail.
+    var dur_lo = f64_div(f64_from(5), f64_from(1000));    # 0.005 s
+    var dur_hi = f64_div(f64_from(2), f64_from(100));     # 0.02 s
+    var attack_end = f64_div(f64_from(1), f64_from(10));  # 0.1
+    var neg_five = f64_neg(f64_from(5));
+    var dry_mix = f64_div(f64_from(3), f64_from(10));     # 0.3
+
     var block_start = 0;
     while (block_start < num) {
         var block_end = block_start + block_size;
         if (block_end > num) { block_end = num; }
         var n_flaps = rng_poisson(rng, flaps_per_block);
+        # Block width is fixed for the whole flap loop below.
+        var width = f64_from(block_end - block_start);
         var c = 0;
         while (c < n_flaps) {
-            var width = f64_from(block_end - block_start);
             var offset = f64_to(rng_next_f32_range(rng, 0, width));
             var idx = block_start + offset;
             if (idx < num) {
                 # Each flap: noise burst with fast attack, medium decay.
                 var flap_amp = f64_mul(amplitude, f64_mul(wind, rng_next_f32_range(rng, F64_HALF, F64_ONE)));
-                var flap_dur = f64_to(f64_mul(sr, rng_next_f32_range(rng,
-                      f64_div(f64_from(5), f64_from(1000)),
-                      f64_div(f64_from(2), f64_from(100)))));
+                var flap_dur = f64_to(f64_mul(sr, rng_next_f32_range(rng, dur_lo, dur_hi)));
+                # Fixed for this flap's envelope; converted once, not per sample.
+                var flap_dur_f = f64_from(flap_dur);
                 var span = flap_dur;
                 if (num - idx < span) { span = num - idx; }
                 var j = 0;
                 while (j < span) {
-                    var t = f64_div(f64_from(j), f64_from(flap_dur));
+                    var t = f64_div(f64_from(j), flap_dur_f);
                     # Fast attack (t < 0.1 -> t/0.1), longer decay (exp(-5*(t-0.1))).
-                    var attack_end = f64_div(f64_from(1), f64_from(10));   # 0.1
                     var env = 0;
                     if (f64_lt(t, attack_end) == 1) {
                         env = f64_div(t, attack_end);
                     } else {
-                        env = f64_exp(f64_mul(f64_neg(f64_from(5)), f64_sub(t, attack_end)));
+                        env = f64_exp(f64_mul(neg_five, f64_sub(t, attack_end)));
                     }
                     var noise = cloth_generate_noise(self);
                     var exc = f64_mul(noise, f64_mul(env, flap_amp));
@@ -207,7 +215,7 @@ fn cloth_process_block(self, output) {
                     var out = exc;
                     if (modal_bank != 0) {
                         out = f64_add(modal_bank_process_sample(modal_bank, exc),
-                          f64_mul(exc, f64_div(f64_from(3), f64_from(10))));
+                          f64_mul(exc, dry_mix));
                     }
                     vec_set(output, idx + j, f64_add(vec_get(output, idx + j), out));
                     j = j + 1;

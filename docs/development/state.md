@@ -5,6 +5,17 @@
 
 ## Version
 
+**2.0.5** (2026-08-30) — per-sample hot-path optimization: loop-invariant work
+hoisted across 9 modules, and the redundant second DC-blocking pass folded into
+generation for `wind` and `texture`. Bit-exact, verified with
+[`scripts/audio-hash.cyr`](../../scripts/audio-hash.cyr). wind −5.6%, thunder
+−3.3%, fire −2.2%. Most remaining time is inside naad, not garjan.
+
+**2.0.4** (2026-08-30) — arena lifetime: the two streaming paths that allocated
+per block (`impact_generate`'s fresh `Exciter`, 64 B; `texture_process_block`'s
+band-mix buffer, 24 B) now allocate **zero**, via `exciter_reset` + a stack
+buffer. Bit-identical audio, asserted directly. ~27 MB/hour of growth removed.
+
 **2.0.3** (2026-08-30) — completes the allocation-failure hardening deferred
 from 2.0.2. `alloc` returns `0` on exhaustion and `garjan_is_err` only detects
 `< 0`, so an OOM was a store to address 0; all allocations now route through
@@ -45,7 +56,7 @@ crate is preserved at `rust-old/` for parity reference (frozen, do not edit).
 
 ## Tests
 
-- **33 module suites** in `tests/*.tcyr`, **472 assertions, all green**.
+- **33 module suites** in `tests/*.tcyr`, **478 assertions, all green**.
   Covers parity (incl. bit-exact PCG32), synthesis finiteness/energy, and
   serde roundtrips. `cyrius test` runs them; each also builds standalone.
 - Cleanliness: `cyrius lint` 0 warnings (33 modules), `cyrius vet` clean,
@@ -81,15 +92,18 @@ _None yet (kiran, joshua, dhvani + any AGNOS component needing environmental aud
 
 ## Next
 
-- **Arena lifetime.** Nothing is ever freed, so long-running streams grow
-  without bound — `texture_band_mix` allocates per `texture_process_block`, and
-  `impact_process_block` builds a fresh `Exciter` (and `Rng`) per call. 2.0.3
-  fixed OOM *detection*; this is the separate problem of not reaching OOM.
+- **Arena lifetime, remaining.** 2.0.4 fixed the two per-block streaming
+  allocations. Still outstanding: every `*_synthesize` grows its output vec from
+  capacity 16 (~12 doubling reallocations per second of audio, all retained),
+  and the allocator has no free at all, so constructing and discarding synths in
+  a loop still grows the arena. `alloc_reset()` invalidates *every* outstanding
+  pointer, so it is only usable at a clean epoch boundary.
 - **Duration / sample-rate upper bounds — needs an ADR.** Currently unbounded
   (1e8 s sizes a 4.4-trillion-sample buffer). Faithful to `rust-old`, so
   capping is a deliberate divergence, not a bug fix.
-- Optimize per-sample hot paths (the f64 port calls the naad bundle
-  unoptimized). The audit catalogued loop-invariant constants rebuilt per sample
-  across ~17 modules plus a redundant second DC-blocking pass in the block
-  synths; `wind` (11.0 ms/s of audio) is the highest-value target.
+- **Further perf needs naad-level work.** 2.0.5 took the hoisting wins
+  (−5.6% on the worst synth); profiling now points into the naad bundle's
+  per-sample noise generation and biquad/SVF filtering, not garjan's own
+  arithmetic. Remaining garjan-side candidates are small: per-event conversions
+  in `bubble`/`foliage`/`precipitation`/`insect`/`whoosh`/`impact`.
 - Port `integration/soorat.rs` (visualization data) once soorat lands in Cyrius.

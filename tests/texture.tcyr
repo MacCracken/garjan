@@ -70,6 +70,34 @@ fn main() {
     assert(bbfinite == 1, "restored texture audio finite");
     assert(f64_gt(bbenergy, 0) == 1, "restored texture audio nonzero");
 
+    # --- 2.0.4: streaming must not grow the arena ---
+    # texture_band_mix allocated 24 B per process_block against an allocator
+    # that never frees. The hot path now uses a stack buffer; the owning form
+    # is retained and must still agree with it for every texture type.
+    test_group("band mix + zero-alloc streaming");
+    var tb_same = 1;
+    var tb_buf[24];
+    var tb_t = 0;
+    while (tb_t < 6) {
+        var tb_owned = texture_band_mix(tb_t);
+        texture_band_mix_into(&tb_buf, tb_t);
+        if (load64(tb_owned) != load64(&tb_buf)) { tb_same = 0; }
+        if (load64(tb_owned + 8) != load64(&tb_buf + 8)) { tb_same = 0; }
+        if (load64(tb_owned + 16) != load64(&tb_buf + 16)) { tb_same = 0; }
+        tb_t = tb_t + 1;
+    }
+    assert_eq(tb_same, 1, "texture_band_mix agrees with texture_band_mix_into");
+
+    var tb_tx = texture_new(TEXTURE_TYPE_FOREST, F64_HALF, f64_from(44100));
+    var tb_out = vec_new();
+    var tb_n = 0;
+    while (tb_n < 256) { vec_push(tb_out, 0); tb_n = tb_n + 1; }
+    texture_process_block(tb_tx, tb_out);
+    var tb_before = alloc_used();
+    var tb_b = 0;
+    while (tb_b < 50) { texture_process_block(tb_tx, tb_out); tb_b = tb_b + 1; }
+    assert_eq(alloc_used() - tb_before, 0, "50 texture blocks allocate 0 bytes");
+
     return assert_summary();
 }
 var ec = main();

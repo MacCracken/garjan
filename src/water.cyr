@@ -143,13 +143,15 @@ fn water_process_stream(self, output) {
     var shape_filter = Water_shape_filter(self);
     var mod_lfo = Water_mod_lfo(self);
     var amp = f64_mul(Water_intensity(self), f64_div(f64_from(3), f64_from(10)));
+    # modulator = 0.7 + 0.3*lfo -- both terms were rebuilt per sample. The
+    # sibling water_process_waves already hoists its equivalents.
+    var mod_base = f64_div(f64_from(7), f64_from(10));
+    var mod_depth = f64_div(f64_from(3), f64_from(10));
     var i = 0;
     while (i < num) {
         var noise = noise_next_sample(noise_gen);
         var filtered = filter_biquad_process_sample(shape_filter, noise);
-        # modulator = 0.7 + 0.3 * lfo
-        var modulator = f64_add(f64_div(f64_from(7), f64_from(10)),
-          f64_mul(f64_div(f64_from(3), f64_from(10)), modulation_lfo_next_value(mod_lfo)));
+        var modulator = f64_add(mod_base, f64_mul(mod_depth, modulation_lfo_next_value(mod_lfo)));
         vec_set(output, i, f64_mul(f64_mul(filtered, amp), modulator));
         i = i + 1;
     }

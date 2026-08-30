@@ -234,6 +234,10 @@ fn generate_modes(props, pattern, count, damping_factor) {
 }
 
 # ---- ExcitationType (data-carrying variant duration lives on Exciter) ----
+# Seed for every Exciter's internal Rng. Shared by exciter_new and
+# exciter_reset so the two produce identical excitation sequences.
+var EXCITER_RNG_SEED = 31337;
+
 var EXCITATION_IMPULSE    = 0;
 var EXCITATION_NOISE_BURST = 1;
 var EXCITATION_HALF_SINE  = 2;
@@ -251,10 +255,26 @@ fn exciter_new(excitation_type, duration_samples, amplitude) {
     Exciter_set_amplitude(self, amplitude);
     Exciter_set_position(self, 0);
     Exciter_set_active(self, 0);
-    var ga_rng2 = rng_new(31337);
+    var ga_rng2 = rng_new(EXCITER_RNG_SEED);
     if (garjan_is_err(ga_rng2) == 1) { return ga_rng2; }
     Exciter_set_rng(self, ga_rng2);
     return self;
+}
+
+# Reconfigure an existing Exciter in place and restart it: exactly equivalent
+# to exciter_new(type, dur, amp) followed by exciter_trigger, minus the two
+# allocations (Exciter + its Rng). The rng is re-seeded to EXCITER_RNG_SEED so
+# the excitation sequence is bit-identical to a freshly built exciter's --
+# callers in a per-block path use this instead of building a new one, because
+# the arena never frees.
+fn exciter_reset(self, excitation_type, duration_samples, amplitude) {
+    Exciter_set_excitation_type(self, excitation_type);
+    Exciter_set_duration_samples(self, duration_samples);
+    Exciter_set_amplitude(self, amplitude);
+    rng_seed(Exciter_rng(self), EXCITER_RNG_SEED);
+    Exciter_set_position(self, 0);
+    Exciter_set_active(self, 1);
+    return 0;
 }
 
 # Trigger: restart excitation from the beginning.

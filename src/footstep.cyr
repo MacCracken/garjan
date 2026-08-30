@@ -219,6 +219,8 @@ fn footstep_process_block(self, output) {
     var neg5 = f64_neg(f64_from(5));
     var mod03 = f64_div(f64_from(3), f64_from(10));
 
+    var bank = Footstep_modal_bank(self);
+
     var i = 0;
     while (i < num) {
         # Check if a step should trigger.
@@ -244,8 +246,9 @@ fn footstep_process_block(self, output) {
         }
         var noise = f64_mul(f64_mul(footstep_generate_noise(self), noise_env), step_force);
 
-        # Modal resonance (or exc*0.5 when no resonant material).
-        var bank = Footstep_modal_bank(self);
+        # Modal resonance (or exc*0.5 when no resonant material). `bank` is
+        # hoisted above the loop: footstep_fire_step resets the bank's STATE but
+        # never reassigns the pointer, so it is loop-invariant.
         var resonant = 0;
         if (bank != 0) {
             resonant = modal_bank_process_sample(bank, f64_add(exc, f64_mul(noise, mod03)));

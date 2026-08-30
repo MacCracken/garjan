@@ -73,6 +73,43 @@ fn main() {
     exciter_next_sample(burst);
     assert_eq(exciter_is_active(burst), 0, "noise burst spent on next call");
 
+    # --- 2.0.4: exciter_reset == exciter_new + exciter_trigger, bit-exact ---
+    # impact_generate reuses one Exciter per block instead of building a fresh
+    # one, so the reset path must reproduce a fresh exciter's stream exactly --
+    # including the rng re-seed, or NOISE_BURST would drift after block 1.
+    test_group("exciter_reset equivalence");
+    var er_ty = 0;
+    var er_same = 1;
+    while (er_ty < 3) {
+        var er_a = exciter_new(er_ty, f64_from(500), garjan_frac(8, 10));
+        exciter_trigger(er_a);
+        var er_b = exciter_new(EXCITATION_IMPULSE, 0, 0);
+        exciter_reset(er_b, er_ty, f64_from(500), garjan_frac(8, 10));
+        var er_i = 0;
+        while (er_i < 600) {
+            if (exciter_next_sample(er_a) != exciter_next_sample(er_b)) { er_same = 0; }
+            er_i = er_i + 1;
+        }
+        er_ty = er_ty + 1;
+    }
+    assert_eq(er_same, 1, "exciter_reset matches exciter_new+trigger for all 3 types");
+    # and a REUSED exciter must match a fresh one on every repeat
+    var er_re = exciter_new(EXCITATION_IMPULSE, 0, 0);
+    var er_rep = 1;
+    var er_r = 0;
+    while (er_r < 3) {
+        var er_f = exciter_new(EXCITATION_NOISE_BURST, f64_from(400), F64_HALF);
+        exciter_trigger(er_f);
+        exciter_reset(er_re, EXCITATION_NOISE_BURST, f64_from(400), F64_HALF);
+        var er_k = 0;
+        while (er_k < 400) {
+            if (exciter_next_sample(er_f) != exciter_next_sample(er_re)) { er_rep = 0; }
+            er_k = er_k + 1;
+        }
+        er_r = er_r + 1;
+    }
+    assert_eq(er_rep, 1, "reused exciter matches a fresh one on every repeat");
+
     return assert_summary();
 }
 var ec = main();

@@ -58,6 +58,21 @@ fn main() {
     # deserialized rng continues the SAME sequence
     assert_eq(rng_next_u32(s1), rng_next_u32(s2), "roundtripped rng resumes sequence");
 
+    # --- 2.0.4: rng_seed re-seeds in place, identically to rng_new ---
+    # Factored out of rng_new so a hot path can restart a sequence without
+    # allocating (the arena never frees). The two MUST stay bit-identical.
+    test_group("rng_seed");
+    var rs1 = rng_new(31337);
+    var rs2 = rng_new(999);
+    rng_seed(rs2, 31337);
+    var rs_same = 1;
+    var rs_i = 0;
+    while (rs_i < 256) {
+        if (rng_next_u32(rs1) != rng_next_u32(rs2)) { rs_same = 0; }
+        rs_i = rs_i + 1;
+    }
+    assert_eq(rs_same, 1, "rng_seed(s) reproduces rng_new(s) stream exactly");
+
     return assert_summary();
 }
 

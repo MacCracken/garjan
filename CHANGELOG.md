@@ -5,6 +5,145 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.5]
+
+Per-sample hot-path optimization. **Every change is bit-exactness-preserving**,
+verified by diffing a raw-bit hash of every synthesizer's output before and
+after — not inferred from the suite passing.
+
+### Changed — loop-invariant work hoisted out of per-sample loops
+
+Only hoisting and redundant-pass elimination. **No floating-point
+reassociation**, which would have changed results.
+
+- **`wind_process_block`, `texture_process_block`** — folded the second
+  DC-blocking pass into the generation loop. Both write each index exactly
+  once, in order, so the blocker sees identical inputs in identical order;
+  this removes a `vec_get` + `vec_set` per sample plus a whole extra traversal.
+  The other ten synths with a separate DC pass were left alone: they accumulate
+  (fire adds crackle over roar, rain adds drops), so the pass genuinely has to
+  come last.
+- **`thunder_process_block`** — hoisted `crack_div` and its f64 conversion,
+  `-10.0`, `-2.0`, `sr*decay_time`, and the 0.8/0.6 gains. Also dropped a
+  `vec_get` of a slot just written to 0, keeping it as `f64_add(0, x)` rather
+  than a plain store so a `-0.0` contribution still normalises exactly as before.
+- **`surf_process_block`** — eleven envelope breakpoints (0.2/0.25/0.3/0.45/0.55),
+  the `-3.0` gain and the jitter range were rebuilt every sample, several twice.
+  The `1/period` reciprocal is now recomputed only on a wave-cycle boundary,
+  where `period` actually changes, instead of once per sample.
+- **`fire`, `rain`, `cloth`** — per-event decay lengths converted to f64 once per
+  event instead of once per sample of the tail; block `width` hoisted out of the
+  event loop; amplitude/duration ranges and envelope constants hoisted.
+- **`water_process_stream`** — the 0.7/0.3 modulator terms, matching what the
+  sibling `water_process_waves` already did.
+- **`rolling_process_block`** — `rotation_rate` and the phase increment are
+  fixed before the loop (velocity, radius and sr are all locals), so two divides
+  and a multiply per sample are gone.
+- **`friction_process_block`** — `velocity`/`pressure` read once instead of
+  through accessors per sample; neither is written in the loop.
+- **`footstep_process_block`** — `modal_bank` read once. `footstep_fire_step`
+  resets the bank's *state* but never reassigns the pointer, so it is invariant.
+
+### Results
+
+Median of 5 runs, against the median of the 2.0.2-2.0.4 runs:
+
+| Synth   | Before   | After    | Change |
+|---------|----------|----------|--------|
+| wind    | 10.95 ms | 10.34 ms | −5.6%  |
+| thunder | 5.43 ms  | 5.25 ms  | −3.3%  |
+| fire    | 4.46 ms  | 4.36 ms  | −2.2%  |
+| rain    | 3.74 ms  | 3.69 ms  | −1.3%  |
+| cloth   | 1.02 ms  | 1.02 ms  | ~0     |
+
+Modest, and worth stating plainly: **most of the remaining time is inside the
+naad bundle** — per-sample noise generation and biquad/SVF filtering — not in
+garjan's own arithmetic. The largest win (wind) came from deleting a whole pass
+over the buffer, not from hoisting constants. `cloth` did not move because its
+flap events are sparse, so the inner loop it optimises rarely runs. Further
+gains need naad-level or algorithmic work, not more hoisting.
+
+### Added
+
+- **`scripts/audio-hash.cyr`** — the bit-exactness oracle used for this work.
+  Prints a rolling hash of the raw f64 bit patterns of every synth's output over
+  three successive blocks, so any last-ulp or ±0.0 change is visible. Capture
+  before, change, rebuild, diff. Event-driven synths are excited first, because
+  an unexcited synth outputs silence and hashes to 0 — which would make the
+  oracle vacuously pass. Hashes are deliberately **not** committed as golden
+  values: they pin one toolchain, dep set and architecture.
+
+**478 assertions** across 33 suites, unchanged and all green.
+
+## [2.0.4]
+
+Arena-lifetime fix — the item 2.0.3 left open. 2.0.3 made heap exhaustion
+*detectable*; this release stops the streaming paths from marching toward it.
+Audio output is bit-identical, verified by direct equivalence tests rather than
+inferred from the suite passing.
+
+### Fixed — the two streaming paths that grew the arena on every block
+
+The bump allocator never frees, so anything allocated per block accumulates for
+the life of the process. Two hot paths did exactly that. Both were *faithful*
+ports — Rust allocated per call too — but Rust's values were dropped, and here
+they are not.
+
+- **`impact_generate` built a fresh `Exciter` (and its `Rng`) on every call** —
+  **64 bytes per block**. Mirrors `rust-old/src/impact.rs:194`
+  (`let mut exciter = Exciter::new(...)` inside the generate loop). `Impact` now
+  caches one exciter, built alongside the other reconstructable components in
+  `impact_build_naad`, and reconfigures it per call via the new
+  `exciter_reset`.
+- **`texture_process_block` allocated a 24-byte band-mix buffer every block** —
+  **24 bytes per block**. The table is now written through
+  `texture_band_mix_into(out, texture_type)` into a stack buffer
+  (`var mixbuf[24]` — 24 bytes = three f64 slots). The owning
+  `texture_band_mix` is retained for API compatibility and delegates to the
+  same helper, so there is one definition of the table.
+
+Measured over 200 `process_block` calls: impact **12,800 -> 0 bytes**, texture
+**4,800 -> 0 bytes**. At 44.1 kHz with 512-sample blocks (~86 blocks/s) that was
+roughly 27 MB/hour between them, which reaches the 2 GiB `ALLOC_MAX` in about
+three days of continuous streaming.
+
+### Added
+
+- **`rng_seed(self, seed)`** (`src/rng.cyr`) — re-seeds an existing `Rng` in
+  place, reproducing exactly what `rng_new(seed)` would have produced. Factored
+  *out of* `rng_new`, which now calls it, so there is a single definition of the
+  seeding sequence and the two cannot drift.
+- **`exciter_reset(self, type, duration, amplitude)`** (`src/modal.cyr`) —
+  equivalent to `exciter_new` + `exciter_trigger` minus both allocations. It
+  re-seeds the exciter's rng to the new `EXCITER_RNG_SEED` constant (31337,
+  now shared with `exciter_new`), which is what makes reuse bit-exact:
+  without it a `NOISE_BURST` excitation would drift from block 2 onward.
+- **`texture_band_mix_into(out, texture_type)`** (`src/texture.cyr`).
+
+### Verified
+
+Bit-exactness is asserted directly, not assumed:
+
+- `exciter_reset` reproduces `exciter_new` + `exciter_trigger` sample-for-sample
+  across all three excitation types, and a *reused* exciter matches a freshly
+  built one on every repeat (`tests/modal.tcyr`).
+- `rng_seed(s)` reproduces `rng_new(s)`'s stream (`tests/rng.tcyr`).
+- `texture_band_mix` agrees with `texture_band_mix_into` for every texture type
+  (`tests/texture.tcyr`).
+- 50 consecutive `process_block` calls allocate **0 bytes** on both the impact
+  and texture paths (`tests/impact.tcyr`, `tests/texture.tcyr`).
+
+**478 assertions** across 33 suites (was 472). Benchmarks unchanged within noise.
+
+### Still open
+
+Arena growth is fixed for the *streaming* paths only. Every `*_synthesize` still
+builds its output vec by pushing from capacity 16 (about a dozen doubling
+reallocations per second of audio, all of them permanently retained), and the
+allocator still has no free at all — a caller that constructs and discards
+synths in a loop grows the arena regardless. Both are lifetime problems, not
+detection problems.
+
 ## [2.0.3]
 
 Completes the allocation-failure hardening deferred from 2.0.2. No behavior

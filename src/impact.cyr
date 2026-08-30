@@ -85,6 +85,7 @@ struct Impact {
     excitation_buf;
     transient_noise;
     resonance_filter;
+    exciter;
 }
 
 # Build/refresh the reconstructable components (modal bank, resonance filter,
@@ -130,6 +131,15 @@ fn impact_build_naad(self) {
         i = i + 1;
     }
     Impact_set_excitation_buf(self, ebuf);
+
+    # One reusable exciter. Its type/duration/amplitude vary per impact, so it
+    # is built with placeholders and reconfigured by exciter_reset in
+    # impact_generate. Rust built a fresh Exciter per call (rust-old/src/
+    # impact.rs:194) and dropped it; the arena here never frees, so a per-call
+    # build leaked an Exciter + an Rng on every process_block.
+    var exc = exciter_new(EXCITATION_IMPULSE, 0, 0);
+    if (garjan_is_err(exc) == 1) { return exc; }
+    Impact_set_exciter(self, exc);
     return GARJAN_OK;
 }
 
@@ -198,9 +208,8 @@ fn impact_generate(self, impact_type, velocity, output) {
     # Primary excitation: build an exciter from the impact type + velocity.
     var exc_type = impact_type_exc_type(impact_type);
     var exc_dur = impact_type_exc_duration(impact_type, sr);
-    var exciter = exciter_new(exc_type, exc_dur, velocity);
-    if (garjan_is_err(exciter) == 1) { return exciter; }
-    exciter_trigger(exciter);
+    var exciter = Impact_exciter(self);
+    exciter_reset(exciter, exc_type, exc_dur, velocity);
 
     var transient_noise = Impact_transient_noise(self);
     var resonance_filter = Impact_resonance_filter(self);

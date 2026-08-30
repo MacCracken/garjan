@@ -125,26 +125,32 @@ fn rain_process_block(self, output) {
     var step = block_size;
     if (step < 1) { step = 1; }
     var drops_per_block = f64_mul(rain_intensity_drops_per_second(intensity), f64_div(f64_from(1), f64_from(100)));
+    # Hoisted out of the drop / decay loops below.
+    var drop_lo = f64_div(f64_from(3), f64_from(10));
+    var neg_five = f64_neg(f64_from(5));
 
     var block_start = 0;
     while (block_start < num) {
         var block_end = block_start + block_size;
         if (block_end > num) { block_end = num; }
         var n_drops = rng_poisson(rng, drops_per_block);
+        # Block width is fixed for the whole drop loop below.
+        var width = f64_from(block_end - block_start);
         var d = 0;
         while (d < n_drops) {
-            var width = f64_from(block_end - block_start);
             var offset = f64_to(rng_next_f32_range(rng, 0, width));
             var idx = block_start + offset;
             if (idx < num) {
-                var drop_amp = f64_mul(amp, rng_next_f32_range(rng, f64_div(f64_from(3), f64_from(10)), F64_ONE));
+                var drop_amp = f64_mul(amp, rng_next_f32_range(rng, drop_lo, F64_ONE));
                 var decay_samples = f64_to(rng_next_f32_range(rng, f64_from(20), f64_from(80)));
+                # Fixed for this drop's decay tail; converted once, not per sample.
+                var decay_samples_f = f64_from(decay_samples);
                 var span = decay_samples;
                 if (num - idx < span) { span = num - idx; }
                 var j = 0;
                 while (j < span) {
-                    var t = f64_div(f64_from(j), f64_from(decay_samples));
-                    var env = f64_exp(f64_mul(f64_neg(f64_from(5)), t));
+                    var t = f64_div(f64_from(j), decay_samples_f);
+                    var env = f64_exp(f64_mul(neg_five, t));
                     var dn = noise_next_sample(drop_noise);
                     var contrib = f64_mul(drop_amp, f64_mul(env, dn));
                     vec_set(output, idx + j, f64_add(vec_get(output, idx + j), contrib));
@@ -325,6 +331,17 @@ fn thunder_process_block(self, output) {
     # decay_time = 0.5 + distance_m*0.001
     var decay_time = f64_add(F64_HALF, f64_mul(distance_m, f64_div(f64_from(1), f64_from(1000))));
 
+    # Loop-invariants, hoisted out of the per-sample loop below. Every one of
+    # these was rebuilt on each of the 44,100 samples per second of audio.
+    var crack_div = crack_len;
+    if (crack_div < 1) { crack_div = 1; }
+    var crack_div_f = f64_from(crack_div);
+    var neg_ten = f64_neg(f64_from(10));
+    var crack_gain = f64_div(f64_from(8), f64_from(10));
+    var neg_two = f64_neg(F64_TWO);
+    var rumble_scale = f64_mul(sr, decay_time);
+    var rumble_gain = f64_div(f64_from(6), f64_from(10));
+
     var i = 0;
     while (i < num) {
         var abs_pos = sample_position + i;
@@ -334,22 +351,23 @@ fn thunder_process_block(self, output) {
         } else {
             var pos_after_delay = abs_pos - delay_samples;
             if (pos_after_delay < crack_len) {
-                var crack_div = crack_len;
-                if (crack_div < 1) { crack_div = 1; }
-                var t_crack = f64_div(f64_from(pos_after_delay), f64_from(crack_div));
-                var env_crack = f64_exp(f64_mul(f64_neg(f64_from(10)), t_crack));
+                var t_crack = f64_div(f64_from(pos_after_delay), crack_div_f);
+                var env_crack = f64_exp(f64_mul(neg_ten, t_crack));
                 var cn = noise_next_sample(crack_noise);
-                var contrib_crack = f64_mul(f64_mul(f64_mul(amp, env_crack), cn), f64_div(f64_from(8), f64_from(10)));
-                vec_set(output, i, f64_add(vec_get(output, i), contrib_crack));
+                var contrib_crack = f64_mul(f64_mul(f64_mul(amp, env_crack), cn), crack_gain);
+                # output[i] was just set to 0 above, so the read-back is a known
+                # 0 -- kept as an add rather than a plain store so a -0.0
+                # contribution still normalises exactly as it did before.
+                vec_set(output, i, f64_add(0, contrib_crack));
             } else {
                 var rumble_pos = pos_after_delay - crack_len;
-                var t_rumble = f64_div(f64_from(rumble_pos), f64_mul(sr, decay_time));
-                var env_rumble = f64_exp(f64_mul(f64_neg(F64_TWO), t_rumble));
+                var t_rumble = f64_div(f64_from(rumble_pos), rumble_scale);
+                var env_rumble = f64_exp(f64_mul(neg_two, t_rumble));
                 var rn = noise_next_sample(rumble_noise);
                 var filtered = filter_biquad_process_sample(rumble_filter, rn);
                 var contrib_rumble = f64_mul(f64_mul(f64_mul(amp, env_rumble), filtered),
-                  f64_div(f64_from(6), f64_from(10)));
-                vec_set(output, i, f64_add(vec_get(output, i), contrib_rumble));
+                  rumble_gain);
+                vec_set(output, i, f64_add(0, contrib_rumble));
             }
             i = i + 1;
         }
@@ -522,21 +540,18 @@ fn wind_process_block(self, output) {
     # gust_scale = gustiness * 0.5
     var gust_scale = f64_mul(gustiness, F64_HALF);
 
+    # DC-blocked inline rather than in a second pass over the buffer. The
+    # generation loop writes each index exactly once, in order, so the blocker
+    # sees the identical inputs in the identical order -- bit-identical output,
+    # minus a vec_get + vec_set per sample.
+    var dc = Wind_dc_blocker(self);
     var i = 0;
     while (i < num) {
         var n = noise_next_sample(noise_gen);
         var filtered = filter_svf_process_sample_lowpass(shape_filter, n);
         var gust = f64_add(F64_ONE, f64_mul(gust_scale, modulation_lfo_next_value(gust_lfo)));
-        vec_set(output, i, f64_mul(f64_mul(filtered, base_amp), gust));
+        vec_set(output, i, garjan_dcblocker_process(dc, f64_mul(f64_mul(filtered, base_amp), gust)));
         i = i + 1;
-    }
-
-    # DC-block the whole buffer, then advance the sample cursor.
-    var dc = Wind_dc_blocker(self);
-    var k = 0;
-    while (k < num) {
-        vec_set(output, k, garjan_dcblocker_process(dc, vec_get(output, k)));
-        k = k + 1;
     }
     Wind_set_sample_position(self, Wind_sample_position(self) + num);
     return 0;

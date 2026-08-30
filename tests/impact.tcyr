@@ -80,6 +80,20 @@ fn main() {
     # restored synth reports the same material
     assert_eq(impact_material(g2), MATERIAL_WOOD, "restored material matches");
 
+    # --- 2.0.4: streaming must not grow the arena ---
+    # impact_generate built a fresh Exciter (+ its Rng) per block -- 64 B each
+    # against an allocator that never frees. It now reuses one cached exciter.
+    test_group("zero-alloc streaming");
+    var ia = impact_new(MATERIAL_METAL, f64_from(44100));
+    var ia_out = vec_new();
+    var ia_n = 0;
+    while (ia_n < 256) { vec_push(ia_out, 0); ia_n = ia_n + 1; }
+    impact_process_block(ia, IMPACT_STRIKE, ia_out);
+    var ia_before = alloc_used();
+    var ia_b = 0;
+    while (ia_b < 50) { impact_process_block(ia, IMPACT_STRIKE, ia_out); ia_b = ia_b + 1; }
+    assert_eq(alloc_used() - ia_before, 0, "50 impact blocks allocate 0 bytes");
+
     return assert_summary();
 }
 var ec = main();
