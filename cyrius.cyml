@@ -57,7 +57,11 @@ modules = [
 ]
 
 # stdlib: alloc/vec/str for heap+buffers; math (clamp/min/max/lerp/F64_*) +
-# ganita (sin/cos/tan/exp/ln/pow/sqrt/… transcendentals) for the DSP; bayan
+# ganita for f64_pow (garjan's only direct ganita call) AND, more importantly,
+# for the 19 symbols hisab needs (f64_acos/atan2/cosh/sinh/pow + the whole mat_*
+# linear-algebra family), goonj's 5 and naad's 2 -- dropping it breaks the deps,
+# not garjan's own code. NOTE sin/cos/exp/sqrt/abs are cycc INTRINSICS, not
+# ganita: verify with `grep -l '^fn f64_sin(' lib/*.cyr` (no match). bayan
 # (JSON parse) + fmt + str drive the `#derive(Serialize)` codec; bench for
 # .bcyr harnesses; assert for .tcyr.
 [deps]

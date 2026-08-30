@@ -78,6 +78,33 @@ Also fixed: `scripts/audio-hash.cyr` passed a `MATERIAL_*` id where
 `footstep_new` takes a `TERRAIN_*`. Only the footstep hash changes; the other
 20 synths are unaffected.
 
+### Fixed — the math-library attribution was wrong
+
+The port audit recorded that `rust-old/src/math.rs` (an f32 `sin/cos/exp/sqrt/
+powf` shim) was "superseded by ganita's f64 transcendentals". That was asserted
+from reading `math.rs`'s surface, never verified, and is **wrong**: five of the
+six float functions garjan calls — `f64_sin`, `f64_cos`, `f64_exp`, `f64_sqrt`,
+`f64_abs` — are **cycc intrinsics**, defined nowhere in `lib/`. ganita supplies
+only `f64_pow`, one of its 133 functions.
+
+ganita is still a required dependency, but for the *deps*: hisab needs 19 of its
+symbols (including the whole `mat_*` linear-algebra family), goonj 5, naad 2.
+Dropping it breaks the build through them, not through garjan.
+
+Accuracy is now measured rather than assumed — 401 trig points over `[0, 4π]`
+and 241 `exp` points over `[-12, 0]`, against correctly-rounded libm:
+**`f64_exp` and `f64_sqrt` are bit-exact**, `f64_cos` 1.4e-20, `f64_sin`
+2.8e-17, `f64_pow` ≤4 ULP. The worst deviation is ~4 billion times smaller than
+a 24-bit audio LSB. Recorded in architecture note
+[002](docs/architecture/002-where-the-transcendentals-come-from.md), along with
+the parity consequence it makes explicit: **the port can never be bit-identical
+to `rust-old`**, because Rust computed in f32 (epsilon 1.2e-7) and the port in
+f64 (2.2e-16). Parity with the oracle is structural, not sample-for-sample —
+which is why `GARJAN_EPSILON` is deliberately `f32::EPSILON`.
+
+Corrected in `cyrius.cyml`, `docs/development/roadmap.md` and
+`docs/development/state.md`.
+
 ### Deferred — output-vector pre-sizing is blocked upstream
 
 Every `*_synthesize` builds its output by pushing from capacity 16. Measured:

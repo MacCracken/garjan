@@ -123,7 +123,9 @@ outstanding item pinned to a version. Immediate:
 
 Verified 2026-08-30: **30 of 34** `rust-old/src` modules ported; **219** public
 items checked; **106 of 106** enum variants have a Cyrius constant. `lib.rs`
-(crate root) and `math.rs` (f32 shim, superseded by ganita) are correctly not
+(crate root) and `math.rs` (f32 shim — superseded by cycc's f64 intrinsics
+plus ganita's `f64_pow`, see architecture note
+[002](../architecture/002-where-the-transcendentals-come-from.md)) are correctly not
 ported. Re-run the check with the recipe in
 [`roadmap.md`](roadmap.md#port-completeness) after any upstream change — a
 missing `pub fn` fails the build, but a missing enum *variant* silently narrows

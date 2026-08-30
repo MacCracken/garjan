@@ -21,8 +21,12 @@ Verified 2026-08-30 by diffing `rust-old/` against `src/` (see
   name shortening, not a gap).
 - Not ported, **correctly**: `lib.rs` (crate root — 62 `use`/`mod` lines plus a
   `Send + Sync` assertion test; Cyrius has a flat namespace and no module
-  system) and `math.rs` (an f32 `sin/cos/exp/sqrt/powf` shim over std/libm,
-  superseded by ganita's f64 transcendentals).
+  system) and `math.rs` (an f32 `sin/cos/exp/sqrt/powf` shim over std/libm).
+  `math.rs`'s five functions are superseded by **cycc's f64 intrinsics**
+  (`f64_sin`/`cos`/`exp`/`sqrt`) plus **ganita's `f64_pow`** — not by ganita
+  wholesale, which supplies exactly one of the six transcendentals garjan calls.
+  Accuracy was measured rather than assumed; see architecture note
+  [002](../architecture/002-where-the-transcendentals-come-from.md).
 - Not ported, **outstanding** — these are scheduled below:
   `integration/soorat.rs` (315 lines), `examples/` (5 programs),
   `tests/integration.rs` (134 tests), and most of `benches/benchmarks.rs`
