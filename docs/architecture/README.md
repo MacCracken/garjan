@@ -6,4 +6,6 @@ Not decisions (those live in [`../adr/`](../adr/)) and not guides (those live in
 
 ## Items
 
-_Empty. Add a numbered entry (`001-kebab-case-title.md`) the first time the code has a non-obvious invariant a reader can't derive. Do not write entries for decisions — those are ADRs._
+- [001 — Deserialize does not restore DSP state (and Rust's did)](001-deserialize-does-not-restore-dsp-state.md) — `*_from_json_str` rebuilds naad components from scalars instead of restoring their live state. Rust serialized that state; the port does not, and the source comments claiming a `#[serde(skip)]` mirror were describing an attribute that does not exist in `rust-old/`.
+
+Add a numbered entry (`NNN-kebab-case-title.md`) whenever the code has a non-obvious invariant a reader can't derive. Numbered chronologically — never renumber. Do not write entries for decisions — those are ADRs.

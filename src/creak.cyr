@@ -8,7 +8,8 @@
 # Result<Self> -> pointer / negative GARJAN_* code. The naad noise_gen +
 # shape_filter AND the ModalBank are reconstructed on deserialize (rebuilt in
 # creak_build_naad from `source`); rng + dc_blocker state ARE serialized (via
-# the flattened CreakParams below), matching the Rust skip+reconstruct split.
+# the flattened CreakParams below). Rust serialized the DSP state too; this
+# port does not -- see architecture note 001.
 # Requires: error, logging, dsp, rng, material, modal, contact foundations +
 # the naad bundle (noise_new/noise_next_sample,
 # filter_biquad_new/filter_biquad_process_sample).
@@ -283,8 +284,8 @@ fn creak_to_json(self, sb) {
 }
 
 # Rebuild a Creak from JSON: restore scalars + rng + dc_blocker state, then
-# reconstruct the modal bank + naad components fresh from `source` (matches
-# Rust's skip+reconstruct).
+# reconstruct the modal bank + naad components fresh from `source` -- Rust
+# restored their state instead (architecture note 001).
 #must_use
 fn creak_from_json_str(json) {
     var p = CreakParams_from_json_str(json);

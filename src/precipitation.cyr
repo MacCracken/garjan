@@ -4,7 +4,7 @@
 # Ports rust-old/src/precipitation.rs. The Cyrius port always uses the naad
 # backend (no feature flags), so it ports the naad path (noise_gen +
 # shape_filter) and drops the fallback. f32 -> f64. Result<Self> -> pointer /
-# negative GARJAN_* code. The Rust `#[serde(skip)]`-style naad components
+# negative GARJAN_* code. The naad components
 # (noise_gen, shape_filter) AND the modal_bank are reconstructed on
 # deserialize from the serialized params (precip_type + stone_size + surface +
 # sample_rate deterministically pin them). rng + dc_blocker state ARE
@@ -331,7 +331,7 @@ fn precipitation_to_json(self, sb) {
 
 # Rebuild a Precipitation from JSON: restore scalars + rng + dc_blocker state,
 # then reconstruct the modal_bank + naad components fresh (matches Rust's
-# skip+reconstruct).
+# rebuilt, not restored -- architecture note 001).
 #must_use
 fn precipitation_from_json_str(json) {
     var p = PrecipitationParams_from_json_str(json);

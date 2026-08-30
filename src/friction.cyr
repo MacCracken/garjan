@@ -7,7 +7,7 @@
 # generate_noise path (noise_gen + shape_filter) and drops the rng fallback.
 # f32 -> f64. Result<Self> -> pointer / negative GARJAN_* code.
 #
-# The Rust `#[serde(skip)]`-equivalent naad components (noise_gen, shape_filter)
+# The naad components (noise_gen, shape_filter)
 # plus the reconstructable modal_bank are NOT serialized; they are rebuilt on
 # deserialize in friction_build_naad from friction_type/surface/sample_rate.
 # The scalar params + rng + dc_blocker state ARE serialized (via the flattened

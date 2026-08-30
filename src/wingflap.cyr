@@ -7,7 +7,7 @@
 # shape_filter (the non-naad rng.next_f32 fallback is dropped). f32 -> f64.
 # Result<Self> -> pointer / negative GARJAN_* code.
 #
-# The Rust `#[serde(skip)]` naad components (noise_gen, shape_filter) are
+# The naad components (noise_gen, shape_filter) are
 # reconstructable from filter_freq + sample_rate, so they are NOT serialized;
 # they are rebuilt in wingflap_build_naad on deserialize. rng + dc_blocker
 # state ARE serialized (via the flattened WingFlapParams below).
@@ -19,7 +19,7 @@ var BIRD_SIZE_SMALL  = 0;
 var BIRD_SIZE_MEDIUM = 1;
 var BIRD_SIZE_LARGE  = 2;
 
-# ---- WingFlapParams: the serializable slice (Rust's non-skipped fields, with
+# ---- WingFlapParams: the serializable slice (the scalar fields only, with
 # rng + dc_blocker FLATTENED to scalars so #derive(Serialize)'s single-pass
 # from_json_str works). bird_size is a BIRD_SIZE_* int. filter_freq is carried
 # so build_naad can reconstruct the bandpass shape filter. Synced to/from the
@@ -255,7 +255,7 @@ fn wingflap_to_json(self, sb) {
 }
 
 # Rebuild a WingFlap from JSON: restore scalars + rng + dc_blocker state, then
-# reconstruct the naad components fresh (matches Rust's skip+reconstruct).
+# reconstruct the naad components fresh (rebuilt, not restored -- architecture note 001).
 #must_use
 fn wingflap_from_json_str(json) {
     var p = WingFlapParams_from_json_str(json);

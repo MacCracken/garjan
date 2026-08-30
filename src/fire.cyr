@@ -3,12 +3,13 @@
 # Ports rust-old/src/fire.rs. The Cyrius port always uses the naad backend
 # (no feature flags), so it ports process_block_naad and drops the fallback.
 # f32 -> f64. Result<Self> -> pointer / negative GARJAN_* code. The Rust
-# `#[serde(skip)]` naad components are reconstructed on deserialize; rng +
-# dc_blocker state ARE serialized (via the flattened FireParams below).
+# naad components are reconstructed on deserialize rather than restored, which
+# is a divergence from Rust (architecture note 001); rng + dc_blocker state ARE
+# serialized (via the flattened FireParams below).
 # Requires: error, logging, dsp, rng foundations + the naad bundle
 # (noise_new/noise_next_sample, filter_biquad_new/filter_biquad_process_sample).
 
-# ---- FireParams: the serializable slice (exactly Rust's non-skipped fields,
+# ---- FireParams: the serializable slice (the scalar fields only,
 # with rng + dc_blocker FLATTENED so #derive(Serialize)'s fast single-pass
 # from_json_str works). Synced to/from the live Fire on (de)serialize. ----
 #derive(accessors)
@@ -191,7 +192,7 @@ fn fire_to_json(self, sb) {
 }
 
 # Rebuild a Fire from JSON: restore scalars + rng + dc_blocker state, then
-# reconstruct the naad components fresh (matches Rust's skip+reconstruct).
+# reconstruct the naad components fresh (rebuilt, not restored -- architecture note 001).
 #must_use
 fn fire_from_json_str(json) {
     var p = FireParams_from_json_str(json);

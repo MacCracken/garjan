@@ -3,7 +3,7 @@
 # Ports rust-old/src/weather.rs. The Cyrius port always uses the naad backend
 # (no feature flags), so it ports the naad code paths and drops the fallbacks.
 # f32 -> f64. Result<Self> -> pointer / negative GARJAN_* code. The Rust
-# `#[serde(skip)]`-equivalent naad components (NoiseGenerator/BiquadFilter/
+# naad components (NoiseGenerator/BiquadFilter/
 # StateVariableFilter/Lfo) are reconstructed on deserialize; rng + dc_blocker
 # state ARE serialized (via the flattened *Params structs below).
 #
@@ -43,7 +43,7 @@ fn rain_intensity_amplitude(intensity) {
 # Rain
 # ---------------------------------------------------------------------------
 
-# ---- RainParams: the serializable slice (exactly Rust's non-skipped fields,
+# ---- RainParams: the serializable slice (the scalar fields only,
 # rng + dc_blocker FLATTENED). intensity is the RainIntensity int tag. ----
 #derive(accessors)
 #derive(Serialize)

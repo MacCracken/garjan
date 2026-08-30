@@ -50,8 +50,9 @@ struct Bubble {
 }
 
 # Build/refresh the naad noise generator (white, seed 4040). Shared by
-# bubble_new and bubble_from_json_str (mirrors the Rust skip+reconstruct of
-# the naad noise_gen). noise_new does not fail, so this always returns
+# bubble_new and bubble_from_json_str. Rust serialized the noise_gen's live
+# state; this port rebuilds it -- see architecture note 001. noise_new does not
+# fail, so this always returns
 # GARJAN_OK; kept for structural parity with the other synths.
 fn bubble_build_naad(self) {
     Bubble_set_noise_gen(self, noise_new(NOISE_WHITE, 4040));
@@ -235,7 +236,7 @@ fn bubble_to_json(self, sb) {
 }
 
 # Rebuild a Bubble from JSON: restore scalars + rng + dc_blocker state, then
-# reconstruct the naad noise generator fresh (matches Rust's skip+reconstruct).
+# reconstruct the naad noise generator fresh (rebuilt, not restored -- architecture note 001).
 #must_use
 fn bubble_from_json_str(json) {
     var p = BubbleParams_from_json_str(json);

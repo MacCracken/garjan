@@ -6,7 +6,7 @@
 # naad backend (no feature flags), so it ports the naad generate_noise path
 # (pink noise -> bandpass surface_filter) and drops the rng fallback. f32 ->
 # f64. Result<Self> -> pointer / negative GARJAN_* code. The Rust
-# `#[serde(skip)]`-equivalent live components (noise_gen, surface_filter,
+# live components (noise_gen, surface_filter,
 # modal_bank) are reconstructed on deserialize; rng + dc_blocker state ARE
 # serialized (via the flattened RollingParams below).
 #

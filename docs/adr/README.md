@@ -19,10 +19,17 @@ Decisions about garjan — what we chose, the context, and the consequences we a
 
 ## Index
 
-- [0005 — Allocation failure is an error code, not an abort](0005-allocation-failure-is-an-error-code-not-an-abort.md) — Accepted, 2026-08-30.
+- [0001 — Modal synthesis](0001-modal-synthesis.md) — Accepted
+- [0002 — Dual code paths (naad + fallback)](0002-dual-code-paths.md) — Accepted. **Superseded in practice by the port**: the Cyrius port always uses the naad backend and dropped the fallback, so the `naad-backend` feature gate this ADR describes no longer exists. Retained as the record of why the Rust crate had two paths.
+- [0003 — Scope boundaries with sibling crates](0003-scope-boundaries.md) — Accepted. The boundary table (garjan owns sources; goonj propagation, dhvani mixing, prani/svara vocal, ghurni mechanical).
+- [0004 — Deterministic synthesis](0004-deterministic-synthesis.md) — Accepted
+- [0005 — Allocation failure is an error code, not an abort](0005-allocation-failure-is-an-error-code-not-an-abort.md) — Accepted, 2026-08-30
 
-> **Numbering note.** 0001-0004 are taken by `adr-001`..`adr-004`, which live in
-> [`../architecture/`](../architecture/) under an older `adr-NNN-` scheme that
-> predates these conventions. They are decisions and belong here; they have not
-> been moved because "never renumber" makes relocation a separate, deliberate
-> change. New ADRs start at 0005 and follow the conventions above.
+> **Format note.** 0001-0004 were written before these conventions and before
+> the port; they use `## Status` / `Accepted (vN)` headings rather than the
+> `**Status**` / `**Date**` form in [`template.md`](template.md), and their
+> version references are to the pre-port Rust line. They were relocated here
+> from `docs/architecture/` (where they had been filed against the README's own
+> rule) without renumbering or reformatting — the content is a historical
+> record, and rewriting it would blur what was decided when. New ADRs follow
+> the template.

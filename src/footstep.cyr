@@ -7,7 +7,7 @@
 # and drops the rng-fallback generate_noise. f32 -> f64. Result<Self> ->
 # pointer / negative GARJAN_* code.
 #
-# serde: the Rust `#[serde(skip)]`-equivalent naad components (noise_gen,
+# serde: the naad components (noise_gen,
 # shape_filter) plus the reconstructable Exciter / ModalBank are rebuilt on
 # deserialize via footstep_build_naad; rng + dc_blocker + all step-timing
 # scalars ARE serialized (via the flattened FootstepParams below). The main

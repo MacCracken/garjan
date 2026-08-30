@@ -1400,12 +1400,13 @@ fn voice_pool_from_json_str(json) {
 # Ports rust-old/src/fire.rs. The Cyrius port always uses the naad backend
 # (no feature flags), so it ports process_block_naad and drops the fallback.
 # f32 -> f64. Result<Self> -> pointer / negative GARJAN_* code. The Rust
-# `#[serde(skip)]` naad components are reconstructed on deserialize; rng +
-# dc_blocker state ARE serialized (via the flattened FireParams below).
+# naad components are reconstructed on deserialize rather than restored, which
+# is a divergence from Rust (architecture note 001); rng + dc_blocker state ARE
+# serialized (via the flattened FireParams below).
 # Requires: error, logging, dsp, rng foundations + the naad bundle
 # (noise_new/noise_next_sample, filter_biquad_new/filter_biquad_process_sample).
 
-# ---- FireParams: the serializable slice (exactly Rust's non-skipped fields,
+# ---- FireParams: the serializable slice (the scalar fields only,
 # with rng + dc_blocker FLATTENED so #derive(Serialize)'s fast single-pass
 # from_json_str works). Synced to/from the live Fire on (de)serialize. ----
 #derive(accessors)
@@ -1588,7 +1589,7 @@ fn fire_to_json(self, sb) {
 }
 
 # Rebuild a Fire from JSON: restore scalars + rng + dc_blocker state, then
-# reconstruct the naad components fresh (matches Rust's skip+reconstruct).
+# reconstruct the naad components fresh (rebuilt, not restored -- architecture note 001).
 #must_use
 fn fire_from_json_str(json) {
     var p = FireParams_from_json_str(json);
@@ -1624,7 +1625,7 @@ fn fire_from_json_str(json) {
 # Ports rust-old/src/weather.rs. The Cyrius port always uses the naad backend
 # (no feature flags), so it ports the naad code paths and drops the fallbacks.
 # f32 -> f64. Result<Self> -> pointer / negative GARJAN_* code. The Rust
-# `#[serde(skip)]`-equivalent naad components (NoiseGenerator/BiquadFilter/
+# naad components (NoiseGenerator/BiquadFilter/
 # StateVariableFilter/Lfo) are reconstructed on deserialize; rng + dc_blocker
 # state ARE serialized (via the flattened *Params structs below).
 #
@@ -1664,7 +1665,7 @@ fn rain_intensity_amplitude(intensity) {
 # Rain
 # ---------------------------------------------------------------------------
 
-# ---- RainParams: the serializable slice (exactly Rust's non-skipped fields,
+# ---- RainParams: the serializable slice (the scalar fields only,
 # rng + dc_blocker FLATTENED). intensity is the RainIntensity int tag. ----
 #derive(accessors)
 #derive(Serialize)
@@ -2249,7 +2250,7 @@ fn wind_from_json_str(json) {
 # Ports rust-old/src/water.rs. The Cyrius port always uses the naad backend
 # (no feature flags), so it ports the #[cfg(feature="naad-backend")] paths and
 # drops the fallback. f32 -> f64. Result<Self> -> pointer / negative GARJAN_*
-# code. The Rust #[serde(skip)]-equivalent naad components (noise_gen,
+# code. The naad components (noise_gen,
 # shape_filter, mod_lfo) are reconstructed on deserialize; water_type,
 # intensity, sample_rate, sample_position, drip_freq, rng, and dc_blocker are
 # serialized (via the flattened WaterParams below).
@@ -2263,7 +2264,7 @@ var WATER_DRIP   = 1;
 var WATER_SPLASH = 2;
 var WATER_WAVES  = 3;
 
-# ---- WaterParams: the serializable slice (Rust's non-skipped fields, with
+# ---- WaterParams: the serializable slice (the scalar fields only, with
 # water_type as an int tag and rng + dc_blocker FLATTENED to scalars so
 # #derive(Serialize)'s single-pass from_json_str works). Synced to/from the
 # live Water on (de)serialize. ----
@@ -2532,7 +2533,7 @@ fn water_to_json(self, sb) {
 }
 
 # Rebuild a Water from JSON: restore scalars + rng + dc_blocker state, then
-# reconstruct the naad components fresh (matches Rust's skip+reconstruct).
+# reconstruct the naad components fresh (rebuilt, not restored -- architecture note 001).
 #must_use
 fn water_from_json_str(json) {
     var p = WaterParams_from_json_str(json);
@@ -2570,7 +2571,7 @@ fn water_from_json_str(json) {
 # Ports rust-old/src/precipitation.rs. The Cyrius port always uses the naad
 # backend (no feature flags), so it ports the naad path (noise_gen +
 # shape_filter) and drops the fallback. f32 -> f64. Result<Self> -> pointer /
-# negative GARJAN_* code. The Rust `#[serde(skip)]`-style naad components
+# negative GARJAN_* code. The naad components
 # (noise_gen, shape_filter) AND the modal_bank are reconstructed on
 # deserialize from the serialized params (precip_type + stone_size + surface +
 # sample_rate deterministically pin them). rng + dc_blocker state ARE
@@ -2897,7 +2898,7 @@ fn precipitation_to_json(self, sb) {
 
 # Rebuild a Precipitation from JSON: restore scalars + rng + dc_blocker state,
 # then reconstruct the modal_bank + naad components fresh (matches Rust's
-# skip+reconstruct).
+# rebuilt, not restored -- architecture note 001).
 #must_use
 fn precipitation_from_json_str(json) {
     var p = PrecipitationParams_from_json_str(json);
@@ -2985,8 +2986,9 @@ struct Bubble {
 }
 
 # Build/refresh the naad noise generator (white, seed 4040). Shared by
-# bubble_new and bubble_from_json_str (mirrors the Rust skip+reconstruct of
-# the naad noise_gen). noise_new does not fail, so this always returns
+# bubble_new and bubble_from_json_str. Rust serialized the noise_gen's live
+# state; this port rebuilds it -- see architecture note 001. noise_new does not
+# fail, so this always returns
 # GARJAN_OK; kept for structural parity with the other synths.
 fn bubble_build_naad(self) {
     Bubble_set_noise_gen(self, noise_new(NOISE_WHITE, 4040));
@@ -3170,7 +3172,7 @@ fn bubble_to_json(self, sb) {
 }
 
 # Rebuild a Bubble from JSON: restore scalars + rng + dc_blocker state, then
-# reconstruct the naad noise generator fresh (matches Rust's skip+reconstruct).
+# reconstruct the naad noise generator fresh (rebuilt, not restored -- architecture note 001).
 #must_use
 fn bubble_from_json_str(json) {
     var p = BubbleParams_from_json_str(json);
@@ -3213,7 +3215,7 @@ fn bubble_from_json_str(json) {
 # noise through a bandpass resonance filter) and drops the rng fallback.
 # f32 -> f64. Result<Self> -> pointer / negative GARJAN_* code.
 #
-# The Rust `#[serde(skip)]`-equivalent live components -- modal_bank, exciter,
+# The live components -- modal_bank, exciter,
 # transient_noise, resonance_filter, excitation_buf -- are NOT serialized; they
 # are reconstructed on deserialize (in impact_build_naad) from the serialized
 # material + properties + sample_rate. rng + dc_blocker state ARE serialized
@@ -3589,7 +3591,7 @@ fn impact_from_json_str(json) {
 # and drops the rng-fallback generate_noise. f32 -> f64. Result<Self> ->
 # pointer / negative GARJAN_* code.
 #
-# serde: the Rust `#[serde(skip)]`-equivalent naad components (noise_gen,
+# serde: the naad components (noise_gen,
 # shape_filter) plus the reconstructable Exciter / ModalBank are rebuilt on
 # deserialize via footstep_build_naad; rng + dc_blocker + all step-timing
 # scalars ARE serialized (via the flattened FootstepParams below). The main
@@ -3941,7 +3943,7 @@ fn footstep_from_json_str(json) {
 # generate_noise path (noise_gen + shape_filter) and drops the rng fallback.
 # f32 -> f64. Result<Self> -> pointer / negative GARJAN_* code.
 #
-# The Rust `#[serde(skip)]`-equivalent naad components (noise_gen, shape_filter)
+# The naad components (noise_gen, shape_filter)
 # plus the reconstructable modal_bank are NOT serialized; they are rebuilt on
 # deserialize in friction_build_naad from friction_type/surface/sample_rate.
 # The scalar params + rng + dc_blocker state ARE serialized (via the flattened
@@ -4256,7 +4258,8 @@ fn friction_from_json_str(json) {
 # Result<Self> -> pointer / negative GARJAN_* code. The naad noise_gen +
 # shape_filter AND the ModalBank are reconstructed on deserialize (rebuilt in
 # creak_build_naad from `source`); rng + dc_blocker state ARE serialized (via
-# the flattened CreakParams below), matching the Rust skip+reconstruct split.
+# the flattened CreakParams below). Rust serialized the DSP state too; this
+# port does not -- see architecture note 001.
 # Requires: error, logging, dsp, rng, material, modal, contact foundations +
 # the naad bundle (noise_new/noise_next_sample,
 # filter_biquad_new/filter_biquad_process_sample).
@@ -4531,8 +4534,8 @@ fn creak_to_json(self, sb) {
 }
 
 # Rebuild a Creak from JSON: restore scalars + rng + dc_blocker state, then
-# reconstruct the modal bank + naad components fresh from `source` (matches
-# Rust's skip+reconstruct).
+# reconstruct the modal bank + naad components fresh from `source` -- Rust
+# restored their state instead (architecture note 001).
 #must_use
 fn creak_from_json_str(json) {
     var p = CreakParams_from_json_str(json);
@@ -4576,7 +4579,7 @@ fn creak_from_json_str(json) {
 # naad backend (no feature flags), so it ports the naad generate_noise path
 # (pink noise -> bandpass surface_filter) and drops the rng fallback. f32 ->
 # f64. Result<Self> -> pointer / negative GARJAN_* code. The Rust
-# `#[serde(skip)]`-equivalent live components (noise_gen, surface_filter,
+# live components (noise_gen, surface_filter,
 # modal_bank) are reconstructed on deserialize; rng + dc_blocker state ARE
 # serialized (via the flattened RollingParams below).
 #
@@ -4877,7 +4880,7 @@ fn rolling_from_json_str(json) {
 # the naad backend (no feature flags): rustle_noise/rustle_filter/wind_lfo are
 # reconstructed on deserialize; the snap ModalBank + Exciter are likewise
 # rebuilt in foliage_build_naad from the serialized params (matching Rust's
-# skip+reconstruct policy). f32 -> f64. Result<Self> -> pointer / negative
+# reconstruct-on-deserialize policy). f32 -> f64. Result<Self> -> pointer / negative
 # GARJAN_* code. rng + dc_blocker + exciter state ARE serialized.
 # Requires: error, logging, dsp, rng, material, modal, contact foundations +
 # the naad bundle (noise_new/noise_next_sample, filter_biquad_new/
@@ -5217,7 +5220,7 @@ fn foliage_to_json(self, sb) {
 
 # Rebuild a Foliage from JSON: restore scalars + rng + dc_blocker + exciter
 # state, then reconstruct the naad + modal components fresh (matches Rust's
-# skip+reconstruct). Returns the synth pointer.
+# rebuilt, not restored -- architecture note 001). Returns the synth pointer.
 #must_use
 fn foliage_from_json_str(json) {
     var p = FoliageParams_from_json_str(json);
@@ -5772,14 +5775,14 @@ fn whistle_from_json_str(json) {
 # shape_filter (the non-naad rng.next_f32 fallback is dropped). f32 -> f64.
 # Result<Self> -> pointer / negative GARJAN_* code.
 #
-# The Rust `#[serde(skip)]` naad components (noise_gen, shape_filter) plus the
+# The naad components (noise_gen, shape_filter) plus the
 # Option<ModalBank> are all reconstructable from cloth_type + sample_rate, so
 # they are NOT serialized; they are rebuilt in cloth_build_naad on deserialize.
 # rng + dc_blocker state ARE serialized (via the flattened ClothParams below).
 # Requires: error, logging, dsp, rng, material, modal, aero foundations + the
 # naad bundle (noise_new/noise_next_sample, filter_biquad_new/process_sample).
 
-# ---- ClothParams: the serializable slice (Rust's non-skipped fields, with
+# ---- ClothParams: the serializable slice (the scalar fields only, with
 # rng + dc_blocker FLATTENED to scalars so #derive(Serialize)'s single-pass
 # from_json_str works). cloth_type is a CLOTH_* int. Synced to/from the live
 # Cloth on (de)serialize. ----
@@ -6040,7 +6043,7 @@ fn cloth_to_json(self, sb) {
 
 # Rebuild a Cloth from JSON: restore scalars + rng + dc_blocker state, then
 # reconstruct the modal bank + naad components fresh (matches Rust's
-# skip+reconstruct). filter_freq / use_modal are re-derived from cloth_type.
+# rebuilt, not restored -- architecture note 001). filter_freq / use_modal are re-derived from cloth_type.
 #must_use
 fn cloth_from_json_str(json) {
     var p = ClothParams_from_json_str(json);
@@ -6085,7 +6088,7 @@ fn cloth_from_json_str(json) {
 # Ports rust-old/src/insect.rs. The Cyrius port always uses the naad backend
 # (no feature flags), so it ports the #[cfg(feature="naad-backend")] path and
 # drops the fallback. f32 -> f64. Result<Self> -> pointer / negative GARJAN_*
-# code. The Rust #[serde(skip)]-equivalent naad components (noise_gen +
+# code. The naad components (noise_gen +
 # shape_filter) are reconstructed on deserialize; all scalar params + the rng,
 # dc_blocker, and the 8 precomputed swarm detunings ARE serialized (via the
 # flattened InsectParams below).
@@ -6166,7 +6169,7 @@ fn insect_detune(self, voice) {
 }
 
 # Build/refresh the naad components from sample_rate + base_freq. Shared by
-# insect_new and insect_from_json_str (mirrors the Rust skip+reconstruct).
+# insect_new and insect_from_json_str (rebuilt, not restored -- architecture note 001).
 # Returns GARJAN_OK or a negative code if a naad constructor rejects params.
 fn insect_build_naad(self) {
     var sr = Insect_sample_rate(self);
@@ -6459,7 +6462,7 @@ fn insect_from_json_str(json) {
 # shape_filter (the non-naad rng.next_f32 fallback is dropped). f32 -> f64.
 # Result<Self> -> pointer / negative GARJAN_* code.
 #
-# The Rust `#[serde(skip)]` naad components (noise_gen, shape_filter) are
+# The naad components (noise_gen, shape_filter) are
 # reconstructable from filter_freq + sample_rate, so they are NOT serialized;
 # they are rebuilt in wingflap_build_naad on deserialize. rng + dc_blocker
 # state ARE serialized (via the flattened WingFlapParams below).
@@ -6471,7 +6474,7 @@ var BIRD_SIZE_SMALL  = 0;
 var BIRD_SIZE_MEDIUM = 1;
 var BIRD_SIZE_LARGE  = 2;
 
-# ---- WingFlapParams: the serializable slice (Rust's non-skipped fields, with
+# ---- WingFlapParams: the serializable slice (the scalar fields only, with
 # rng + dc_blocker FLATTENED to scalars so #derive(Serialize)'s single-pass
 # from_json_str works). bird_size is a BIRD_SIZE_* int. filter_freq is carried
 # so build_naad can reconstruct the bandpass shape filter. Synced to/from the
@@ -6707,7 +6710,7 @@ fn wingflap_to_json(self, sb) {
 }
 
 # Rebuild a WingFlap from JSON: restore scalars + rng + dc_blocker state, then
-# reconstruct the naad components fresh (matches Rust's skip+reconstruct).
+# reconstruct the naad components fresh (rebuilt, not restored -- architecture note 001).
 #must_use
 fn wingflap_from_json_str(json) {
     var p = WingFlapParams_from_json_str(json);
@@ -6749,7 +6752,7 @@ fn wingflap_from_json_str(json) {
 # Ports rust-old/src/underwater.rs. The Cyrius port always uses the naad
 # backend (no feature flags), so it ports the naad-backend code path and
 # drops the fallback. f32 -> f64. Result<Self> -> pointer / negative GARJAN_*
-# code. The Rust `#[serde(skip)]`-equivalent naad components (noise gens,
+# code. The naad components (noise gens,
 # biquads, LFO) are reconstructed on deserialize; depth/params + rng +
 # dc_blocker state ARE serialized (via the flattened UnderwaterParams below).
 # Requires: error, logging, dsp, rng foundations + the naad bundle
@@ -6761,7 +6764,7 @@ var UNDERWATER_DEPTH_SHALLOW = 0;
 var UNDERWATER_DEPTH_MEDIUM  = 1;
 var UNDERWATER_DEPTH_DEEP    = 2;
 
-# ---- UnderwaterParams: the serializable slice (Rust's non-skipped fields,
+# ---- UnderwaterParams: the serializable slice (the scalar fields only,
 # with rng + dc_blocker FLATTENED so #derive(Serialize)'s single-pass
 # from_json_str works). Synced to/from the live Underwater on (de)serialize.
 # depth is an enum -> i64 tag. lp_cutoff is carried so build_naad can
@@ -7024,7 +7027,7 @@ fn underwater_to_json(self, sb) {
 }
 
 # Rebuild an Underwater from JSON: restore scalars + rng + dc_blocker state,
-# then reconstruct the naad components fresh (matches Rust skip+reconstruct).
+# then reconstruct the naad components fresh (rebuilt, not restored -- architecture note 001).
 #must_use
 fn underwater_from_json_str(json) {
     var p = UnderwaterParams_from_json_str(json);
@@ -7066,7 +7069,7 @@ fn underwater_from_json_str(json) {
 # (receding hiss). The Cyrius port always uses the naad backend (no feature
 # flags), so it ports the #[cfg(feature="naad-backend")] path and drops the
 # fallback. f32 -> f64. Result<Self> -> pointer / negative GARJAN_* code. The
-# Rust #[serde(skip)]-equivalent naad components (crash/wash/rumble noise +
+# naad components (crash/wash/rumble noise +
 # filters) are reconstructed on deserialize; intensity, sample_rate,
 # sample_position, wave_period_samples, break_amp, wash_amp, volume,
 # wave_phase, rng, and dc_blocker are serialized (via the flattened SurfParams
@@ -7080,7 +7083,7 @@ var SURF_MODERATE = 1;
 var SURF_HEAVY    = 2;
 var SURF_STORM    = 3;
 
-# ---- SurfParams: the serializable slice (Rust's non-skipped fields, with
+# ---- SurfParams: the serializable slice (the scalar fields only, with
 # intensity as an int tag and rng + dc_blocker FLATTENED to scalars so
 # #derive(Serialize)'s single-pass from_json_str works). Synced to/from the
 # live Surf on (de)serialize. ----
@@ -7362,7 +7365,7 @@ fn surf_to_json(self, sb) {
 }
 
 # Rebuild a Surf from JSON: restore scalars + rng + dc_blocker state, then
-# reconstruct the naad components fresh (matches Rust's skip+reconstruct).
+# reconstruct the naad components fresh (rebuilt, not restored -- architecture note 001).
 #must_use
 fn surf_from_json_str(json) {
     var p = SurfParams_from_json_str(json);
@@ -7404,7 +7407,7 @@ fn surf_from_json_str(json) {
 # drip, desert wind, night). The Cyrius port always uses the naad backend (no
 # feature flags), so it ports process_block_naad and drops the fallback.
 # f32 -> f64. Result<Self> -> pointer / negative GARJAN_* code. The Rust
-# `#[serde(skip)]`-equivalent naad components (3 noise gens, 3 biquad filters,
+# naad components (3 noise gens, 3 biquad filters,
 # 1 LFO) are reconstructed on deserialize; rng + dc_blocker state ARE
 # serialized (via the flattened AmbientTextureParams below).
 #

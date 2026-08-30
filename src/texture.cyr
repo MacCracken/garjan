@@ -5,7 +5,7 @@
 # drip, desert wind, night). The Cyrius port always uses the naad backend (no
 # feature flags), so it ports process_block_naad and drops the fallback.
 # f32 -> f64. Result<Self> -> pointer / negative GARJAN_* code. The Rust
-# `#[serde(skip)]`-equivalent naad components (3 noise gens, 3 biquad filters,
+# naad components (3 noise gens, 3 biquad filters,
 # 1 LFO) are reconstructed on deserialize; rng + dc_blocker state ARE
 # serialized (via the flattened AmbientTextureParams below).
 #

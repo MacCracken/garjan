@@ -5,7 +5,7 @@
 # (receding hiss). The Cyrius port always uses the naad backend (no feature
 # flags), so it ports the #[cfg(feature="naad-backend")] path and drops the
 # fallback. f32 -> f64. Result<Self> -> pointer / negative GARJAN_* code. The
-# Rust #[serde(skip)]-equivalent naad components (crash/wash/rumble noise +
+# naad components (crash/wash/rumble noise +
 # filters) are reconstructed on deserialize; intensity, sample_rate,
 # sample_position, wave_period_samples, break_amp, wash_amp, volume,
 # wave_phase, rng, and dc_blocker are serialized (via the flattened SurfParams
@@ -19,7 +19,7 @@ var SURF_MODERATE = 1;
 var SURF_HEAVY    = 2;
 var SURF_STORM    = 3;
 
-# ---- SurfParams: the serializable slice (Rust's non-skipped fields, with
+# ---- SurfParams: the serializable slice (the scalar fields only, with
 # intensity as an int tag and rng + dc_blocker FLATTENED to scalars so
 # #derive(Serialize)'s single-pass from_json_str works). Synced to/from the
 # live Surf on (de)serialize. ----
@@ -301,7 +301,7 @@ fn surf_to_json(self, sb) {
 }
 
 # Rebuild a Surf from JSON: restore scalars + rng + dc_blocker state, then
-# reconstruct the naad components fresh (matches Rust's skip+reconstruct).
+# reconstruct the naad components fresh (rebuilt, not restored -- architecture note 001).
 #must_use
 fn surf_from_json_str(json) {
     var p = SurfParams_from_json_str(json);

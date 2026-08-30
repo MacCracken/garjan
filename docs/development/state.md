@@ -56,7 +56,9 @@ crate is preserved at `rust-old/` for parity reference (frozen, do not edit).
 
 ## Tests
 
-- **33 module suites** in `tests/*.tcyr`, **478 assertions, all green**.
+- **33 module suites** in `tests/*.tcyr`, **764 assertions, all green**.
+  `tests/garjan.tcyr` is the cross-module integration suite (288 of those),
+  ported from `rust-old/tests/integration.rs`.
   Covers parity (incl. bit-exact PCG32), synthesis finiteness/energy, and
   serde roundtrips. `cyrius test` runs them; each also builds standalone.
 - Cleanliness: `cyrius lint` 0 warnings (33 modules), `cyrius vet` clean,
@@ -95,15 +97,16 @@ _None yet (kiran, joshua, dhvani + any AGNOS component needing environmental aud
 Sequencing lives in [`roadmap.md`](roadmap.md) — the 2.x arc, with each
 outstanding item pinned to a version. Immediate:
 
-- **2.0.6 (docs accuracy)** — ~8 source comments claim the port "mirrors Rust's
-  `#[serde(skip)]`"; `rust-old/src` contains **zero** `serde(skip)`. Rust
-  derived Serialize over all fields, naad components included. Also: the
-  `CLAUDE.md` `## Goal` stub, the empty architecture-notes index, and the
-  ADR-location split (`adr-001`..`004` in `docs/architecture/`, 0005 in
-  `docs/adr/`).
-- **2.1.x (parity completion)** — port Rust's 134 cross-module integration
-  tests (`tests/garjan.tcyr` is a two-assertion placeholder), the 5 examples
-  (`docs/examples/` holds only `.gitkeep`), and more of the 26 benchmarks.
+- ✅ **2.0.6 (docs accuracy, shipped untagged)** — the false `#[serde(skip)]`
+  premise removed from 35 sites and replaced by architecture note
+  [001](../architecture/001-deserialize-does-not-restore-dsp-state.md);
+  `CLAUDE.md`'s `## Goal` filled from ADR-0003; architecture index populated;
+  ADRs 1-4 relocated to `docs/adr/` under the four-digit convention.
+- **2.1.x (parity completion, in progress)** — ✅ integration suite ported
+  (2 → 288 assertions). Remaining: the 5 examples (`docs/examples/` holds only
+  `.gitkeep`), benchmark coverage (5 of 26), the `docs/audit/` write-up, and
+  pre-sizing the `*_synthesize` output vectors. **Not tagged yet** — `VERSION`
+  stays 2.0.5 until 2.1.0 ships.
 - **2.2.x (needs ADRs)** — serde live-state round-trip parity, duration /
   sample-rate caps, out-of-range enum ids.
 - **Gated** — `integration/soorat.rs` (315 lines) is the one genuinely unported

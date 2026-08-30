@@ -7,7 +7,7 @@
 # the naad backend (no feature flags): rustle_noise/rustle_filter/wind_lfo are
 # reconstructed on deserialize; the snap ModalBank + Exciter are likewise
 # rebuilt in foliage_build_naad from the serialized params (matching Rust's
-# skip+reconstruct policy). f32 -> f64. Result<Self> -> pointer / negative
+# reconstruct-on-deserialize policy). f32 -> f64. Result<Self> -> pointer / negative
 # GARJAN_* code. rng + dc_blocker + exciter state ARE serialized.
 # Requires: error, logging, dsp, rng, material, modal, contact foundations +
 # the naad bundle (noise_new/noise_next_sample, filter_biquad_new/
@@ -347,7 +347,7 @@ fn foliage_to_json(self, sb) {
 
 # Rebuild a Foliage from JSON: restore scalars + rng + dc_blocker + exciter
 # state, then reconstruct the naad + modal components fresh (matches Rust's
-# skip+reconstruct). Returns the synth pointer.
+# rebuilt, not restored -- architecture note 001). Returns the synth pointer.
 #must_use
 fn foliage_from_json_str(json) {
     var p = FoliageParams_from_json_str(json);

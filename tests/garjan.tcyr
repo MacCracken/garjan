@@ -1,11 +1,588 @@
-# garjan test suite
-# Stdlib auto-included via cyrius.cyml
+# garjan.tcyr -- CROSS-MODULE integration suite.
+#
+# Ports rust-old/tests/integration.rs. That file has 134 #[test] fns, but a
+# large share of them are per-type serde round-trips and per-synth constructor
+# checks which the 33 per-module suites in this directory already cover with
+# 478 assertions. Re-porting those verbatim would duplicate, not add.
+#
+# What no per-module suite can assert -- and what this file therefore owns --
+# is the CROSS-CUTTING contract: that every synthesizer, as a family, obeys the
+# same validation rules, that every enum variant actually constructs and
+# renders, that relative-loudness invariants hold BETWEEN synths, and that the
+# silence gates behave uniformly. A per-module suite tests one synth against
+# itself; these test the surface against itself.
+#
+# Grouped to mirror integration.rs's own section comments.
+
+include "src/error.cyr"
+include "src/logging.cyr"
+include "src/dsp.cyr"
+include "src/rng.cyr"
+include "src/lod.cyr"
+include "src/material.cyr"
+include "src/modal.cyr"
+include "src/contact.cyr"
+include "src/aero.cyr"
+include "src/creature.cyr"
+include "src/voice.cyr"
+include "src/fire.cyr"
+include "src/weather.cyr"
+include "src/water.cyr"
+include "src/precipitation.cyr"
+include "src/bubble.cyr"
+include "src/impact.cyr"
+include "src/footstep.cyr"
+include "src/friction.cyr"
+include "src/creak.cyr"
+include "src/rolling.cyr"
+include "src/foliage.cyr"
+include "src/whoosh.cyr"
+include "src/whistle.cyr"
+include "src/cloth.cyr"
+include "src/insect.cyr"
+include "src/wingflap.cyr"
+include "src/underwater.cyr"
+include "src/surf.cyr"
+include "src/texture.cyr"
+include "src/bridge.cyr"
+include "src/builder.cyr"
+
+var SR = 0;
+var NAN_BITS = 0x7FF8000000000000;
+
+# ---- helpers -------------------------------------------------------------
+
+#must_use
+fn mkbuf(n) {
+    var v = vec_new();
+    var i = 0;
+    while (i < n) { vec_push(v, 0); i = i + 1; }
+    return v;
+}
+
+# 1 iff every sample is finite.
+#must_use
+fn all_finite(v) {
+    var i = 0;
+    while (i < vec_len(v)) {
+        if (garjan_is_finite(vec_get(v, i)) == 0) { return 0; }
+        i = i + 1;
+    }
+    return 1;
+}
+
+# Sum of |s| -- a loudness proxy that avoids squaring into inf.
+#must_use
+fn energy(v) {
+    var e = 0;
+    var i = 0;
+    while (i < vec_len(v)) { e = f64_add(e, f64_abs(vec_get(v, i))); i = i + 1; }
+    return e;
+}
+
+# 1 iff any sample exceeds `thr` in magnitude (i.e. it is not silence).
+#must_use
+fn any_above(v, thr) {
+    var i = 0;
+    while (i < vec_len(v)) {
+        if (f64_gt(f64_abs(vec_get(v, i)), thr) == 1) { return 1; }
+        i = i + 1;
+    }
+    return 0;
+}
+
+# Render one block through a synth's process_block and assert it is usable.
+# The sweeps care that EVERY enum variant constructs and renders, not about the
+# specific samples -- those are the per-module suites' job.
+fn renders_ok(self, buf, label) {
+    assert(garjan_is_err(self) == 0, label);
+    if (garjan_is_err(self) == 1) { return 0; }
+    assert(all_finite(buf) == 1, label);
+    return 0;
+}
 
 fn main() {
     alloc_init();
-    test_group("smoke");
-    assert(1, "true is true");
-    assert_eq(1 + 1, 2, "math works");
+    sakshi_set_level(5);          # quiet: these tests deliberately pass bad input
+    SR = f64_from(44100);
+
+    # =====================================================================
+    # Uniform validation contract.
+    #
+    # integration.rs checks sample_rate 0 / negative / NaN / inf and a bad
+    # duration on a couple of synths. The real invariant is that the WHOLE
+    # family agrees, so sweep every constructor. A synth that forgets to call
+    # garjan_validate_sample_rate is invisible to its own module suite if that
+    # suite only tests the happy path.
+    # =====================================================================
+    test_group("every constructor rejects sample_rate 0");
+    assert(garjan_is_err(fire_new(F64_HALF, 0)) == 1, "fire");
+    assert(garjan_is_err(rain_new(RAIN_INTENSITY_LIGHT, 0)) == 1, "rain");
+    assert(garjan_is_err(thunder_new(f64_from(500), 0)) == 1, "thunder");
+    assert(garjan_is_err(wind_new(f64_from(10), F64_HALF, 0)) == 1, "wind");
+    assert(garjan_is_err(water_new(WATER_STREAM, F64_HALF, 0)) == 1, "water");
+    assert(garjan_is_err(bubble_new(BUBBLE_BOILING, 0)) == 1, "bubble");
+    assert(garjan_is_err(impact_new(MATERIAL_METAL, 0)) == 1, "impact");
+    assert(garjan_is_err(footstep_new(TERRAIN_GRAVEL, MOVEMENT_WALK, 0)) == 1, "footstep");
+    assert(garjan_is_err(friction_new(FRICTION_SLIDE, MATERIAL_WOOD, 0)) == 1, "friction");
+    assert(garjan_is_err(creak_new(CREAK_DOOR, 0)) == 1, "creak");
+    assert(garjan_is_err(rolling_new(ROLLING_BALL, MATERIAL_WOOD, 0)) == 1, "rolling");
+    assert(garjan_is_err(foliage_new(FOLIAGE_LEAF_RUSTLE, 0)) == 1, "foliage");
+    assert(garjan_is_err(whoosh_new(WHOOSH_SWING, 0)) == 1, "whoosh");
+    assert(garjan_is_err(whistle_new(WHISTLE_GAP, 0)) == 1, "whistle");
+    assert(garjan_is_err(cloth_new(CLOTH_FLAG, 0)) == 1, "cloth");
+    assert(garjan_is_err(insect_new(INSECT_CICADA_DRONE, 0)) == 1, "insect");
+    assert(garjan_is_err(wingflap_new(BIRD_SIZE_MEDIUM, 0)) == 1, "wingflap");
+    assert(garjan_is_err(underwater_new(f64_from(10), 0)) == 1, "underwater");
+    assert(garjan_is_err(surf_new(F64_HALF, 0)) == 1, "surf");
+    assert(garjan_is_err(texture_new(TEXTURE_TYPE_FOREST, F64_HALF, 0)) == 1, "texture");
+    assert(garjan_is_err(precipitation_new(PRECIP_HAIL, STONE_MEDIUM, MATERIAL_STONE, 0)) == 1, "precipitation");
+
+    test_group("every constructor rejects negative / NaN / inf sample_rate");
+    var neg = f64_neg(f64_from(44100));
+    assert(garjan_is_err(fire_new(F64_HALF, neg)) == 1, "fire negative");
+    assert(garjan_is_err(fire_new(F64_HALF, NAN_BITS)) == 1, "fire NaN");
+    assert(garjan_is_err(fire_new(F64_HALF, GARJAN_POS_INF)) == 1, "fire +inf");
+    assert(garjan_is_err(rain_new(RAIN_INTENSITY_LIGHT, neg)) == 1, "rain negative");
+    assert(garjan_is_err(rain_new(RAIN_INTENSITY_LIGHT, NAN_BITS)) == 1, "rain NaN");
+    assert(garjan_is_err(wind_new(f64_from(10), F64_HALF, GARJAN_POS_INF)) == 1, "wind +inf");
+    assert(garjan_is_err(impact_new(MATERIAL_METAL, NAN_BITS)) == 1, "impact NaN");
+    assert(garjan_is_err(surf_new(F64_HALF, GARJAN_NEG_INF)) == 1, "surf -inf");
+
+    test_group("every synthesize rejects non-positive / non-finite duration");
+    var f = fire_new(F64_HALF, SR);
+    assert(garjan_is_err(fire_synthesize(f, 0)) == 1, "fire duration 0");
+    assert(garjan_is_err(fire_synthesize(f, f64_neg(F64_ONE))) == 1, "fire duration negative");
+    assert(garjan_is_err(fire_synthesize(f, NAN_BITS)) == 1, "fire duration NaN");
+    assert(garjan_is_err(fire_synthesize(f, GARJAN_POS_INF)) == 1, "fire duration inf");
+    var rn = rain_new(RAIN_INTENSITY_LIGHT, SR);
+    assert(garjan_is_err(rain_synthesize(rn, 0)) == 1, "rain duration 0");
+    assert(garjan_is_err(rain_synthesize(rn, GARJAN_POS_INF)) == 1, "rain duration inf");
+    var tx = texture_new(TEXTURE_TYPE_FOREST, F64_HALF, SR);
+    assert(garjan_is_err(texture_synthesize(tx, f64_neg(F64_ONE))) == 1, "texture duration negative");
+
+    # =====================================================================
+    # Variant sweeps. Every enum variant must construct and render.
+    #
+    # Rust enums became module-prefixed ints in the port, so a variant that was
+    # dropped, or one whose table entry is missing, produces no compile error --
+    # it just silently falls into the if/elif chain's final `else`. Sweeping
+    # every variant through a real render is the only way that surfaces.
+    # =====================================================================
+    test_group("sweep: materials (impact)");
+    var mats = vec_new();
+    vec_push(mats, MATERIAL_METAL); vec_push(mats, MATERIAL_WOOD);
+    vec_push(mats, MATERIAL_STONE); vec_push(mats, MATERIAL_EARTH);
+    vec_push(mats, MATERIAL_GLASS); vec_push(mats, MATERIAL_FABRIC);
+    vec_push(mats, MATERIAL_LEAF);  vec_push(mats, MATERIAL_WATER);
+    vec_push(mats, MATERIAL_PLASTIC); vec_push(mats, MATERIAL_CERAMIC);
+    var mi = 0;
+    while (mi < vec_len(mats)) {
+        var im = impact_new(vec_get(mats, mi), SR);
+        var ib = mkbuf(1024);
+        impact_process_block(im, IMPACT_STRIKE, ib);
+        renders_ok(im, ib, "impact renders for every material");
+        mi = mi + 1;
+    }
+    assert_eq(vec_len(mats), 10, "all 10 materials swept");
+
+    test_group("sweep: impact types");
+    var its = vec_new();
+    vec_push(its, IMPACT_TAP); vec_push(its, IMPACT_STRIKE);
+    vec_push(its, IMPACT_CRASH); vec_push(its, IMPACT_SHATTER);
+    var ii = 0;
+    while (ii < vec_len(its)) {
+        var im2 = impact_new(MATERIAL_GLASS, SR);
+        var ib2 = mkbuf(1024);
+        impact_process_block(im2, vec_get(its, ii), ib2);
+        renders_ok(im2, ib2, "impact renders for every impact type");
+        ii = ii + 1;
+    }
+
+    test_group("sweep: rain intensities");
+    var ri = vec_new();
+    vec_push(ri, RAIN_INTENSITY_LIGHT); vec_push(ri, RAIN_INTENSITY_MODERATE);
+    vec_push(ri, RAIN_INTENSITY_HEAVY); vec_push(ri, RAIN_INTENSITY_TORRENTIAL);
+    var rj = 0;
+    while (rj < vec_len(ri)) {
+        var r2 = rain_new(vec_get(ri, rj), SR);
+        var rb = mkbuf(2048);
+        rain_process_block(r2, rb);
+        renders_ok(r2, rb, "rain renders for every intensity");
+        rj = rj + 1;
+    }
+
+    test_group("sweep: water types");
+    var wt = vec_new();
+    vec_push(wt, WATER_STREAM); vec_push(wt, WATER_DRIP);
+    vec_push(wt, WATER_SPLASH); vec_push(wt, WATER_WAVES);
+    var wj = 0;
+    while (wj < vec_len(wt)) {
+        var w2 = water_new(vec_get(wt, wj), F64_HALF, SR);
+        var wb = mkbuf(2048);
+        water_process_block(w2, wb);
+        renders_ok(w2, wb, "water renders for every type");
+        wj = wj + 1;
+    }
+
+    test_group("sweep: texture types");
+    var tt = 0;
+    while (tt < 6) {
+        var t2 = texture_new(tt, F64_HALF, SR);
+        var tb = mkbuf(1024);
+        texture_process_block(t2, tb);
+        renders_ok(t2, tb, "texture renders for every type");
+        tt = tt + 1;
+    }
+
+    test_group("sweep: terrains x movements (footstep)");
+    var terr = vec_new();
+    vec_push(terr, TERRAIN_GRAVEL); vec_push(terr, TERRAIN_SAND);
+    vec_push(terr, TERRAIN_MUD);    vec_push(terr, TERRAIN_SNOW);
+    vec_push(terr, TERRAIN_WOOD);   vec_push(terr, TERRAIN_METAL);
+    vec_push(terr, TERRAIN_TILE);   vec_push(terr, TERRAIN_WET);
+    var movs = vec_new();
+    vec_push(movs, MOVEMENT_WALK); vec_push(movs, MOVEMENT_RUN);
+    vec_push(movs, MOVEMENT_SNEAK); vec_push(movs, MOVEMENT_JUMP_LAND);
+    var ti = 0;
+    while (ti < vec_len(terr)) {
+        var mj = 0;
+        while (mj < vec_len(movs)) {
+            var fs = footstep_new(vec_get(terr, ti), vec_get(movs, mj), SR);
+            var fb = mkbuf(1024);
+            footstep_process_block(fs, fb);
+            renders_ok(fs, fb, "footstep renders for every terrain x movement");
+            mj = mj + 1;
+        }
+        ti = ti + 1;
+    }
+    assert_eq(vec_len(terr) * vec_len(movs), 32, "all 32 terrain x movement pairs swept");
+
+    test_group("sweep: friction / rolling / creak / foliage");
+    var fr_t = vec_new();
+    vec_push(fr_t, FRICTION_SLIDE); vec_push(fr_t, FRICTION_SCRAPE); vec_push(fr_t, FRICTION_GRIND);
+    var fi2 = 0;
+    while (fi2 < vec_len(fr_t)) {
+        var fx = friction_new(vec_get(fr_t, fi2), MATERIAL_WOOD, SR);
+        friction_set_velocity(fx, f64_from(2));
+        friction_set_pressure(fx, F64_HALF);
+        var fxb = mkbuf(1024);
+        friction_process_block(fx, fxb);
+        renders_ok(fx, fxb, "friction renders for every type");
+        fi2 = fi2 + 1;
+    }
+    var rb_t = vec_new();
+    vec_push(rb_t, ROLLING_BALL); vec_push(rb_t, ROLLING_BARREL);
+    vec_push(rb_t, ROLLING_WHEEL); vec_push(rb_t, ROLLING_BOULDER);
+    var rk = 0;
+    while (rk < vec_len(rb_t)) {
+        var rx = rolling_new(vec_get(rb_t, rk), MATERIAL_STONE, SR);
+        rolling_set_velocity(rx, f64_from(3));
+        var rxb = mkbuf(1024);
+        rolling_process_block(rx, rxb);
+        renders_ok(rx, rxb, "rolling renders for every body");
+        rk = rk + 1;
+    }
+    var ck_t = vec_new();
+    vec_push(ck_t, CREAK_DOOR); vec_push(ck_t, CREAK_HINGE);
+    vec_push(ck_t, CREAK_ROPE); vec_push(ck_t, CREAK_WOOD_STRESS);
+    var ck = 0;
+    while (ck < vec_len(ck_t)) {
+        var cx = creak_new(vec_get(ck_t, ck), SR);
+        creak_set_tension(cx, F64_HALF);
+        creak_set_speed(cx, F64_HALF);
+        var cxb = mkbuf(1024);
+        creak_process_block(cx, cxb);
+        renders_ok(cx, cxb, "creak renders for every source");
+        ck = ck + 1;
+    }
+    var fo_t = vec_new();
+    vec_push(fo_t, FOLIAGE_LEAF_RUSTLE); vec_push(fo_t, FOLIAGE_GRASS_SWISH); vec_push(fo_t, FOLIAGE_BRANCH_SNAP);
+    var fk = 0;
+    while (fk < vec_len(fo_t)) {
+        var ox = foliage_new(vec_get(fo_t, fk), SR);
+        foliage_set_wind_speed(ox, f64_from(8));
+        foliage_set_contact_intensity(ox, F64_HALF);
+        var oxb = mkbuf(1024);
+        foliage_process_block(ox, oxb);
+        renders_ok(ox, oxb, "foliage renders for every type");
+        fk = fk + 1;
+    }
+
+    test_group("sweep: aero / creature / precip / underwater / surf");
+    var ao = 0;
+    while (ao < 4) {
+        var wx = whoosh_new(ao, SR);
+        whoosh_set_speed(wx, f64_from(20));
+        whoosh_trigger(wx);
+        var wxb = mkbuf(1024);
+        whoosh_process_block(wx, wxb);
+        renders_ok(wx, wxb, "whoosh renders for every type");
+        var hx = whistle_new(ao, SR);
+        whistle_set_wind_speed(hx, f64_from(15));
+        var hxb = mkbuf(1024);
+        whistle_process_block(hx, hxb);
+        renders_ok(hx, hxb, "whistle renders for every source");
+        var lx = cloth_new(ao, SR);
+        cloth_set_wind_speed(lx, f64_from(12));
+        var lxb = mkbuf(1024);
+        cloth_process_block(lx, lxb);
+        renders_ok(lx, lxb, "cloth renders for every type");
+        var bx = bubble_new(ao, SR);
+        bubble_set_intensity(bx, F64_HALF);
+        var bxb = mkbuf(1024);
+        bubble_process_block(bx, bxb);
+        renders_ok(bx, bxb, "bubble renders for every type");
+        ao = ao + 1;
+    }
+    var cr3 = 0;
+    while (cr3 < 3) {
+        var ix = insect_new(cr3, SR);
+        insect_set_intensity(ix, F64_ONE);
+        var ixb = mkbuf(1024);
+        insect_process_block(ix, ixb);
+        renders_ok(ix, ixb, "insect renders for every type");
+        var gx = wingflap_new(cr3, SR);
+        wingflap_set_intensity(gx, F64_ONE);
+        var gxb = mkbuf(1024);
+        wingflap_process_block(gx, gxb);
+        renders_ok(gx, gxb, "wingflap renders for every bird size");
+        var px = precipitation_new(cr3, STONE_MEDIUM, MATERIAL_STONE, SR);
+        precipitation_set_intensity(px, F64_HALF);
+        var pxb = mkbuf(1024);
+        precipitation_process_block(px, pxb);
+        renders_ok(px, pxb, "precipitation renders for every type");
+        cr3 = cr3 + 1;
+    }
+    var dep = 0;
+    while (dep < 3) {
+        var ux = underwater_new(f64_from(5 + dep * 20), SR);
+        underwater_set_intensity(ux, F64_HALF);
+        var uxb = mkbuf(1024);
+        underwater_process_block(ux, uxb);
+        renders_ok(ux, uxb, "underwater renders at every depth");
+        dep = dep + 1;
+    }
+    var si = 0;
+    while (si < 4) {
+        var sx = surf_new(f64_div(f64_from(si * 3 + 1), f64_from(10)), SR);
+        var sxb = mkbuf(2048);
+        surf_process_block(sx, sxb);
+        renders_ok(sx, sxb, "surf renders at every intensity");
+        si = si + 1;
+    }
+
+    # =====================================================================
+    # Relative invariants -- these compare two synths, so no per-module suite
+    # can express them.
+    # =====================================================================
+    test_group("heavier rain is louder than light rain");
+    var lr = rain_new(RAIN_INTENSITY_LIGHT, SR);
+    var hr = rain_new(RAIN_INTENSITY_HEAVY, SR);
+    var lb = mkbuf(44100);
+    var hb = mkbuf(44100);
+    rain_process_block(lr, lb);
+    rain_process_block(hr, hb);
+    assert(f64_gt(energy(hb), energy(lb)) == 1, "heavy rain energy > light rain energy");
+
+    test_group("closer thunder is louder than distant thunder");
+    var ct = thunder_new(f64_from(100), SR);
+    var dt = thunder_new(f64_from(8000), SR);
+    var cb = mkbuf(44100);
+    var db = mkbuf(44100);
+    thunder_process_block(ct, cb);
+    thunder_process_block(dt, db);
+    assert(f64_gt(energy(cb), energy(db)) == 1, "close thunder energy > distant thunder energy");
+    assert(all_finite(cb) == 1, "close thunder finite");
+    assert(all_finite(db) == 1, "distant thunder finite");
+
+    # =====================================================================
+    # Silence gates. Uniform contract: a synth with no driving energy must be
+    # silent, not merely quiet.
+    # =====================================================================
+    test_group("silence gates are uniform across synths");
+    var tiny = f64_div(F64_ONE, f64_from(10000));
+    var sf = friction_new(FRICTION_SLIDE, MATERIAL_WOOD, SR);
+    friction_set_velocity(sf, 0);
+    var sfb = mkbuf(512);
+    friction_process_block(sf, sfb);
+    assert_eq(any_above(sfb, tiny), 0, "friction at zero velocity is silent");
+    var sr2 = rolling_new(ROLLING_BALL, MATERIAL_WOOD, SR);
+    rolling_set_velocity(sr2, 0);
+    var srb = mkbuf(512);
+    rolling_process_block(sr2, srb);
+    assert_eq(any_above(srb, tiny), 0, "rolling at zero velocity is silent");
+    var sw = whistle_new(WHISTLE_GAP, SR);
+    whistle_set_wind_speed(sw, 0);
+    var swb = mkbuf(512);
+    whistle_process_block(sw, swb);
+    assert_eq(any_above(swb, tiny), 0, "whistle at zero wind is silent");
+    var sc = cloth_new(CLOTH_FLAG, SR);
+    cloth_set_wind_speed(sc, 0);
+    var scb = mkbuf(512);
+    cloth_process_block(sc, scb);
+    assert_eq(any_above(scb, tiny), 0, "cloth at zero wind is silent");
+    var sn = insect_new(INSECT_CICADA_DRONE, SR);
+    insect_set_intensity(sn, 0);
+    var snb = mkbuf(512);
+    insect_process_block(sn, snb);
+    assert_eq(any_above(snb, tiny), 0, "insect at zero intensity is silent");
+    var sg = wingflap_new(BIRD_SIZE_MEDIUM, SR);
+    wingflap_set_intensity(sg, 0);
+    var sgb = mkbuf(512);
+    wingflap_process_block(sg, sgb);
+    assert_eq(any_above(sgb, tiny), 0, "wingflap at zero intensity is silent");
+    var sb2 = bubble_new(BUBBLE_BOILING, SR);
+    bubble_set_intensity(sb2, 0);
+    var sbb = mkbuf(512);
+    bubble_process_block(sb2, sbb);
+    assert_eq(any_above(sbb, tiny), 0, "bubble at zero intensity is silent");
+
+    # =====================================================================
+    # process_block edge cases + streaming continuity.
+    # =====================================================================
+    test_group("process_block on an empty buffer is a no-op, not a crash");
+    var eb = vec_new();
+    var ef = fire_new(F64_HALF, SR);
+    assert_eq(fire_process_block(ef, eb), 0, "fire on empty buffer");
+    assert_eq(vec_len(eb), 0, "empty buffer stays empty");
+    var ew = wind_new(f64_from(10), F64_HALF, SR);
+    assert_eq(wind_process_block(ew, eb), 0, "wind on empty buffer");
+
+    test_group("repeated process_block stays finite (state carries cleanly)");
+    var sfire = fire_new(F64_HALF, SR);
+    var sbuf = mkbuf(4096);
+    var blk = 0;
+    var still_ok = 1;
+    while (blk < 8) {
+        fire_process_block(sfire, sbuf);
+        if (all_finite(sbuf) == 0) { still_ok = 0; }
+        blk = blk + 1;
+    }
+    assert_eq(still_ok, 1, "fire stays finite across 8 successive blocks");
+
+    # =====================================================================
+    # Determinism across the family: same seed path => identical output.
+    # =====================================================================
+    test_group("deterministic replay across synths");
+    var d1 = fire_new(F64_HALF, SR);
+    var d2 = fire_new(F64_HALF, SR);
+    var db1 = mkbuf(2048);
+    var db2 = mkbuf(2048);
+    fire_process_block(d1, db1);
+    fire_process_block(d2, db2);
+    var same = 1;
+    var di = 0;
+    while (di < vec_len(db1)) {
+        if (vec_get(db1, di) != vec_get(db2, di)) { same = 0; }
+        di = di + 1;
+    }
+    assert_eq(same, 1, "two identically-constructed fires render identically");
+    var e1 = rain_new(RAIN_INTENSITY_MODERATE, SR);
+    var e2 = rain_new(RAIN_INTENSITY_MODERATE, SR);
+    var eb1 = mkbuf(2048);
+    var eb2 = mkbuf(2048);
+    rain_process_block(e1, eb1);
+    rain_process_block(e2, eb2);
+    var same2 = 1;
+    var ei = 0;
+    while (ei < vec_len(eb1)) {
+        if (vec_get(eb1, ei) != vec_get(eb2, ei)) { same2 = 0; }
+        ei = ei + 1;
+    }
+    assert_eq(same2, 1, "two identically-constructed rains render identically");
+
+    # =====================================================================
+    # Builders produce the same thing as the direct constructor.
+    # =====================================================================
+    test_group("builders match their direct constructors");
+    var pb = precipitation_builder_new(SR);
+    pb = precipitation_builder_precip_type(pb, PRECIP_HAIL);
+    pb = precipitation_builder_stone_size(pb, STONE_LARGE);
+    pb = precipitation_builder_surface(pb, MATERIAL_METAL);
+    var pbuilt = precipitation_builder_build(pb);
+    assert(garjan_is_err(pbuilt) == 0, "precipitation builder builds");
+    var pdirect = precipitation_new(PRECIP_HAIL, STONE_LARGE, MATERIAL_METAL, SR);
+    assert(garjan_is_err(pdirect) == 0, "precipitation direct builds");
+    var pbb = mkbuf(1024);
+    var pdb = mkbuf(1024);
+    precipitation_process_block(pbuilt, pbb);
+    precipitation_process_block(pdirect, pdb);
+    var psame = 1;
+    var pi = 0;
+    while (pi < vec_len(pbb)) {
+        if (vec_get(pbb, pi) != vec_get(pdb, pi)) { psame = 0; }
+        pi = pi + 1;
+    }
+    assert_eq(psame, 1, "builder-built precipitation renders identically to direct");
+
+    var fbld = footstep_builder_new(SR);
+    fbld = footstep_builder_terrain(fbld, TERRAIN_WOOD);
+    fbld = footstep_builder_movement(fbld, MOVEMENT_RUN);
+    var fbuilt = footstep_builder_build(fbld);
+    assert(garjan_is_err(fbuilt) == 0, "footstep builder builds");
+    var rbld = friction_builder_new(SR);
+    rbld = friction_builder_friction_type(rbld, FRICTION_GRIND);
+    rbld = friction_builder_surface(rbld, MATERIAL_STONE);
+    var rbuilt = friction_builder_build(rbld);
+    assert(garjan_is_err(rbuilt) == 0, "friction builder builds");
+
+    # =====================================================================
+    # Bridge: physical units in, synth parameters out. Cross-module by design.
+    # =====================================================================
+    test_group("bridge feeds real synth parameters");
+    var bi = bridge_rain_intensity_from_rate(f64_from(20));
+    var br = rain_new(bi, SR);
+    assert(garjan_is_err(br) == 0, "bridge rain intensity constructs a Rain");
+    var bws = bridge_wind_speed_normalized(f64_from(15));
+    var bw = wind_new(bws, F64_HALF, SR);
+    assert(garjan_is_err(bw) == 0, "bridge wind speed constructs a Wind");
+    var bd = bridge_thunder_distance_from_flash(f64_from(3), f64_from(20));
+    assert(f64_gt(bd, 0) == 1, "thunder distance from flash is positive");
+    var bt = thunder_new(bd, SR);
+    assert(garjan_is_err(bt) == 0, "bridge thunder distance constructs a Thunder");
+    var bfi = bridge_fire_intensity_from_temperature(f64_from(1200));
+    var bf2 = fire_new(bfi, SR);
+    assert(garjan_is_err(bf2) == 0, "bridge fire intensity constructs a Fire");
+    var od = 0; var ow = 0; var orn = 0;
+    var outb[24];
+    bridge_weather_from_threat_level(4, &outb, &outb + 8, &outb + 16);
+    assert(f64_gt(load64(&outb + 8), 0) == 1, "threat level 4 yields a positive wind speed");
+    assert(f64_lt(bridge_gain_from_distance(f64_from(10), f64_from(100)), F64_ONE) == 1,
+      "gain falls off with distance");
+
+    # =====================================================================
+    # LOD scaling drives real synth cost.
+    # =====================================================================
+    test_group("LOD quality scales modes and rates monotonically");
+    assert(lod_scale_modes(QUALITY_FULL, 16) >= lod_scale_modes(QUALITY_REDUCED, 16),
+      "full quality >= reduced modes");
+    assert(lod_scale_modes(QUALITY_REDUCED, 16) >= lod_scale_modes(QUALITY_MINIMAL, 16),
+      "reduced quality >= minimal modes");
+    assert(f64_ge(lod_scale_rate(QUALITY_FULL, f64_from(100)),
+      lod_scale_rate(QUALITY_MINIMAL, f64_from(100))) == 1, "full rate >= minimal rate");
+
+    # =====================================================================
+    # Voice pool under real allocation pressure.
+    # =====================================================================
+    test_group("voice pool integration");
+    var vp = voice_pool_new(3, STEAL_OLDEST);
+    assert_eq(voice_pool_max_voices(vp), 3, "pool holds 3 voices");
+    var _va100 = voice_pool_allocate(vp, 5, 100);
+    var _va200 = voice_pool_allocate(vp, 5, 200);
+    var _va300 = voice_pool_allocate(vp, 5, 300);
+    assert_eq(voice_pool_active_count(vp), 3, "pool fills to 3");
+    voice_pool_tick(vp);
+    var _va400 = voice_pool_allocate(vp, 5, 400);
+    assert_eq(voice_pool_active_count(vp), 3, "pool stays at 3 after stealing");
+    voice_pool_release_all(vp);
+    assert_eq(voice_pool_active_count(vp), 0, "release_all empties the pool");
+    var vpn = voice_pool_new(2, STEAL_NONE);
+    var _vn1 = voice_pool_allocate(vpn, 5, 1);
+    var _vn2 = voice_pool_allocate(vpn, 5, 2);
+    assert_eq(voice_pool_active_count(vpn), 2, "no-steal pool fills");
+    assert(voice_pool_allocate(vpn, 5, 3) < 0, "no-steal pool refuses a 3rd voice");
+
     return assert_summary();
 }
 

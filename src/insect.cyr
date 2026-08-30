@@ -3,7 +3,7 @@
 # Ports rust-old/src/insect.rs. The Cyrius port always uses the naad backend
 # (no feature flags), so it ports the #[cfg(feature="naad-backend")] path and
 # drops the fallback. f32 -> f64. Result<Self> -> pointer / negative GARJAN_*
-# code. The Rust #[serde(skip)]-equivalent naad components (noise_gen +
+# code. The naad components (noise_gen +
 # shape_filter) are reconstructed on deserialize; all scalar params + the rng,
 # dc_blocker, and the 8 precomputed swarm detunings ARE serialized (via the
 # flattened InsectParams below).
@@ -84,7 +84,7 @@ fn insect_detune(self, voice) {
 }
 
 # Build/refresh the naad components from sample_rate + base_freq. Shared by
-# insect_new and insect_from_json_str (mirrors the Rust skip+reconstruct).
+# insect_new and insect_from_json_str (rebuilt, not restored -- architecture note 001).
 # Returns GARJAN_OK or a negative code if a naad constructor rejects params.
 fn insect_build_naad(self) {
     var sr = Insect_sample_rate(self);

@@ -53,7 +53,7 @@ cargo deny check
 
 ## Scope Boundaries
 
-Before adding new sound categories, check whether the sound belongs in garjan or a sibling crate. See [docs/architecture/adr-003-scope-boundaries.md](docs/architecture/adr-003-scope-boundaries.md).
+Before adding new sound categories, check whether the sound belongs in garjan or a sibling crate. See [ADR-0003 — Scope boundaries](docs/adr/0003-scope-boundaries.md).
 
 ## License
 

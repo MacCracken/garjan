@@ -58,26 +58,28 @@ Patch line. No API changes, no audio changes.
 | 2.0.4 | ✅ 2026-08-30 | Arena lifetime: per-block allocations → zero |
 | 2.0.5 | ✅ 2026-08-30 | Per-sample hot paths; bit-exact (`scripts/audio-hash.cyr`) |
 
-### 2.0.6 — documentation accuracy _(next patch)_
+### 2.0.6 — documentation accuracy ✅ (docs only, shipped untagged)
 
-Nothing here changes behavior. All of it is wrong-or-absent documentation found
-during the 2.0.x work.
+Nothing here changed behavior, so it rides along with 2.0.5 rather than taking
+a tag of its own.
 
-- **Remove the false `#[serde(skip)]` premise.** Roughly eight comments across
-  `bubble/friction/insect/impact/texture/cloth/fire/…` state the port "mirrors
-  Rust's skip+reconstruct". **`rust-old/src` contains zero `serde(skip)`
-  attributes.** Rust derived `Serialize`/`Deserialize` over *all* fields,
-  naad components included. The reconstruct-on-deserialize behavior is a
-  deliberate divergence, not a mirror — say so, and cross-reference the parity
-  item scheduled for 2.2.0.
-- Fill in the `## Goal` section of `CLAUDE.md` (currently a `_TODO:_` stub —
-  what does garjan own in the stack?).
-- Populate `docs/architecture/README.md`'s empty index, or state that the
-  architecture notes are intentionally empty.
-- Decide the ADR location split: `adr-001`..`adr-004` live in
-  `docs/architecture/` under a pre-conventions `adr-NNN-` scheme, while
-  `docs/adr/README.md` declares `docs/adr/` with four-digit names as the home
-  and 0005 was filed there. Either relocate 1–4 or record the exception.
+- ✅ **Removed the false `#[serde(skip)]` premise** from 35 comment sites across
+  17 modules. `rust-old/src` contains zero `serde(skip)`; Rust derived
+  serialization over *all* fields, naad components included. The authoritative
+  explanation now lives in architecture note
+  [001](../architecture/001-deserialize-does-not-restore-dsp-state.md), and the
+  comments point at it instead of restating a false premise 35 times.
+- ✅ **Filled `CLAUDE.md`'s `## Goal`** — grounded in
+  [ADR-0003](../adr/0003-scope-boundaries.md)'s boundary table rather than
+  invented: garjan owns environmental/nature sound *sources*; propagation is
+  goonj, mixing dhvani, vocal prani/svara, mechanical ghurni.
+- ✅ **Populated `docs/architecture/README.md`**'s empty index with note 001.
+- ✅ **Resolved the ADR location split** — `adr-001`..`adr-004` moved from
+  `docs/architecture/` to `docs/adr/0001`..`0004`, the home both `CLAUDE.md`
+  and the two READMEs already declared. Renamed to the four-digit convention;
+  **not** renumbered and **not** reformatted (they predate the template and
+  reference the pre-port Rust version line — rewriting them would blur what was
+  decided when). Inbound links updated; all 34 relative doc links verified.
 
 ---
 
@@ -86,11 +88,22 @@ during the 2.0.x work.
 Everything Rust shipped that the port has not. Additive; no behavior change to
 existing APIs.
 
-- **Port `tests/integration.rs` → `tests/garjan.tcyr`.** Rust has **134**
-  cross-module integration tests; the Cyrius equivalent is a two-assertion
-  placeholder (`assert(1, "true is true")`). This is the single largest
-  coverage gap and it blocks a maturity criterion. The 33 per-module suites
-  (478 assertions) are real, but nothing covers cross-module interaction.
+- ✅ **Ported `tests/integration.rs` → `tests/garjan.tcyr`.** The placeholder
+  (`assert(1, "true is true")`) is replaced by a real cross-module suite:
+  **2 → 288 assertions**, taking the project from 478 to **764** overall.
+  Scoped deliberately: Rust's 134 tests include many per-type serde
+  round-trips and per-synth constructor checks the 33 per-module suites
+  already cover, so re-porting them verbatim would duplicate rather than add.
+  This file owns what no per-module suite *can* assert —
+  the uniform validation contract across all 21 constructors, exhaustive enum
+  variant sweeps (all 10 materials, all 32 terrain × movement pairs, every
+  intensity/type/size), cross-synth relative invariants (heavier rain louder
+  than light; closer thunder louder than distant), the uniform silence gates,
+  empty-buffer and multi-block streaming, determinism replay, builder-vs-direct
+  equivalence, bridge→synth wiring, LOD monotonicity, and voice-pool stealing.
+  The variant sweeps matter most: Rust enums became module-prefixed ints, so a
+  dropped variant produces no compile error — it silently falls into the final
+  `else`.
 - **Port `examples/` (5 programs) → `docs/examples/`**, which currently holds
   only `.gitkeep` while `CLAUDE.md` advertises it: `forest_ambience`,
   `weather_scene`, `combat_impacts`, `error_handling`, `logging`.

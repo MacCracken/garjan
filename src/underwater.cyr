@@ -4,7 +4,7 @@
 # Ports rust-old/src/underwater.rs. The Cyrius port always uses the naad
 # backend (no feature flags), so it ports the naad-backend code path and
 # drops the fallback. f32 -> f64. Result<Self> -> pointer / negative GARJAN_*
-# code. The Rust `#[serde(skip)]`-equivalent naad components (noise gens,
+# code. The naad components (noise gens,
 # biquads, LFO) are reconstructed on deserialize; depth/params + rng +
 # dc_blocker state ARE serialized (via the flattened UnderwaterParams below).
 # Requires: error, logging, dsp, rng foundations + the naad bundle
@@ -16,7 +16,7 @@ var UNDERWATER_DEPTH_SHALLOW = 0;
 var UNDERWATER_DEPTH_MEDIUM  = 1;
 var UNDERWATER_DEPTH_DEEP    = 2;
 
-# ---- UnderwaterParams: the serializable slice (Rust's non-skipped fields,
+# ---- UnderwaterParams: the serializable slice (the scalar fields only,
 # with rng + dc_blocker FLATTENED so #derive(Serialize)'s single-pass
 # from_json_str works). Synced to/from the live Underwater on (de)serialize.
 # depth is an enum -> i64 tag. lp_cutoff is carried so build_naad can
@@ -279,7 +279,7 @@ fn underwater_to_json(self, sb) {
 }
 
 # Rebuild an Underwater from JSON: restore scalars + rng + dc_blocker state,
-# then reconstruct the naad components fresh (matches Rust skip+reconstruct).
+# then reconstruct the naad components fresh (rebuilt, not restored -- architecture note 001).
 #must_use
 fn underwater_from_json_str(json) {
     var p = UnderwaterParams_from_json_str(json);

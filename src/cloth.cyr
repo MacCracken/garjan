@@ -8,14 +8,14 @@
 # shape_filter (the non-naad rng.next_f32 fallback is dropped). f32 -> f64.
 # Result<Self> -> pointer / negative GARJAN_* code.
 #
-# The Rust `#[serde(skip)]` naad components (noise_gen, shape_filter) plus the
+# The naad components (noise_gen, shape_filter) plus the
 # Option<ModalBank> are all reconstructable from cloth_type + sample_rate, so
 # they are NOT serialized; they are rebuilt in cloth_build_naad on deserialize.
 # rng + dc_blocker state ARE serialized (via the flattened ClothParams below).
 # Requires: error, logging, dsp, rng, material, modal, aero foundations + the
 # naad bundle (noise_new/noise_next_sample, filter_biquad_new/process_sample).
 
-# ---- ClothParams: the serializable slice (Rust's non-skipped fields, with
+# ---- ClothParams: the serializable slice (the scalar fields only, with
 # rng + dc_blocker FLATTENED to scalars so #derive(Serialize)'s single-pass
 # from_json_str works). cloth_type is a CLOTH_* int. Synced to/from the live
 # Cloth on (de)serialize. ----
@@ -276,7 +276,7 @@ fn cloth_to_json(self, sb) {
 
 # Rebuild a Cloth from JSON: restore scalars + rng + dc_blocker state, then
 # reconstruct the modal bank + naad components fresh (matches Rust's
-# skip+reconstruct). filter_freq / use_modal are re-derived from cloth_type.
+# rebuilt, not restored -- architecture note 001). filter_freq / use_modal are re-derived from cloth_type.
 #must_use
 fn cloth_from_json_str(json) {
     var p = ClothParams_from_json_str(json);

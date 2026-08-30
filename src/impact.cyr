@@ -6,7 +6,7 @@
 # noise through a bandpass resonance filter) and drops the rng fallback.
 # f32 -> f64. Result<Self> -> pointer / negative GARJAN_* code.
 #
-# The Rust `#[serde(skip)]`-equivalent live components -- modal_bank, exciter,
+# The live components -- modal_bank, exciter,
 # transient_noise, resonance_filter, excitation_buf -- are NOT serialized; they
 # are reconstructed on deserialize (in impact_build_naad) from the serialized
 # material + properties + sample_rate. rng + dc_blocker state ARE serialized

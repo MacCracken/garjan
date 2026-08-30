@@ -18,7 +18,20 @@
 
 ## Goal
 
-_TODO: one-or-two-sentence mission statement. What does garjan OWN in the stack? Durable — doesn't change per release._
+garjan owns **environmental and nature sound *source* generation** for the
+AGNOS stack — what a thing sounds like at the point it is made: weather
+(thunder, rain, wind), fire, water and fluids, impacts and surface contact
+(footsteps, friction, rolling, creak), aerodynamics (whoosh, whistle, cloth),
+foliage, and creature *mechanisms* (insect stridulation, wing flaps).
+
+It deliberately owns nothing downstream of the source. Propagation belongs to
+**goonj**, mixing and scheduling to **dhvani**, RTPC mapping to
+**dhvani/kiran**, mechanical sounds to **ghurni**, and anything vocal — speech,
+bird song, growls — to **prani/svara**. garjan therefore carries no dependency
+on a sibling audio crate; the `bridge` module converts physical units at the
+boundary using primitive values only. The full boundary table, including the
+Doppler and creature-sound edge cases, is
+[ADR-0003](docs/adr/0003-scope-boundaries.md).
 
 ## Current State
 

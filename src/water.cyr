@@ -3,7 +3,7 @@
 # Ports rust-old/src/water.rs. The Cyrius port always uses the naad backend
 # (no feature flags), so it ports the #[cfg(feature="naad-backend")] paths and
 # drops the fallback. f32 -> f64. Result<Self> -> pointer / negative GARJAN_*
-# code. The Rust #[serde(skip)]-equivalent naad components (noise_gen,
+# code. The naad components (noise_gen,
 # shape_filter, mod_lfo) are reconstructed on deserialize; water_type,
 # intensity, sample_rate, sample_position, drip_freq, rng, and dc_blocker are
 # serialized (via the flattened WaterParams below).
@@ -17,7 +17,7 @@ var WATER_DRIP   = 1;
 var WATER_SPLASH = 2;
 var WATER_WAVES  = 3;
 
-# ---- WaterParams: the serializable slice (Rust's non-skipped fields, with
+# ---- WaterParams: the serializable slice (the scalar fields only, with
 # water_type as an int tag and rng + dc_blocker FLATTENED to scalars so
 # #derive(Serialize)'s single-pass from_json_str works). Synced to/from the
 # live Water on (de)serialize. ----
@@ -286,7 +286,7 @@ fn water_to_json(self, sb) {
 }
 
 # Rebuild a Water from JSON: restore scalars + rng + dc_blocker state, then
-# reconstruct the naad components fresh (matches Rust's skip+reconstruct).
+# reconstruct the naad components fresh (rebuilt, not restored -- architecture note 001).
 #must_use
 fn water_from_json_str(json) {
     var p = WaterParams_from_json_str(json);

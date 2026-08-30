@@ -121,7 +121,7 @@ fn main() {
     k = 0; h = 0; while (k < 3) { friction_process_block(fr, b); h = hbuf(h, b); k = k + 1; }
     report("friction", h);
 
-    var ft = footstep_new(MATERIAL_STONE, MOVEMENT_WALK, sr);
+    var ft = footstep_new(TERRAIN_GRAVEL, MOVEMENT_WALK, sr);
     k = 0; h = 0; while (k < 3) { footstep_process_block(ft, b); h = hbuf(h, b); k = k + 1; }
     report("footstep", h);
 
