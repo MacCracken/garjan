@@ -11,9 +11,9 @@
 The 2.x line so far: the Rust→Cyrius port (2.0.0), a toolchain and dependency
 refresh (2.0.1), a P-1 security audit and its repairs (2.0.2-2.0.4), hot-path
 optimization (2.0.5, 2.3.0), parity completion — integration suite, benchmarks,
-examples (2.1.0) — boundary validation (2.2.0, 2.4.0), serde live-state parity (2.5.0) — the last
-outstanding divergence from the Rust oracle — and a second full audit sweep
-(2.5.1).
+examples (2.1.0) — boundary validation (2.2.0, 2.4.0), serde live-state parity
+(2.5.0, the last outstanding divergence from the Rust oracle), and a second full
+audit sweep (2.5.1).
 
 ## Toolchain
 

@@ -29,7 +29,7 @@ cyrius audit                     # fmt / lint / docs / tests / bench
   rain is louder than light), the uniform silence gates, determinism replay,
   builder-vs-direct equivalence, and the hot-path allocation contract.
 
-Total: **797 assertions**.
+Total: **836 assertions**.
 
 ## What the suite does NOT check
 
@@ -52,7 +52,7 @@ filter/RNG carry-over only appears from block 2.
 
 ## Writing a new test
 
-Follow an existing suite. The shape is:
+Follow an existing suite. The shape is (a template — `my_synth` is a stand-in, so this does not compile as written):
 
 ```cyrius
 include "src/error.cyr"

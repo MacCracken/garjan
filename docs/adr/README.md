@@ -30,8 +30,11 @@ Decisions about garjan — what we chose, the context, and the consequences we a
 
 > **Format note.** 0001-0004 were written before these conventions and before
 > the port; they use `## Status` / `Accepted (vN)` headings rather than the
-> `**Status**` / `**Date**` form in [`template.md`](template.md), and their
-> version references are to the pre-port Rust line. They were relocated here
+> `**Status**` / `**Date**` form in [`template.md`](template.md). **Read them as
+> historical records**: their version references are to the pre-port Rust line,
+> and they cite `.rs` paths and Rust concepts (`no_std`, feature gates) that no
+> longer exist — ADR-0002's dual code paths in particular were dropped by the
+> port. The decisions they record still stand; the file paths do not. They were relocated here
 > from `docs/architecture/` (where they had been filed against the README's own
 > rule) without renumbering or reformatting — the content is a historical
 > record, and rewriting it would blur what was decided when. New ADRs follow

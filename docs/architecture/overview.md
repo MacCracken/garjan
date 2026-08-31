@@ -97,7 +97,7 @@ fn my_synth_process_block(self, output) { ... }
 | `Result<T, GarjanError>` | pointer or negative `GARJAN_ERR_*`; check `garjan_is_err` |
 | `enum Material` | `MATERIAL_*` integer constants, validated at the boundary |
 | `#[cfg(feature = "naad-backend")]` dual paths | naad always on; the fallback path was dropped ([ADR-0002](../adr/0002-dual-code-paths.md)) |
-| `#[derive(Serialize)]` over live DSP state | scalars only; naad components rebuilt ([note 001](001-deserialize-does-not-restore-dsp-state.md)) |
+| `#[derive(Serialize)]` over live DSP state | matched since 2.5.0 — scalars via the derive, component state spliced in as `"dsp"` ([ADR-0008](../adr/0008-serde-carries-live-dsp-state.md)) |
 | `tracing` behind a feature | sakshi, always compiled, gated at runtime |
 | f32 throughout | f64 throughout ([note 002](002-where-the-transcendentals-come-from.md)) |
 | module system, `lib.rs`, prelude | one flat namespace; `[lib] modules` in `cyrius.cyml` sets the order |

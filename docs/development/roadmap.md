@@ -5,38 +5,36 @@
 > [CHANGELOG](../../CHANGELOG.md) — this file carries only what is still open,
 > plus enough context to pick each item up cold.
 
-## Next up
+## Open
 
-Nothing is queued. The parity work is complete — see **Open** below for what
-remains, all of it either blocked upstream or awaiting a decision that is not
-garjan's to make alone.
+The parity work is complete and nothing is queued. What remains splits three
+ways: two upstream API gaps, one dependency that does not exist yet, and work
+that needs a decision rather than an implementation.
 
----
+### Blocked on an upstream API
 
-## Open, blocked upstream
-
-Neither can be fixed inside garjan without coupling to a dependency's internals.
+Neither is fixable inside garjan without coupling to a dependency's internals,
+and `CLAUDE.md` forbids modifying `lib/`.
 
 - **`vec_with_capacity` in the Cyrius stdlib.** Every `*_synthesize` builds its
   output by pushing from capacity 16. Measured: **1,048,472 bytes retained per
   second of audio against an ideal 352,824** — ~3x overhead, never reclaimed.
-  `lib/vec.cyr` exposes only `vec_new()`, which hardcodes capacity 16;
-  hand-building the vector header would couple garjan to its private
-  `[data][len][cap]` layout, and `CLAUDE.md` forbids modifying `lib/`.
+  `lib/vec.cyr` exposes only `vec_new()`, which hardcodes 16; hand-building the
+  vector header would couple garjan to its private `[data][len][cap]` layout.
 - **`filter_svf_process_sample_bandpass` in naad.** `whistle_process_block`
   allocates **32 B/sample** because naad's `filter_svf_process_sample` returns a
   heap `SvfOutput`; naad has a non-allocating `_lowpass` variant but no
   band-pass one. That is 1.41 MB/s, **5.08 GB/hour** — the 2 GiB arena is gone
   in ~25 minutes of continuous whistle. Pinned by a test so it cannot worsen,
-  and called out in the README and integration guide.
+  and flagged in the README and integration guide.
+
+### Blocked on a dependency that does not exist
 
 - **Port `integration/soorat.rs`** (315 lines: `PrecipitationField`,
-  `FireEmitter`, `WindField`). Blocked — soorat has not landed in Cyrius. It was
+  `FireEmitter`, `WindField`) — soorat has not landed in Cyrius. It was
   feature-gated in Rust and is the one genuinely unported *feature*.
 
----
-
-## Open, unscheduled
+### Needs a decision, not an implementation
 
 - **Performance beyond 2.3.0.** `insect` is still the slowest at ~23x real-time,
   but measurement says most of what remains is irreducible: per 352,800
@@ -45,7 +43,10 @@ Neither can be fixed inside garjan without coupling to a dependency's internals.
   oscillator instead of a `sin` per voice per sample — which would **not** be
   bit-exact and so needs an ADR. Smaller garjan-side wins remain in `bubble`,
   `foliage`, `precipitation`, `whoosh`, `impact`.
-- **A downstream consumer.** The last unmet maturity criterion.
+- **A downstream consumer.** The last unmet maturity criterion — and the only
+  one that cannot be closed from inside this repository.
+
+---
 
 ## 3.0.0 — breaking, if it happens
 
@@ -59,7 +60,7 @@ Neither can be fixed inside garjan without coupling to a dependency's internals.
 ## 2.x maturity criteria
 
 - [x] Rust → Cyrius surface parity verified (function-level diff against `rust-old/`)
-- [x] Test coverage adequate for the surface area — 33 suites, 797 assertions,
+- [x] Test coverage adequate for the surface area — 33 suites, 836 assertions,
       including a 288-assertion cross-module suite
 - [x] Benchmarks captured — 26 ops in [`BENCHMARKS.md`](../../BENCHMARKS.md)
 - [x] Security audit written up — [2.0.2](../audit/2026-08-30-audit.md) and [2.5.1](../audit/2026-08-30-audit-2.md)
@@ -68,45 +69,19 @@ Neither can be fixed inside garjan without coupling to a dependency's internals.
 
 ## Shipped
 
-| | |
-|---|---|
-| 2.0.0 | Full Rust→Cyrius port, 32 modules |
-| 2.0.1 | Toolchain 6.3.44 → 6.5.36; all deps to latest |
-| 2.0.2 | P-1 audit: 3 JSON-reachable defects; `cyrius audit` fmt gate |
-| 2.0.3 | Allocation-failure guard ([ADR-0005](../adr/0005-allocation-failure-is-an-error-code-not-an-abort.md)) |
-| 2.0.4 | Arena lifetime: per-block allocations → zero |
-| 2.0.5 | Per-sample hot paths; bit-exact |
-| 2.0.6 | Docs accuracy (untagged); ADRs relocated to `docs/adr/` |
-| 2.1.0 | Integration suite (2 → 288 assertions), 26 benchmarks, 5 examples, audit write-up |
-| 2.2.0 | Out-of-range enum ids rejected ([ADR-0006](../adr/0006-out-of-range-enum-ids-are-rejected.md)) |
-| 2.3.0 | `insect` hot spot: 49.9 → 42.6 ms, bit-exact |
-| 2.4.0 | Duration / sample-rate / sample-count caps ([ADR-0007](../adr/0007-bounded-duration-and-sample-rate.md)) |
-| 2.5.0 | serde carries live DSP state — last parity divergence closed ([ADR-0008](../adr/0008-serde-carries-live-dsp-state.md)) |
-| 2.5.1 | Audit sweep: deserialize now validates what the constructor validates ([audit](../audit/2026-08-30-audit-2.md)) |
+2.0.0 through 2.5.1 — the port itself, two security audits and their repairs,
+hot-path optimization, parity completion, boundary validation, and serde
+live-state parity. Per-release detail is in the
+[CHANGELOG](../../CHANGELOG.md); it is not duplicated here.
 
 ---
 
 ## Port completeness
 
-Verified 2026-08-30, then **re-verified** after the first pass was found to have
-asserted things it had not checked. Re-run these after any upstream change.
-
-- **30 of 34** `rust-old/src` modules have a `.cyr` counterpart.
-- **All 106 enum variants ported, 103 preserving Rust's exact discriminant.**
-  The 3 exceptions are `GarjanError`, deliberately remapped to negative codes.
-- **~223 of 242** public items compared. The remainder is `math.rs` (superseded
-  — [note 002](../architecture/002-where-the-transcendentals-come-from.md)) and
-  `integration/soorat.rs` (deferred).
-- Correctly not ported: `lib.rs` (module declarations, a prelude, and a
-  `#[cfg(test)]` Send+Sync assertion — no behavior), `math.rs`, and
-  `integration/mod.rs` (7 lines).
-- **Also dropped deliberately: ~232 lines of non-naad fallback across 19 ported
-  modules** ([ADR-0002](../adr/0002-dual-code-paths.md)). The module count alone
-  overstates completeness.
-- One API-shape gap: `VoicePool::active_voices` returned an iterator; Cyrius has
-  none. Reachable by looping `voice_pool_slot` + `VoiceSlot_active`.
-
-### Method
+The verified result lives in [`state.md`](state.md#port-completeness). What
+belongs here is the **method**, because it must be re-run after any upstream
+change and because the first pass got it wrong — it asserted completeness it had
+not established.
 
 **1. Module level** — note `rglob`, not `glob`; the first pass used `glob` and
 silently skipped `rust-old/src/integration/`.
@@ -140,3 +115,10 @@ grep -rc 'cfg(not(feature = "naad-backend"))' rust-old/src/
 constants — `DcBlocker`'s clamp bounds were checked as bit patterns
 (`0x3FECCCCCCCCCCCCD` == 0.9), and the transcendentals measured against libm
 rather than assumed.
+
+**6. Check properties, not diffs.** Every defect in the 2.5.1 sweep came from
+asking a question across the whole surface — *"does every deserialize entry
+point validate its sample rate?"*, *"does every vector-building function have
+the size guard?"* — rather than from re-reading code already reviewed. A
+scripted rollout is only as good as its pattern: 2.4.0's size guard missed
+`impact_synthesize_velocity` because its operands were reversed.

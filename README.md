@@ -146,11 +146,13 @@ Cyrius has no cargo-style features; the Rust flags map to always-on wiring:
 - **Deterministic**: seeded RNG, bit-identical replay guaranteed. Enforced
   across refactors by [`scripts/audio-hash.cyr`](scripts/audio-hash.cyr) — the
   test suite checks finiteness and energy, *not* exact sample values.
-- **Validated at the boundary**: constructors reject out-of-range enum ids,
-  sample rates outside 1 Hz–768 kHz, durations over 600 s, and buffers over
-  44.1 M samples, rather than silently producing the wrong thing
+- **Validated at the boundary**: out-of-range enum ids, sample rates outside
+  1 Hz–768 kHz, durations over 600 s and buffers over 44.1 M samples are
+  rejected rather than silently producing the wrong thing
   ([ADR-0006](docs/adr/0006-out-of-range-enum-ids-are-rejected.md),
-  [ADR-0007](docs/adr/0007-bounded-duration-and-sample-rate.md))
+  [ADR-0007](docs/adr/0007-bounded-duration-and-sample-rate.md)). **Since 2.5.1
+  deserialization enforces the same rules as the constructors** — it no longer
+  relies on a downstream component happening to reject bad input
 - **Composable**: synthesizers are independent, caller mixes
 - **Physically grounded**: modal resonance, Poisson processes, stick-slip models
 
