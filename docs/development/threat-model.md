@@ -22,7 +22,10 @@ garjan does NOT trust:
 - **enum ids** — validated at 21 constructors and 10 table dispatchers. Ported
   Rust enums are plain integers, so an unvalidated id would fall through an
   `if`/`elif` chain's final `else` and silently select the last variant
-- **deserialized JSON** — the highest-risk surface; see below
+- **deserialized JSON** — the highest-risk surface; see below. Since 2.5.1 the
+  deserialize path validates *everything the constructor validates*: sample
+  rate, enum ids, and the size of any buffer it implies. It no longer relies on
+  a downstream naad component happening to reject bad input
 
 ## Attack surface: deserialization
 
@@ -41,6 +44,20 @@ input. Three defects were found and fixed here in 2.0.2 (see
   one `process_block` unbounded.
 
 All three are pinned by regression tests driving genuinely hostile documents.
+
+The 2.5.1 sweep found two more of the same shape, both now fixed:
+
+- **no deserialize path validated `sample_rate`.** They relied on
+  `*_build_naad` failing — which `bubble`'s cannot, since it only calls
+  `noise_new`. A document with `"sample_rate":0.0` constructed a bubble that
+  silently synthesized an empty buffer.
+- **no deserialize path re-validated enum ids**, so a hostile document could
+  restore an out-of-range id that the constructor rejects, reaching the
+  wrong-table behaviour ADR-0006 exists to prevent.
+
+The 2.5.0 `"dsp"` state loaders were tested against twelve hostile documents
+(type confusion, over-length arrays, truncation, malformed JSON) with no crash
+and no non-finite output.
 
 ## Attack surface: resource exhaustion
 

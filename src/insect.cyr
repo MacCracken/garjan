@@ -252,6 +252,11 @@ fn insect_process_block(self, output) {
     # sets it (insect_new_swarm, and insect_from_json_str since 2.0.2).
     var freqs[64];
     var phases[64];
+    # 64 bytes = 8 f64 slots. swarm_count is clamped to 1..8 on every path that
+    # sets it, so this is defence in depth -- but the margin is ZERO, and a
+    # future cap raised without resizing these would corrupt the stack silently.
+    if (swarm_count > 8) { swarm_count = 8; }
+    if (swarm_count < 1) { swarm_count = 1; }
     var phase_step = f64_div(f64_from(37), f64_from(100));
     var v = 0;
     while (v < swarm_count) {
@@ -417,6 +422,16 @@ fn insect_to_json(self, sb) {
 #must_use
 fn insect_from_json_str(json) {
     var p = InsectParams_from_json_str(json);
+    # Deserialize must validate what the constructor validates. Before 2.5.1
+    # this path relied on a downstream naad component rejecting a bad
+    # sample_rate -- which bubble's build_naad cannot do, since it only
+    # calls noise_new -- and it never re-checked the enum id at all, so a
+    # hostile document could restore an out-of-range one that *_new rejects.
+    var vsr = garjan_validate_sample_rate(InsectParams_sample_rate(p));
+    if (garjan_is_err(vsr) == 1) { return vsr; }
+    if (garjan_enum_invalid(InsectParams_insect_type(p), INSECT_CICADA_DRONE) == 1) {
+        return GARJAN_ERR_INVALID_PARAMETER;
+    }
     var self = garjan_alloc(sizeof(Insect));
     if (garjan_is_err(self) == 1) { return self; }
     Insect_set_insect_type(self, InsectParams_insect_type(p));

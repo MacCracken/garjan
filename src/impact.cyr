@@ -297,6 +297,10 @@ fn impact_synthesize_velocity(self, impact_type, velocity) {
     # duration = decay*2 + 0.05
     var duration = f64_add(f64_mul(pdecay, F64_TWO), f64_div(f64_from(5), f64_from(100)));
     var num_samples = f64_to(f64_mul(duration, Impact_sample_rate(self)));
+    # The 2.4.0 rollout matched `f64_mul(<Type>_sample_rate(self), duration)` and
+    # missed this one, whose operands are the other way round.
+    var ga_ncheck = garjan_validate_sample_count(num_samples);
+    if (garjan_is_err(ga_ncheck) == 1) { return ga_ncheck; }
 
     var output = vec_new();
     var i = 0;
@@ -356,6 +360,14 @@ fn impact_to_json(self, sb) {
 #must_use
 fn impact_from_json_str(json) {
     var p = ImpactParams_from_json_str(json);
+    # Deserialize must validate what the constructor validates. Before 2.5.1
+    # this path relied on a downstream naad component rejecting a bad
+    # sample_rate -- which bubble's build_naad cannot do, since it only
+    # calls noise_new -- and it never re-checked the enum id at all, so a
+    # hostile document could restore an out-of-range one that *_new rejects.
+    var vsr = garjan_validate_sample_rate(ImpactParams_sample_rate(p));
+    if (garjan_is_err(vsr) == 1) { return vsr; }
+    if (garjan_enum_invalid(ImpactParams_material(p), MATERIAL_CERAMIC) == 1) { return GARJAN_ERR_INVALID_PARAMETER; }
     var self = garjan_alloc(sizeof(Impact));
     if (garjan_is_err(self) == 1) { return self; }
     Impact_set_material(self, ImpactParams_material(p));

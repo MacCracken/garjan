@@ -5,6 +5,65 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.5.1]
+
+Full audit sweep of everything added since 2.0.2. **Three defects fixed, one
+hardening change** — write-up in
+[`docs/audit/2026-08-30-audit-2.md`](docs/audit/2026-08-30-audit-2.md). All
+three share the root cause the 2.0.2 audit found: **the deserialize path did
+not enforce what the constructor enforces.**
+
+### Fixed — `*_from_json_str` never validated `sample_rate`
+
+None of the 21 deserialize entry points validated the JSON-supplied
+`sample_rate`. The 2.0.2 fix made them propagate `*_build_naad`'s error, which
+*looked* like validation because most `build_naad`s construct a naad component
+that rejects a bad rate — but `bubble_build_naad` only calls `noise_new`, which
+cannot fail. So `bubble_from_json_str` with `"sample_rate":0.0` **constructed
+successfully**, stored 0, and `bubble_synthesize` then returned an **empty
+buffer with no error**. All 21 now validate directly, as `*_new` does.
+
+### Fixed — `*_from_json_str` never re-validated enum ids
+
+2.2.0 rejected out-of-range enum ids at 21 constructors and 10 dispatchers, but
+not on deserialize. `bubble_new(99, sr)` was rejected while
+`bubble_from_json_str` with `"bubble_type":99` was **accepted and stored 99** —
+reaching exactly the silent wrong-table behaviour
+[ADR-0006](docs/adr/0006-out-of-range-enum-ids-are-rejected.md) exists to
+prevent. 26 restored ids across 18 synths are now checked against the same
+named bounds the constructors use.
+
+### Fixed — `impact_synthesize_velocity` had no sample-count guard
+
+2.4.0 applied `garjan_validate_sample_count` at 20 sites by matching
+`f64_mul(<Type>_sample_rate(self), duration)`. This one computes it with the
+**operands reversed**, so the scripted rollout skipped it silently. 21 of 21
+guarded now. The check that caught it was "every function that builds a vector
+must have the guard" — not "every match of the pattern was rewritten".
+
+### Hardened — insect stack buffers had zero margin
+
+`insect_process_block` indexes two 64-byte stack buffers (8 f64 slots) by
+`swarm_count`. All three writers clamp to 1..8, so it was correct — but with no
+margin, and a future cap raised without resizing them would corrupt the stack
+silently. Now bounded at the point of use.
+
+### Verified clean
+
+The 2.5.0 `"dsp"` loaders stood up to twelve hostile documents — `dsp` as
+null/number/string/array, wrong-typed component values, empty arrays, arrays of
+objects, a 40-element octave array against a 16-slot vector, truncated arrays,
+malformed JSON — with no crash and no non-finite output.
+
+Also confirmed: no raw `alloc(` outside `garjan_alloc`; no unguarded
+pointer-returning helper results across ~160 call sites; all 3 stack buffers
+correctly sized in bytes; all 8 runtime setters clamp; `process_block` allocates
+nothing on 20 of 21 synths (`whistle` remains the documented, upstream-blocked
+exception).
+
+**836 assertions** across 33 suites (was 825). Lint 0 warnings, 0 lines over 120
+chars, audio bit-identical to 2.5.0.
+
 ## [2.5.0]
 
 Closes the last outstanding parity divergence: serde now carries the live DSP

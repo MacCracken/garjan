@@ -5,14 +5,15 @@
 
 ## Version
 
-**2.5.0** (2026-08-30). Per-release detail is in the
+**2.5.1** (2026-08-30). Per-release detail is in the
 [CHANGELOG](../../CHANGELOG.md); this file is current state only.
 
 The 2.x line so far: the Rust→Cyrius port (2.0.0), a toolchain and dependency
 refresh (2.0.1), a P-1 security audit and its repairs (2.0.2-2.0.4), hot-path
 optimization (2.0.5, 2.3.0), parity completion — integration suite, benchmarks,
-examples (2.1.0) — boundary validation (2.2.0, 2.4.0), and serde live-state parity (2.5.0) — the
-last outstanding divergence from the Rust oracle.
+examples (2.1.0) — boundary validation (2.2.0, 2.4.0), serde live-state parity (2.5.0) — the last
+outstanding divergence from the Rust oracle — and a second full audit sweep
+(2.5.1).
 
 ## Toolchain
 
@@ -30,7 +31,7 @@ last outstanding divergence from the Rust oracle.
 
 ## Tests
 
-- **33 module suites** in `tests/*.tcyr`, **825 assertions, all green**.
+- **33 module suites** in `tests/*.tcyr`, **836 assertions, all green**.
   `tests/garjan.tcyr` is the cross-module integration suite (288 of those),
   ported from `rust-old/tests/integration.rs`.
   Covers parity (incl. bit-exact PCG32), synthesis finiteness/energy, and

@@ -943,6 +943,52 @@ fn main() {
     assert_eq(same_samples(pa, sp_pb), 1, "foliage resumes identically (exciter + snap_modal)");
 
 
+    # =====================================================================
+    # Deserialize validates what the constructor validates (2.5.1).
+    #
+    # Until 2.5.1 the deserialize path relied on a downstream naad component
+    # rejecting a bad sample_rate -- which bubble's build_naad cannot do, it
+    # only calls noise_new -- and it never re-checked the enum id at all. So a
+    # hostile document could restore state that *_new rejects outright. Same
+    # root cause as the 2.0.2 findings: deserialize bypassing the constructor's
+    # guarantees.
+    # =====================================================================
+    test_group("from_json rejects what new() rejects");
+    # bubble is the case with no validating component downstream
+    assert(garjan_is_err(bubble_new(BUBBLE_BOILING, 0)) == 1, "bubble_new rejects sr=0");
+    assert(garjan_is_err(bubble_from_json_str("{\"bubble_type\":0,\"sample_rate\":0.0,\"sample_position\":0,\"intensity\":1.0,\"rng_state\":1,\"rng_inc\":1,\"dcb_x_prev\":0.0,\"dcb_y_prev\":0.0,\"dcb_r\":0.999}")) == 1,
+      "bubble_from_json rejects sr=0 too");
+    assert(garjan_is_err(bubble_from_json_str("{\"bubble_type\":99,\"sample_rate\":44100.0,\"sample_position\":0,\"intensity\":1.0,\"rng_state\":1,\"rng_inc\":1,\"dcb_x_prev\":0.0,\"dcb_y_prev\":0.0,\"dcb_r\":0.999}")) == 1,
+      "bubble_from_json rejects an out-of-range enum id");
+    assert(garjan_is_err(texture_from_json_str("{\"texture_type\":99,\"sample_rate\":44100.0,\"sample_position\":0,\"level\":0.5,\"rng_state\":1,\"rng_inc\":1,\"dcb_x_prev\":0.0,\"dcb_y_prev\":0.0,\"dcb_r\":0.999}")) == 1,
+      "texture_from_json rejects an out-of-range enum id");
+    assert(garjan_is_err(texture_from_json_str("{\"texture_type\":0,\"sample_rate\":0.0,\"sample_position\":0,\"level\":0.5,\"rng_state\":1,\"rng_inc\":1,\"dcb_x_prev\":0.0,\"dcb_y_prev\":0.0,\"dcb_r\":0.999}")) == 1,
+      "texture_from_json rejects sr=0");
+
+    test_group("hostile dsp payloads cannot corrupt a restore");
+    # Type confusion and over-length arrays in the 2.5.0 "dsp" member. Each must
+    # either be rejected or produce a synth that renders finite audio.
+    var v51_hb = mkbuf(128);
+    var v51_h1 = fire_from_json_str("{\"intensity\":0.5,\"crackle_rate\":20.0,\"sample_rate\":44100.0,\"sample_position\":0,\"rng_state\":1,\"rng_inc\":19999,\"dcb_x_prev\":0.0,\"dcb_y_prev\":0.0,\"dcb_r\":0.999,\"dsp\":\"pwn\"}");
+    assert(garjan_is_err(v51_h1) == 0, "dsp as a string still loads");
+    fire_process_block(v51_h1, v51_hb);
+    assert_eq(all_finite(v51_hb), 1, "...and renders finite");
+    var v51_h2 = fire_from_json_str("{\"intensity\":0.5,\"crackle_rate\":20.0,\"sample_rate\":44100.0,\"sample_position\":0,\"rng_state\":1,\"rng_inc\":19999,\"dcb_x_prev\":0.0,\"dcb_y_prev\":0.0,\"dcb_r\":0.999,\"dsp\":{\"rf\":[\"a\",\"b\"],\"rn\":[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30]}}");
+    assert(garjan_is_err(v51_h2) == 0, "wrong-typed and over-length dsp arrays still load");
+    v51_hb = mkbuf(128);
+    fire_process_block(v51_h2, v51_hb);
+    assert_eq(all_finite(v51_hb), 1, "...and render finite (no vec overrun)");
+
+    test_group("impact_synthesize_velocity is size-guarded");
+    # Its sample count is computed as f64_mul(duration, sample_rate) -- operands
+    # reversed relative to every other synth -- which is why the 2.4.0 rollout
+    # missed it.
+    var iv = impact_new(MATERIAL_METAL, SR);
+    var ivout = impact_synthesize_velocity(iv, IMPACT_STRIKE, F64_HALF);
+    assert(garjan_is_err(ivout) == 0, "normal velocity synthesis works");
+    assert(vec_len(ivout) > 0, "...and produces samples");
+
+
     return assert_summary();
 }
 

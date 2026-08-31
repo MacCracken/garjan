@@ -209,6 +209,13 @@ fn fire_to_json(self, sb) {
 #must_use
 fn fire_from_json_str(json) {
     var p = FireParams_from_json_str(json);
+    # Deserialize must validate what the constructor validates. Before 2.5.1
+    # this path relied on a downstream naad component rejecting a bad
+    # sample_rate -- which bubble's build_naad cannot do, since it only
+    # calls noise_new -- and it never re-checked the enum id at all, so a
+    # hostile document could restore an out-of-range one that *_new rejects.
+    var vsr = garjan_validate_sample_rate(FireParams_sample_rate(p));
+    if (garjan_is_err(vsr) == 1) { return vsr; }
     var self = garjan_alloc(sizeof(Fire));
     if (garjan_is_err(self) == 1) { return self; }
     Fire_set_intensity(self, FireParams_intensity(p));

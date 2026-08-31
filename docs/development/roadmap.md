@@ -62,7 +62,7 @@ Neither can be fixed inside garjan without coupling to a dependency's internals.
 - [x] Test coverage adequate for the surface area — 33 suites, 797 assertions,
       including a 288-assertion cross-module suite
 - [x] Benchmarks captured — 26 ops in [`BENCHMARKS.md`](../../BENCHMARKS.md)
-- [x] Security audit written up — [`docs/audit/`](../audit/2026-08-30-audit.md)
+- [x] Security audit written up — [2.0.2](../audit/2026-08-30-audit.md) and [2.5.1](../audit/2026-08-30-audit-2.md)
 - [x] CHANGELOG complete from 2.0.0 onward
 - [ ] **At least one downstream consumer green** — none yet
 
@@ -82,6 +82,7 @@ Neither can be fixed inside garjan without coupling to a dependency's internals.
 | 2.3.0 | `insect` hot spot: 49.9 → 42.6 ms, bit-exact |
 | 2.4.0 | Duration / sample-rate / sample-count caps ([ADR-0007](../adr/0007-bounded-duration-and-sample-rate.md)) |
 | 2.5.0 | serde carries live DSP state — last parity divergence closed ([ADR-0008](../adr/0008-serde-carries-live-dsp-state.md)) |
+| 2.5.1 | Audit sweep: deserialize now validates what the constructor validates ([audit](../audit/2026-08-30-audit-2.md)) |
 
 ---
 

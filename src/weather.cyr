@@ -224,6 +224,16 @@ fn rain_to_json(self, sb) {
 #must_use
 fn rain_from_json_str(json) {
     var p = RainParams_from_json_str(json);
+    # Deserialize must validate what the constructor validates. Before 2.5.1
+    # this path relied on a downstream naad component rejecting a bad
+    # sample_rate -- which bubble's build_naad cannot do, since it only
+    # calls noise_new -- and it never re-checked the enum id at all, so a
+    # hostile document could restore an out-of-range one that *_new rejects.
+    var vsr = garjan_validate_sample_rate(RainParams_sample_rate(p));
+    if (garjan_is_err(vsr) == 1) { return vsr; }
+    if (garjan_enum_invalid(RainParams_intensity(p), RAIN_INTENSITY_TORRENTIAL) == 1) {
+        return GARJAN_ERR_INVALID_PARAMETER;
+    }
     var self = garjan_alloc(sizeof(Rain));
     if (garjan_is_err(self) == 1) { return self; }
     Rain_set_intensity(self, RainParams_intensity(p));
@@ -453,6 +463,13 @@ fn thunder_to_json(self, sb) {
 #must_use
 fn thunder_from_json_str(json) {
     var p = ThunderParams_from_json_str(json);
+    # Deserialize must validate what the constructor validates. Before 2.5.1
+    # this path relied on a downstream naad component rejecting a bad
+    # sample_rate -- which bubble's build_naad cannot do, since it only
+    # calls noise_new -- and it never re-checked the enum id at all, so a
+    # hostile document could restore an out-of-range one that *_new rejects.
+    var vsr = garjan_validate_sample_rate(ThunderParams_sample_rate(p));
+    if (garjan_is_err(vsr) == 1) { return vsr; }
     var self = garjan_alloc(sizeof(Thunder));
     if (garjan_is_err(self) == 1) { return self; }
     Thunder_set_distance_m(self, ThunderParams_distance_m(p));
@@ -648,6 +665,13 @@ fn wind_to_json(self, sb) {
 #must_use
 fn wind_from_json_str(json) {
     var p = WindParams_from_json_str(json);
+    # Deserialize must validate what the constructor validates. Before 2.5.1
+    # this path relied on a downstream naad component rejecting a bad
+    # sample_rate -- which bubble's build_naad cannot do, since it only
+    # calls noise_new -- and it never re-checked the enum id at all, so a
+    # hostile document could restore an out-of-range one that *_new rejects.
+    var vsr = garjan_validate_sample_rate(WindParams_sample_rate(p));
+    if (garjan_is_err(vsr) == 1) { return vsr; }
     var self = garjan_alloc(sizeof(Wind));
     if (garjan_is_err(self) == 1) { return self; }
     Wind_set_speed(self, WindParams_speed(p));

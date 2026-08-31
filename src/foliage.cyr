@@ -365,6 +365,16 @@ fn foliage_to_json(self, sb) {
 #must_use
 fn foliage_from_json_str(json) {
     var p = FoliageParams_from_json_str(json);
+    # Deserialize must validate what the constructor validates. Before 2.5.1
+    # this path relied on a downstream naad component rejecting a bad
+    # sample_rate -- which bubble's build_naad cannot do, since it only
+    # calls noise_new -- and it never re-checked the enum id at all, so a
+    # hostile document could restore an out-of-range one that *_new rejects.
+    var vsr = garjan_validate_sample_rate(FoliageParams_sample_rate(p));
+    if (garjan_is_err(vsr) == 1) { return vsr; }
+    if (garjan_enum_invalid(FoliageParams_foliage_type(p), FOLIAGE_BRANCH_SNAP) == 1) {
+        return GARJAN_ERR_INVALID_PARAMETER;
+    }
     var self = garjan_alloc(sizeof(Foliage));
     if (garjan_is_err(self) == 1) { return self; }
     Foliage_set_foliage_type(self, FoliageParams_foliage_type(p));

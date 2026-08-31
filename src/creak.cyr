@@ -301,6 +301,14 @@ fn creak_to_json(self, sb) {
 #must_use
 fn creak_from_json_str(json) {
     var p = CreakParams_from_json_str(json);
+    # Deserialize must validate what the constructor validates. Before 2.5.1
+    # this path relied on a downstream naad component rejecting a bad
+    # sample_rate -- which bubble's build_naad cannot do, since it only
+    # calls noise_new -- and it never re-checked the enum id at all, so a
+    # hostile document could restore an out-of-range one that *_new rejects.
+    var vsr = garjan_validate_sample_rate(CreakParams_sample_rate(p));
+    if (garjan_is_err(vsr) == 1) { return vsr; }
+    if (garjan_enum_invalid(CreakParams_source(p), CREAK_WOOD_STRESS) == 1) { return GARJAN_ERR_INVALID_PARAMETER; }
     var self = garjan_alloc(sizeof(Creak));
     if (garjan_is_err(self) == 1) { return self; }
     Creak_set_source(self, CreakParams_source(p));
