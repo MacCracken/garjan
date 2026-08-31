@@ -101,6 +101,21 @@ fn renders_ok(self, buf, label) {
     return 0;
 }
 
+# Warm a synth, snapshot it, restore, then continue BOTH and compare. Parity
+# means the two continuations are sample-identical. This is the check that
+# matters -- JSON round-trip equality passed throughout the period when restore
+# silently zeroed every filter.
+#must_use
+fn same_samples(a, b) {
+    if (vec_len(a) != vec_len(b)) { return 0; }
+    var i = 0;
+    while (i < vec_len(a)) {
+        if (vec_get(a, i) != vec_get(b, i)) { return 0; }
+        i = i + 1;
+    }
+    return 1;
+}
+
 fn main() {
     alloc_init();
     # Quiet the deliberate bad-input warnings. sakshi emits when
@@ -716,6 +731,216 @@ fn main() {
     var na_wd = alloc_used() - na0;
     assert(na_wd > 0, "whistle still allocates (documented naad gap)");
     assert(na_wd <= 20 * 1024 * 32, "whistle allocation has not grown beyond 32 B/sample");
+
+
+    # =====================================================================
+    # serde live-state parity (2.5.0). Rust derived Serialize over the naad
+    # component fields, so a Rust save/restore resumed seamlessly. The port
+    # rebuilt them from scalars and resumed with zeroed filter memory, reset
+    # noise position and reset LFO phase (architecture note 001).
+    #
+    # Every synth is checked the only way that detects this: warm it, snapshot,
+    # restore, then run BOTH forward and compare sample for sample.
+    # =====================================================================
+    test_group("serde restores live DSP state for every synth");
+    var pw = mkbuf(512);
+    var pa = mkbuf(512);
+    var sp_pb = mkbuf(512);
+    var psb = str_builder_new();
+
+    var q1 = fire_new(F64_HALF, SR); fire_process_block(q1, pw);
+    psb = str_builder_new();
+    var sp_e1 = fire_to_json(q1, psb);
+    var q2 = fire_from_json_str(str_data(str_builder_build(psb)));
+    pa = mkbuf(512); sp_pb = mkbuf(512);
+    fire_process_block(q1, pa); fire_process_block(q2, sp_pb);
+    assert_eq(same_samples(pa, sp_pb), 1, "fire resumes identically");
+
+    var r1 = rain_new(RAIN_INTENSITY_MODERATE, SR); rain_process_block(r1, pw);
+    psb = str_builder_new();
+    var sp_e2 = rain_to_json(r1, psb);
+    var sp_r2 = rain_from_json_str(str_data(str_builder_build(psb)));
+    pa = mkbuf(512); sp_pb = mkbuf(512);
+    rain_process_block(r1, pa); rain_process_block(sp_r2, sp_pb);
+    assert_eq(same_samples(pa, sp_pb), 1, "rain resumes identically");
+
+    var t1 = thunder_new(f64_from(200), SR); thunder_process_block(t1, pw);
+    psb = str_builder_new();
+    var sp_e3 = thunder_to_json(t1, psb);
+    var sp_t2 = thunder_from_json_str(str_data(str_builder_build(psb)));
+    pa = mkbuf(512); sp_pb = mkbuf(512);
+    thunder_process_block(t1, pa); thunder_process_block(sp_t2, sp_pb);
+    assert_eq(same_samples(pa, sp_pb), 1, "thunder resumes identically");
+
+    # wind exercises pink noise (16 octave values) + an SVF + an LFO
+    var n1 = wind_new(f64_from(12), F64_HALF, SR); wind_process_block(n1, pw);
+    psb = str_builder_new();
+    var sp_e4 = wind_to_json(n1, psb);
+    var n2 = wind_from_json_str(str_data(str_builder_build(psb)));
+    pa = mkbuf(512); sp_pb = mkbuf(512);
+    wind_process_block(n1, pa); wind_process_block(n2, sp_pb);
+    assert_eq(same_samples(pa, sp_pb), 1, "wind resumes identically (pink + svf + lfo)");
+
+    var w1 = water_new(WATER_STREAM, F64_HALF, SR); water_process_block(w1, pw);
+    psb = str_builder_new();
+    var sp_e5 = water_to_json(w1, psb);
+    var sp_w2 = water_from_json_str(str_data(str_builder_build(psb)));
+    pa = mkbuf(512); sp_pb = mkbuf(512);
+    water_process_block(w1, pa); water_process_block(sp_w2, sp_pb);
+    assert_eq(same_samples(pa, sp_pb), 1, "water resumes identically");
+
+    var x1 = texture_new(TEXTURE_TYPE_FOREST, F64_HALF, SR); texture_process_block(x1, pw);
+    psb = str_builder_new();
+    var sp_e6 = texture_to_json(x1, psb);
+    var x2 = texture_from_json_str(str_data(str_builder_build(psb)));
+    pa = mkbuf(512); sp_pb = mkbuf(512);
+    texture_process_block(x1, pa); texture_process_block(x2, sp_pb);
+    assert_eq(same_samples(pa, sp_pb), 1, "texture resumes identically (3 noise + 3 filters + lfo)");
+
+    var u1 = underwater_new(UNDERWATER_DEPTH_MEDIUM, SR); underwater_set_intensity(u1, F64_HALF);
+    underwater_process_block(u1, pw);
+    psb = str_builder_new();
+    var sp_e7 = underwater_to_json(u1, psb);
+    var u2 = underwater_from_json_str(str_data(str_builder_build(psb)));
+    pa = mkbuf(512); sp_pb = mkbuf(512);
+    underwater_process_block(u1, pa); underwater_process_block(u2, sp_pb);
+    assert_eq(same_samples(pa, sp_pb), 1, "underwater resumes identically");
+
+    var f1 = surf_new(SURF_MODERATE, SR); surf_process_block(f1, pw);
+    psb = str_builder_new();
+    var sp_e8 = surf_to_json(f1, psb);
+    var f2 = surf_from_json_str(str_data(str_builder_build(psb)));
+    pa = mkbuf(512); sp_pb = mkbuf(512);
+    surf_process_block(f1, pa); surf_process_block(f2, sp_pb);
+    assert_eq(same_samples(pa, sp_pb), 1, "surf resumes identically");
+
+    var h1 = whistle_new(WHISTLE_PIPE, SR); whistle_set_wind_speed(h1, f64_from(15));
+    whistle_process_block(h1, pw);
+    psb = str_builder_new();
+    var sp_e9 = whistle_to_json(h1, psb);
+    var h2 = whistle_from_json_str(str_data(str_builder_build(psb)));
+    pa = mkbuf(512); sp_pb = mkbuf(512);
+    whistle_process_block(h1, pa); whistle_process_block(h2, sp_pb);
+    assert_eq(same_samples(pa, sp_pb), 1, "whistle resumes identically (svf)");
+
+    var o1 = whoosh_new(WHOOSH_SWING, SR); whoosh_set_speed(o1, f64_from(20));
+    whoosh_trigger(o1); whoosh_process_block(o1, pw);
+    psb = str_builder_new();
+    var sp_e10 = whoosh_to_json(o1, psb);
+    var o2 = whoosh_from_json_str(str_data(str_builder_build(psb)));
+    pa = mkbuf(512); sp_pb = mkbuf(512);
+    whoosh_process_block(o1, pa); whoosh_process_block(o2, sp_pb);
+    assert_eq(same_samples(pa, sp_pb), 1, "whoosh resumes identically");
+
+    var c1 = cloth_new(CLOTH_SAIL, SR); cloth_set_wind_speed(c1, f64_from(12));
+    cloth_process_block(c1, pw);
+    psb = str_builder_new();
+    var sp_e11 = cloth_to_json(c1, psb);
+    var c2 = cloth_from_json_str(str_data(str_builder_build(psb)));
+    pa = mkbuf(512); sp_pb = mkbuf(512);
+    cloth_process_block(c1, pa); cloth_process_block(c2, sp_pb);
+    assert_eq(same_samples(pa, sp_pb), 1, "cloth resumes identically (modal bank)");
+
+    var i1 = insect_new_swarm(INSECT_CICADA_DRONE, 4, SR); insect_set_intensity(i1, F64_ONE);
+    insect_process_block(i1, pw);
+    psb = str_builder_new();
+    var sp_e12 = insect_to_json(i1, psb);
+    var i2 = insect_from_json_str(str_data(str_builder_build(psb)));
+    pa = mkbuf(512); sp_pb = mkbuf(512);
+    insect_process_block(i1, pa); insect_process_block(i2, sp_pb);
+    assert_eq(same_samples(pa, sp_pb), 1, "insect resumes identically");
+
+    var g1 = wingflap_new(BIRD_SIZE_MEDIUM, SR); wingflap_set_intensity(g1, F64_ONE);
+    wingflap_process_block(g1, pw);
+    psb = str_builder_new();
+    var sp_e13 = wingflap_to_json(g1, psb);
+    var g2 = wingflap_from_json_str(str_data(str_builder_build(psb)));
+    pa = mkbuf(512); sp_pb = mkbuf(512);
+    wingflap_process_block(g1, pa); wingflap_process_block(g2, sp_pb);
+    assert_eq(same_samples(pa, sp_pb), 1, "wingflap resumes identically");
+
+    var b1 = bubble_new(BUBBLE_BOILING, SR); bubble_set_intensity(b1, F64_ONE);
+    bubble_process_block(b1, pw);
+    psb = str_builder_new();
+    var sp_e14 = bubble_to_json(b1, psb);
+    var b2 = bubble_from_json_str(str_data(str_builder_build(psb)));
+    pa = mkbuf(512); sp_pb = mkbuf(512);
+    bubble_process_block(b1, pa); bubble_process_block(b2, sp_pb);
+    assert_eq(same_samples(pa, sp_pb), 1, "bubble resumes identically");
+
+    # --- the modal-bank and exciter carriers ---
+    var m1 = impact_new(MATERIAL_METAL, SR); impact_process_block(m1, IMPACT_STRIKE, pw);
+    psb = str_builder_new();
+    var sp_e15 = impact_to_json(m1, psb);
+    var m2 = impact_from_json_str(str_data(str_builder_build(psb)));
+    pa = mkbuf(512); sp_pb = mkbuf(512);
+    impact_process_block(m1, IMPACT_STRIKE, pa); impact_process_block(m2, IMPACT_STRIKE, sp_pb);
+    assert_eq(same_samples(pa, sp_pb), 1, "impact resumes identically (modal bank + exciter)");
+
+    var s1 = footstep_new(TERRAIN_WOOD, MOVEMENT_WALK, SR); footstep_process_block(s1, pw);
+    psb = str_builder_new();
+    var sp_e16 = footstep_to_json(s1, psb);
+    var s2 = footstep_from_json_str(str_data(str_builder_build(psb)));
+    pa = mkbuf(512); sp_pb = mkbuf(512);
+    footstep_process_block(s1, pa); footstep_process_block(s2, sp_pb);
+    assert_eq(same_samples(pa, sp_pb), 1, "footstep resumes identically (resonant terrain)");
+
+    # a non-resonant terrain leaves modal_bank at 0 -- the loader must tolerate it
+    var s3 = footstep_new(TERRAIN_SAND, MOVEMENT_RUN, SR); footstep_process_block(s3, pw);
+    psb = str_builder_new();
+    var sp_e17 = footstep_to_json(s3, psb);
+    var s4 = footstep_from_json_str(str_data(str_builder_build(psb)));
+    pa = mkbuf(512); sp_pb = mkbuf(512);
+    footstep_process_block(s3, pa); footstep_process_block(s4, sp_pb);
+    assert_eq(same_samples(pa, sp_pb), 1, "footstep resumes identically with a null modal bank");
+
+    var k1 = creak_new(CREAK_DOOR, SR); creak_set_tension(k1, F64_HALF); creak_set_speed(k1, F64_HALF);
+    creak_process_block(k1, pw);
+    psb = str_builder_new();
+    var sp_e18 = creak_to_json(k1, psb);
+    var k2 = creak_from_json_str(str_data(str_builder_build(psb)));
+    pa = mkbuf(512); sp_pb = mkbuf(512);
+    creak_process_block(k1, pa); creak_process_block(k2, sp_pb);
+    assert_eq(same_samples(pa, sp_pb), 1, "creak resumes identically");
+
+    var l1 = rolling_new(ROLLING_BARREL, MATERIAL_WOOD, SR); rolling_set_velocity(l1, F64_TWO);
+    rolling_process_block(l1, pw);
+    psb = str_builder_new();
+    var sp_e19 = rolling_to_json(l1, psb);
+    var l2 = rolling_from_json_str(str_data(str_builder_build(psb)));
+    pa = mkbuf(512); sp_pb = mkbuf(512);
+    rolling_process_block(l1, pa); rolling_process_block(l2, sp_pb);
+    assert_eq(same_samples(pa, sp_pb), 1, "rolling resumes identically");
+
+    var y1 = friction_new(FRICTION_GRIND, MATERIAL_STONE, SR);
+    friction_set_velocity(y1, F64_TWO); friction_set_pressure(y1, F64_HALF);
+    friction_process_block(y1, pw);
+    psb = str_builder_new();
+    var sp_e20 = friction_to_json(y1, psb);
+    var y2 = friction_from_json_str(str_data(str_builder_build(psb)));
+    pa = mkbuf(512); sp_pb = mkbuf(512);
+    friction_process_block(y1, pa); friction_process_block(y2, sp_pb);
+    assert_eq(same_samples(pa, sp_pb), 1, "friction resumes identically");
+
+    var z1 = precipitation_new(PRECIP_HAIL, STONE_MEDIUM, MATERIAL_METAL, SR);
+    precipitation_set_intensity(z1, F64_HALF); precipitation_process_block(z1, pw);
+    psb = str_builder_new();
+    var sp_e21 = precipitation_to_json(z1, psb);
+    var z2 = precipitation_from_json_str(str_data(str_builder_build(psb)));
+    pa = mkbuf(512); sp_pb = mkbuf(512);
+    precipitation_process_block(z1, pa); precipitation_process_block(z2, sp_pb);
+    assert_eq(same_samples(pa, sp_pb), 1, "precipitation resumes identically");
+
+    # foliage carries BOTH an exciter and a modal bank, under the field name
+    # `snap_modal` -- which a grep for `modal_bank` misses.
+    var v1 = foliage_new(FOLIAGE_BRANCH_SNAP, SR); foliage_set_wind_speed(v1, f64_from(8));
+    foliage_trigger_snap(v1); foliage_process_block(v1, pw);
+    psb = str_builder_new();
+    var sp_e22 = foliage_to_json(v1, psb);
+    var v2 = foliage_from_json_str(str_data(str_builder_build(psb)));
+    pa = mkbuf(512); sp_pb = mkbuf(512);
+    foliage_process_block(v1, pa); foliage_process_block(v2, sp_pb);
+    assert_eq(same_samples(pa, sp_pb), 1, "foliage resumes identically (exciter + snap_modal)");
 
 
     return assert_summary();

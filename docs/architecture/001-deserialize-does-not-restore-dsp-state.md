@@ -1,5 +1,12 @@
 # 001 — Deserialize does not restore DSP state (and Rust's did)
 
+> **RESOLVED in 2.5.0** — see [ADR-0008](../adr/0008-serde-carries-live-dsp-state.md).
+> Deserialize now restores the live state of every component, and the
+> cross-module suite verifies it for all 21 synths by comparing *continued
+> output after restore*. This note is kept for the history: what the divergence
+> was, how the false `#[serde(skip)]` premise hid it, and why JSON round-trip
+> tests could not see it.
+
 Every `*_from_json_str` in `src/` rebuilds its naad components — noise
 generators, biquad / state-variable filters, LFOs, modal banks, exciters —
 **fresh from the scalar parameters**, rather than restoring their live state.
@@ -47,13 +54,16 @@ the audio after a restore.
 `Rng` and `DcBlocker` state **are** preserved — they are plain scalars carried
 through `*Params` — so the divergence is specific to the naad-owned components.
 
-## Why it is still like this
+## How it was fixed
 
-The port had no way to read live state out of naad's bundle types when it was
-written. Changing it is a real decision with a format consequence (`*Params`
-would grow the component state, so stored JSON breaks), which is why it is
-scheduled as a 2.2.x item requiring an ADR rather than quietly fixed — see
-[`../development/roadmap.md`](../development/roadmap.md).
+naad exposes accessors for all of it, so the state was reachable all along. 2.5.0
+splices a `"dsp"` member into the existing params object — the derive parser
+ignores unknown keys — and stores values as raw i64 bit patterns so the
+round-trip is exact. Documents written before 2.5.0 still load, without live
+state. See [ADR-0008](../adr/0008-serde-carries-live-dsp-state.md).
 
-Until that lands, treat serde round-tripping as **parameter persistence, not
-session snapshotting**.
+As of 2.5.0 serde round-tripping **is** session snapshotting. The lesson worth
+keeping is the testing one: every serde test checked round-trip idempotence —
+serialize, deserialize, re-serialize, compare strings — and that passes
+perfectly while every filter is silently zeroed. The check that finds it is to
+warm a synth, snapshot, restore, run **both** forward, and compare samples.

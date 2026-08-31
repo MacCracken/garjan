@@ -261,7 +261,20 @@ fn texture_to_json(self, sb) {
     AmbientTextureParams_set_dcb_x_prev(p, DcBlocker_x_prev(dc));
     AmbientTextureParams_set_dcb_y_prev(p, DcBlocker_y_prev(dc));
     AmbientTextureParams_set_dcb_r(p, DcBlocker_r(dc));
-    return AmbientTextureParams_to_json(p, sb);
+    # Scalars via the derive, then the naad components' LIVE state spliced
+    # in as "dsp" -- without it a restore resumes with zeroed filter memory.
+    var psb = str_builder_new();
+    var pe = AmbientTextureParams_to_json(p, psb);
+    if (garjan_is_err(pe) == 1) { return pe; }
+    var dsp = bayan_json_v_obj_new();
+    bayan_json_v_obj_set(dsp, str_from("lf"), garjan_state_biquad(AmbientTexture_low_filter(self)));
+    bayan_json_v_obj_set(dsp, str_from("mf"), garjan_state_biquad(AmbientTexture_mid_filter(self)));
+    bayan_json_v_obj_set(dsp, str_from("hf"), garjan_state_biquad(AmbientTexture_high_filter(self)));
+    bayan_json_v_obj_set(dsp, str_from("ml"), garjan_state_lfo(AmbientTexture_mod_lfo(self)));
+    bayan_json_v_obj_set(dsp, str_from("ln"), garjan_state_noise(AmbientTexture_low_noise(self)));
+    bayan_json_v_obj_set(dsp, str_from("mn"), garjan_state_noise(AmbientTexture_mid_noise(self)));
+    bayan_json_v_obj_set(dsp, str_from("hn"), garjan_state_noise(AmbientTexture_high_noise(self)));
+    return garjan_emit_with_dsp(sb, psb, dsp);
 }
 
 # Rebuild an AmbientTexture from JSON: restore scalars + rng + dc_blocker
@@ -291,5 +304,19 @@ fn texture_from_json_str(json) {
 
     var b = texture_build_naad(self);
     if (garjan_is_err(b) == 1) { return b; }
+
+    # Restore the components' live state onto the freshly built ones. A
+    # document written before 2.5.0 has no "dsp" member; garjan_dsp_node
+    # returns 0 and the synth resumes without it, exactly as it used to.
+    var dsp = garjan_dsp_node(json);
+    if (dsp != 0) {
+        garjan_state_biquad_load(AmbientTexture_low_filter(self), bayan_json_v_obj_get(dsp, "lf"));
+        garjan_state_biquad_load(AmbientTexture_mid_filter(self), bayan_json_v_obj_get(dsp, "mf"));
+        garjan_state_biquad_load(AmbientTexture_high_filter(self), bayan_json_v_obj_get(dsp, "hf"));
+        garjan_state_lfo_load(AmbientTexture_mod_lfo(self), bayan_json_v_obj_get(dsp, "ml"));
+        garjan_state_noise_load(AmbientTexture_low_noise(self), bayan_json_v_obj_get(dsp, "ln"));
+        garjan_state_noise_load(AmbientTexture_mid_noise(self), bayan_json_v_obj_get(dsp, "mn"));
+        garjan_state_noise_load(AmbientTexture_high_noise(self), bayan_json_v_obj_get(dsp, "hn"));
+    }
     return self;
 }

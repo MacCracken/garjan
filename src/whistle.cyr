@@ -199,7 +199,16 @@ fn whistle_to_json(self, sb) {
     WhistleParams_set_dcb_x_prev(p, DcBlocker_x_prev(dc));
     WhistleParams_set_dcb_y_prev(p, DcBlocker_y_prev(dc));
     WhistleParams_set_dcb_r(p, DcBlocker_r(dc));
-    return WhistleParams_to_json(p, sb);
+    # Scalars via the derive, then the naad components' LIVE state spliced
+    # in as "dsp" -- without it a restore resumes with zeroed filter memory.
+    var psb = str_builder_new();
+    var pe = WhistleParams_to_json(p, psb);
+    if (garjan_is_err(pe) == 1) { return pe; }
+    var dsp = bayan_json_v_obj_new();
+    bayan_json_v_obj_set(dsp, str_from("rf"), garjan_state_svf(Whistle_resonance_filter(self)));
+    bayan_json_v_obj_set(dsp, str_from("pl"), garjan_state_lfo(Whistle_pitch_lfo(self)));
+    bayan_json_v_obj_set(dsp, str_from("ng"), garjan_state_noise(Whistle_noise_gen(self)));
+    return garjan_emit_with_dsp(sb, psb, dsp);
 }
 
 # Rebuild a Whistle from JSON: restore scalars + rng + dc_blocker state, then
@@ -232,5 +241,15 @@ fn whistle_from_json_str(json) {
 
     var b = whistle_build_naad(self);
     if (garjan_is_err(b) == 1) { return b; }
+
+    # Restore the components' live state onto the freshly built ones. A
+    # document written before 2.5.0 has no "dsp" member; garjan_dsp_node
+    # returns 0 and the synth resumes without it, exactly as it used to.
+    var dsp = garjan_dsp_node(json);
+    if (dsp != 0) {
+        garjan_state_svf_load(Whistle_resonance_filter(self), bayan_json_v_obj_get(dsp, "rf"));
+        garjan_state_lfo_load(Whistle_pitch_lfo(self), bayan_json_v_obj_get(dsp, "pl"));
+        garjan_state_noise_load(Whistle_noise_gen(self), bayan_json_v_obj_get(dsp, "ng"));
+    }
     return self;
 }

@@ -338,7 +338,17 @@ fn impact_to_json(self, sb) {
     ImpactParams_set_dcb_x_prev(p, DcBlocker_x_prev(dc));
     ImpactParams_set_dcb_y_prev(p, DcBlocker_y_prev(dc));
     ImpactParams_set_dcb_r(p, DcBlocker_r(dc));
-    return ImpactParams_to_json(p, sb);
+    # Scalars via the derive, then the naad components' LIVE state spliced
+    # in as "dsp" -- without it a restore resumes with zeroed filter memory.
+    var psb = str_builder_new();
+    var pe = ImpactParams_to_json(p, psb);
+    if (garjan_is_err(pe) == 1) { return pe; }
+    var dsp = bayan_json_v_obj_new();
+    bayan_json_v_obj_set(dsp, str_from("rf"), garjan_state_biquad(Impact_resonance_filter(self)));
+    bayan_json_v_obj_set(dsp, str_from("tn"), garjan_state_noise(Impact_transient_noise(self)));
+    bayan_json_v_obj_set(dsp, str_from("mb"), garjan_state_modal(Impact_modal_bank(self)));
+    bayan_json_v_obj_set(dsp, str_from("ex"), garjan_state_exciter(Impact_exciter(self)));
+    return garjan_emit_with_dsp(sb, psb, dsp);
 }
 
 # Rebuild an Impact from JSON: restore material + props + rng + dc_blocker
@@ -372,5 +382,16 @@ fn impact_from_json_str(json) {
 
     var b = impact_build_naad(self);
     if (garjan_is_err(b) == 1) { return b; }
+
+    # Restore the components' live state onto the freshly built ones. A
+    # document written before 2.5.0 has no "dsp" member; garjan_dsp_node
+    # returns 0 and the synth resumes without it, exactly as it used to.
+    var dsp = garjan_dsp_node(json);
+    if (dsp != 0) {
+        garjan_state_modal_load(Impact_modal_bank(self), bayan_json_v_obj_get(dsp, "mb"));
+        garjan_state_exciter_load(Impact_exciter(self), bayan_json_v_obj_get(dsp, "ex"));
+        garjan_state_biquad_load(Impact_resonance_filter(self), bayan_json_v_obj_get(dsp, "rf"));
+        garjan_state_noise_load(Impact_transient_noise(self), bayan_json_v_obj_get(dsp, "tn"));
+    }
     return self;
 }

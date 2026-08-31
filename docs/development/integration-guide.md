@@ -84,11 +84,12 @@ Accepted input ranges: sample rate 1 Hz–768 kHz, duration ≤ 600 s, buffer
 `<type>_to_json(p, sb)` / `<type>_from_json_str(json)` round-trip a
 synthesizer's parameters, RNG and DC-blocker state.
 
-**This is parameter persistence, not session snapshotting.** The naad
-components (filters, noise generators, LFOs) are rebuilt from the parameters
-rather than restored, so a synth saved mid-stream resumes with zeroed filter
-history — audible as a discontinuity. See
-[architecture note 001](../architecture/001-deserialize-does-not-restore-dsp-state.md).
+**Since 2.5.0 this is a full session snapshot**, not just parameter
+persistence: biquad and SVF memory, noise-generator position, LFO phase, modal
+resonators and exciters all travel, so a synth saved mid-stream resumes
+sample-identically. Documents written before 2.5.0 have no `"dsp"` member and
+still load, restoring parameters only. See
+[ADR-0008](../adr/0008-serde-carries-live-dsp-state.md).
 
 ## Where garjan stops
 

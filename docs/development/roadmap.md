@@ -7,40 +7,9 @@
 
 ## Next up
 
-### serde live-state round-trip parity
-
-**The last open parity divergence, and the next thing to build.**
-
-Rust derived `Serialize`/`Deserialize` over *all* fields, naad components
-included, so a save/restore resumed with filter history intact. The port drops
-those fields from `*Params` and rebuilds the components from scratch, so a synth
-saved mid-stream resumes with **zeroed filter state** — audible as a
-discontinuity. Full background:
-[architecture note 001](../architecture/001-deserialize-does-not-restore-dsp-state.md).
-
-**Decided: implement full parity.** Verbose but mechanical, and it needs no
-hand-rolled JSON — the `*Params` structs are flat `#derive(Serialize)` types and
-every piece of naad state is a plain `f64`/`i64`.
-
-State to carry, all reachable through naad's existing accessors:
-
-| Component | Fields | Notes |
-|---|---|---|
-| `BiquadFilter` | `z1`, `z2` | coefficients are re-derived from the params already stored |
-| `StateVariableFilter` | `ic1eq`, `ic2eq` | |
-| `Lfo` | `phase`, `sh_value` | |
-| `NoiseGenerator` | rng state, `pink_counter`, `pink_running_sum`, `brown_prev`, 16 × `pink_octaves` | 20 fields; garjan uses white ×11, pink ×9, brown ×5 |
-
-Plan:
-
-1. Shared state-transfer helpers, one pair per component type.
-2. Prove it end-to-end on **one** synth with a round-trip test that asserts
-   *continued output after restore* matches the un-saved original — not just
-   that the JSON round-trips, which is what the current serde tests check and
-   why this gap survived.
-3. Roll out to the remaining 18.
-
-It **changes the JSON format**, so it lands as a minor bump with an ADR.
+Nothing is queued. The parity work is complete — see **Open** below for what
+remains, all of it either blocked upstream or awaiting a decision that is not
+garjan's to make alone.
 
 ---
 
@@ -112,6 +81,7 @@ Neither can be fixed inside garjan without coupling to a dependency's internals.
 | 2.2.0 | Out-of-range enum ids rejected ([ADR-0006](../adr/0006-out-of-range-enum-ids-are-rejected.md)) |
 | 2.3.0 | `insect` hot spot: 49.9 → 42.6 ms, bit-exact |
 | 2.4.0 | Duration / sample-rate / sample-count caps ([ADR-0007](../adr/0007-bounded-duration-and-sample-rate.md)) |
+| 2.5.0 | serde carries live DSP state — last parity divergence closed ([ADR-0008](../adr/0008-serde-carries-live-dsp-state.md)) |
 
 ---
 

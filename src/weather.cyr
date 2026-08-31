@@ -209,7 +209,15 @@ fn rain_to_json(self, sb) {
     RainParams_set_dcb_x_prev(p, DcBlocker_x_prev(dc));
     RainParams_set_dcb_y_prev(p, DcBlocker_y_prev(dc));
     RainParams_set_dcb_r(p, DcBlocker_r(dc));
-    return RainParams_to_json(p, sb);
+    # Scalars via the derive, then the naad components' LIVE state spliced
+    # in as "dsp" -- without it a restore resumes with zeroed filter memory.
+    var psb = str_builder_new();
+    var pe = RainParams_to_json(p, psb);
+    if (garjan_is_err(pe) == 1) { return pe; }
+    var dsp = bayan_json_v_obj_new();
+    bayan_json_v_obj_set(dsp, str_from("rf"), garjan_state_biquad(Rain_rain_filter(self)));
+    bayan_json_v_obj_set(dsp, str_from("dn"), garjan_state_noise(Rain_drop_noise(self)));
+    return garjan_emit_with_dsp(sb, psb, dsp);
 }
 
 # Rebuild a Rain from JSON: restore scalars + rng + dc_blocker, reconstruct naad.
@@ -237,6 +245,15 @@ fn rain_from_json_str(json) {
 
     var b = rain_build_naad(self);
     if (garjan_is_err(b) == 1) { return b; }
+
+    # Restore the components' live state onto the freshly built ones. A
+    # document written before 2.5.0 has no "dsp" member; garjan_dsp_node
+    # returns 0 and the synth resumes without it, exactly as it used to.
+    var dsp = garjan_dsp_node(json);
+    if (dsp != 0) {
+        garjan_state_biquad_load(Rain_rain_filter(self), bayan_json_v_obj_get(dsp, "rf"));
+        garjan_state_noise_load(Rain_drop_noise(self), bayan_json_v_obj_get(dsp, "dn"));
+    }
     return self;
 }
 
@@ -420,7 +437,16 @@ fn thunder_to_json(self, sb) {
     ThunderParams_set_dcb_x_prev(p, DcBlocker_x_prev(dc));
     ThunderParams_set_dcb_y_prev(p, DcBlocker_y_prev(dc));
     ThunderParams_set_dcb_r(p, DcBlocker_r(dc));
-    return ThunderParams_to_json(p, sb);
+    # Scalars via the derive, then the naad components' LIVE state spliced
+    # in as "dsp" -- without it a restore resumes with zeroed filter memory.
+    var psb = str_builder_new();
+    var pe = ThunderParams_to_json(p, psb);
+    if (garjan_is_err(pe) == 1) { return pe; }
+    var dsp = bayan_json_v_obj_new();
+    bayan_json_v_obj_set(dsp, str_from("rf"), garjan_state_biquad(Thunder_rumble_filter(self)));
+    bayan_json_v_obj_set(dsp, str_from("cn"), garjan_state_noise(Thunder_crack_noise(self)));
+    bayan_json_v_obj_set(dsp, str_from("rn"), garjan_state_noise(Thunder_rumble_noise(self)));
+    return garjan_emit_with_dsp(sb, psb, dsp);
 }
 
 # Rebuild a Thunder from JSON: restore scalars + rng + dc_blocker, reconstruct naad.
@@ -448,6 +474,16 @@ fn thunder_from_json_str(json) {
 
     var b = thunder_build_naad(self);
     if (garjan_is_err(b) == 1) { return b; }
+
+    # Restore the components' live state onto the freshly built ones. A
+    # document written before 2.5.0 has no "dsp" member; garjan_dsp_node
+    # returns 0 and the synth resumes without it, exactly as it used to.
+    var dsp = garjan_dsp_node(json);
+    if (dsp != 0) {
+        garjan_state_biquad_load(Thunder_rumble_filter(self), bayan_json_v_obj_get(dsp, "rf"));
+        garjan_state_noise_load(Thunder_crack_noise(self), bayan_json_v_obj_get(dsp, "cn"));
+        garjan_state_noise_load(Thunder_rumble_noise(self), bayan_json_v_obj_get(dsp, "rn"));
+    }
     return self;
 }
 
@@ -596,7 +632,16 @@ fn wind_to_json(self, sb) {
     WindParams_set_dcb_x_prev(p, DcBlocker_x_prev(dc));
     WindParams_set_dcb_y_prev(p, DcBlocker_y_prev(dc));
     WindParams_set_dcb_r(p, DcBlocker_r(dc));
-    return WindParams_to_json(p, sb);
+    # Scalars via the derive, then the naad components' LIVE state spliced
+    # in as "dsp" -- without it a restore resumes with zeroed filter memory.
+    var psb = str_builder_new();
+    var pe = WindParams_to_json(p, psb);
+    if (garjan_is_err(pe) == 1) { return pe; }
+    var dsp = bayan_json_v_obj_new();
+    bayan_json_v_obj_set(dsp, str_from("sf"), garjan_state_svf(Wind_shape_filter(self)));
+    bayan_json_v_obj_set(dsp, str_from("gl"), garjan_state_lfo(Wind_gust_lfo(self)));
+    bayan_json_v_obj_set(dsp, str_from("ng"), garjan_state_noise(Wind_noise_gen(self)));
+    return garjan_emit_with_dsp(sb, psb, dsp);
 }
 
 # Rebuild a Wind from JSON: restore scalars + rng + dc_blocker, reconstruct naad.
@@ -625,5 +670,15 @@ fn wind_from_json_str(json) {
 
     var b = wind_build_naad(self);
     if (garjan_is_err(b) == 1) { return b; }
+
+    # Restore the components' live state onto the freshly built ones. A
+    # document written before 2.5.0 has no "dsp" member; garjan_dsp_node
+    # returns 0 and the synth resumes without it, exactly as it used to.
+    var dsp = garjan_dsp_node(json);
+    if (dsp != 0) {
+        garjan_state_svf_load(Wind_shape_filter(self), bayan_json_v_obj_get(dsp, "sf"));
+        garjan_state_lfo_load(Wind_gust_lfo(self), bayan_json_v_obj_get(dsp, "gl"));
+        garjan_state_noise_load(Wind_noise_gen(self), bayan_json_v_obj_get(dsp, "ng"));
+    }
     return self;
 }

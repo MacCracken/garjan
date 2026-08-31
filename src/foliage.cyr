@@ -345,7 +345,18 @@ fn foliage_to_json(self, sb) {
     FoliageParams_set_exc_rng_state(p, Rng_state(exc_rng));
     FoliageParams_set_exc_rng_inc(p, Rng_inc(exc_rng));
 
-    return FoliageParams_to_json(p, sb);
+    # Scalars via the derive, then the naad components' LIVE state spliced
+    # in as "dsp" -- without it a restore resumes with zeroed filter memory.
+    var psb = str_builder_new();
+    var pe = FoliageParams_to_json(p, psb);
+    if (garjan_is_err(pe) == 1) { return pe; }
+    var dsp = bayan_json_v_obj_new();
+    bayan_json_v_obj_set(dsp, str_from("rf"), garjan_state_biquad(Foliage_rustle_filter(self)));
+    bayan_json_v_obj_set(dsp, str_from("rn"), garjan_state_noise(Foliage_rustle_noise(self)));
+    bayan_json_v_obj_set(dsp, str_from("wl"), garjan_state_lfo(Foliage_wind_lfo(self)));
+    bayan_json_v_obj_set(dsp, str_from("se"), garjan_state_exciter(Foliage_snap_exciter(self)));
+    bayan_json_v_obj_set(dsp, str_from("sm"), garjan_state_modal(Foliage_snap_modal(self)));
+    return garjan_emit_with_dsp(sb, psb, dsp);
 }
 
 # Rebuild a Foliage from JSON: restore scalars + rng + dc_blocker + exciter
@@ -391,5 +402,17 @@ fn foliage_from_json_str(json) {
 
     var b = foliage_build_naad(self);
     if (garjan_is_err(b) == 1) { return b; }
+
+    # Restore the components' live state onto the freshly built ones. A
+    # document written before 2.5.0 has no "dsp" member; garjan_dsp_node
+    # returns 0 and the synth resumes without it, exactly as it used to.
+    var dsp = garjan_dsp_node(json);
+    if (dsp != 0) {
+        garjan_state_exciter_load(Foliage_snap_exciter(self), bayan_json_v_obj_get(dsp, "se"));
+        garjan_state_modal_load(Foliage_snap_modal(self), bayan_json_v_obj_get(dsp, "sm"));
+        garjan_state_biquad_load(Foliage_rustle_filter(self), bayan_json_v_obj_get(dsp, "rf"));
+        garjan_state_noise_load(Foliage_rustle_noise(self), bayan_json_v_obj_get(dsp, "rn"));
+        garjan_state_lfo_load(Foliage_wind_lfo(self), bayan_json_v_obj_get(dsp, "wl"));
+    }
     return self;
 }

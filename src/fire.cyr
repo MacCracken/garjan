@@ -190,7 +190,18 @@ fn fire_to_json(self, sb) {
     FireParams_set_dcb_x_prev(p, DcBlocker_x_prev(dc));
     FireParams_set_dcb_y_prev(p, DcBlocker_y_prev(dc));
     FireParams_set_dcb_r(p, DcBlocker_r(dc));
-    return FireParams_to_json(p, sb);
+
+    # Scalars via the derive, then the naad components' LIVE state spliced in
+    # as "dsp" -- without it a restore resumes with zeroed filter memory.
+    var psb = str_builder_new();
+    var pe = FireParams_to_json(p, psb);
+    if (garjan_is_err(pe) == 1) { return pe; }
+    var dsp = bayan_json_v_obj_new();
+    bayan_json_v_obj_set(dsp, str_from("rf"), garjan_state_biquad(Fire_roar_filter(self)));
+    bayan_json_v_obj_set(dsp, str_from("cf"), garjan_state_biquad(Fire_crackle_filter(self)));
+    bayan_json_v_obj_set(dsp, str_from("rn"), garjan_state_noise(Fire_roar_noise(self)));
+    bayan_json_v_obj_set(dsp, str_from("cn"), garjan_state_noise(Fire_crackle_noise(self)));
+    return garjan_emit_with_dsp(sb, psb, dsp);
 }
 
 # Rebuild a Fire from JSON: restore scalars + rng + dc_blocker state, then
@@ -220,5 +231,16 @@ fn fire_from_json_str(json) {
 
     var b = fire_build_naad(self);
     if (garjan_is_err(b) == 1) { return b; }
+
+    # Restore the components' live state on top of the freshly built ones. A
+    # document written before 2.5.0 has no "dsp" member; garjan_dsp_node
+    # returns 0 and the synth simply resumes without it, as it always did.
+    var dsp = garjan_dsp_node(json);
+    if (dsp != 0) {
+        garjan_state_biquad_load(Fire_roar_filter(self), bayan_json_v_obj_get(dsp, "rf"));
+        garjan_state_biquad_load(Fire_crackle_filter(self), bayan_json_v_obj_get(dsp, "cf"));
+        garjan_state_noise_load(Fire_roar_noise(self), bayan_json_v_obj_get(dsp, "rn"));
+        garjan_state_noise_load(Fire_crackle_noise(self), bayan_json_v_obj_get(dsp, "cn"));
+    }
     return self;
 }

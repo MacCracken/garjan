@@ -332,7 +332,16 @@ fn precipitation_to_json(self, sb) {
     PrecipitationParams_set_dcb_x_prev(p, DcBlocker_x_prev(dc));
     PrecipitationParams_set_dcb_y_prev(p, DcBlocker_y_prev(dc));
     PrecipitationParams_set_dcb_r(p, DcBlocker_r(dc));
-    return PrecipitationParams_to_json(p, sb);
+    # Scalars via the derive, then the naad components' LIVE state spliced
+    # in as "dsp" -- without it a restore resumes with zeroed filter memory.
+    var psb = str_builder_new();
+    var pe = PrecipitationParams_to_json(p, psb);
+    if (garjan_is_err(pe) == 1) { return pe; }
+    var dsp = bayan_json_v_obj_new();
+    bayan_json_v_obj_set(dsp, str_from("ng"), garjan_state_noise(Precipitation_noise_gen(self)));
+    bayan_json_v_obj_set(dsp, str_from("sf"), garjan_state_biquad(Precipitation_shape_filter(self)));
+    bayan_json_v_obj_set(dsp, str_from("mb"), garjan_state_modal(Precipitation_modal_bank(self)));
+    return garjan_emit_with_dsp(sb, psb, dsp);
 }
 
 # Rebuild a Precipitation from JSON: restore scalars + rng + dc_blocker state,
@@ -368,5 +377,15 @@ fn precipitation_from_json_str(json) {
 
     var b = precipitation_build_naad(self);
     if (garjan_is_err(b) == 1) { return b; }
+
+    # Restore the components' live state onto the freshly built ones. A
+    # document written before 2.5.0 has no "dsp" member; garjan_dsp_node
+    # returns 0 and the synth resumes without it, exactly as it used to.
+    var dsp = garjan_dsp_node(json);
+    if (dsp != 0) {
+        garjan_state_modal_load(Precipitation_modal_bank(self), bayan_json_v_obj_get(dsp, "mb"));
+        garjan_state_noise_load(Precipitation_noise_gen(self), bayan_json_v_obj_get(dsp, "ng"));
+        garjan_state_biquad_load(Precipitation_shape_filter(self), bayan_json_v_obj_get(dsp, "sf"));
+    }
     return self;
 }

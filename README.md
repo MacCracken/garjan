@@ -88,12 +88,12 @@ syscall(60, r);
 Every public type also serializes to / from JSON (`<type>_to_json(p, sb)` /
 `<type>_from_json_str(json)`), including the stateful synthesizers.
 
-> **Round-tripping persists parameters, not a live session.** Scalars, RNG and
-> DC-blocker state survive; the naad components (filters, noise generators,
-> LFOs) are rebuilt from the parameters rather than restored, so a synth saved
-> mid-stream resumes with zeroed filter history. Rust preserved that state —
-> this is a known divergence, see
-> [architecture note 001](docs/architecture/001-deserialize-does-not-restore-dsp-state.md).
+> **Round-tripping is a full session snapshot.** Since 2.5.0 the live DSP state
+> travels too — biquad and SVF memory, noise-generator position, LFO phase,
+> modal-bank resonators and exciters — so a synth saved mid-stream resumes
+> sample-identically. Documents written before 2.5.0 still load, restoring
+> parameters only. See
+> [ADR-0008](docs/adr/0008-serde-carries-live-dsp-state.md).
 
 ## Performance
 

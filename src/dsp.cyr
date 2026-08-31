@@ -133,3 +133,206 @@ fn garjan_map_naad_error(code) {
     }
     return GARJAN_OK;
 }
+
+# ================================================================
+# naad component state transfer (2.5.0).
+#
+# `*_build_naad` rebuilds naad's components from the stored scalars, which
+# loses their LIVE state -- biquad delay memory, SVF integrators, LFO phase,
+# noise-generator position. Rust derived Serialize over those fields, so a Rust
+# save/restore resumed seamlessly; the port did not. See architecture note 001.
+#
+# Two implementation choices worth knowing before editing:
+#
+# 1. State is stored as raw i64 BIT PATTERNS via bayan_json_v_int, not as JSON
+#    floats. In Cyrius an f64 *is* an i64 bit pattern, so this is exact by
+#    construction -- no decimal formatting to lose. These values are opaque
+#    machine state, never read by a human.
+#
+# 2. bayan's object API is ASYMMETRIC, deliberately (there is a banner in
+#    lib/bayan.cyr): `bayan_json_v_obj_set` takes its key as a **Str**, while
+#    `bayan_json_v_obj_get` takes a **cstring**. Passing a cstring to obj_set
+#    builds a tree that SEGFAULTS when serialized. Use str_from() on set.
+# ================================================================
+
+# ---- BiquadFilter: z1/z2 delay memory (coefficients are re-derived) ----
+#must_use
+fn garjan_state_biquad(f) {
+    var a = bayan_json_v_arr_new();
+    bayan_json_v_arr_push(a, bayan_json_v_int_new(BiquadFilter_z1(f)));
+    bayan_json_v_arr_push(a, bayan_json_v_int_new(BiquadFilter_z2(f)));
+    return a;
+}
+
+fn garjan_state_biquad_load(f, n) {
+    if (n == 0) { return 0; }
+    if (bayan_json_v_arr_len(n) < 2) { return 0; }
+    BiquadFilter_set_z1(f, bayan_json_v_int(bayan_json_v_arr_get(n, 0)));
+    BiquadFilter_set_z2(f, bayan_json_v_int(bayan_json_v_arr_get(n, 1)));
+    return 0;
+}
+
+# ---- StateVariableFilter: the two integrator states ----
+#must_use
+fn garjan_state_svf(f) {
+    var a = bayan_json_v_arr_new();
+    bayan_json_v_arr_push(a, bayan_json_v_int_new(StateVariableFilter_ic1eq(f)));
+    bayan_json_v_arr_push(a, bayan_json_v_int_new(StateVariableFilter_ic2eq(f)));
+    return a;
+}
+
+fn garjan_state_svf_load(f, n) {
+    if (n == 0) { return 0; }
+    if (bayan_json_v_arr_len(n) < 2) { return 0; }
+    StateVariableFilter_set_ic1eq(f, bayan_json_v_int(bayan_json_v_arr_get(n, 0)));
+    StateVariableFilter_set_ic2eq(f, bayan_json_v_int(bayan_json_v_arr_get(n, 1)));
+    return 0;
+}
+
+# ---- Lfo: phase, sample-and-hold value, and its own rng state ----
+#must_use
+fn garjan_state_lfo(l) {
+    var a = bayan_json_v_arr_new();
+    bayan_json_v_arr_push(a, bayan_json_v_int_new(Lfo_phase(l)));
+    bayan_json_v_arr_push(a, bayan_json_v_int_new(Lfo_sh_value(l)));
+    bayan_json_v_arr_push(a, bayan_json_v_int_new(load64(Lfo_rng(l))));
+    return a;
+}
+
+fn garjan_state_lfo_load(l, n) {
+    if (n == 0) { return 0; }
+    if (bayan_json_v_arr_len(n) < 3) { return 0; }
+    Lfo_set_phase(l, bayan_json_v_int(bayan_json_v_arr_get(n, 0)));
+    Lfo_set_sh_value(l, bayan_json_v_int(bayan_json_v_arr_get(n, 1)));
+    store64(Lfo_rng(l), bayan_json_v_int(bayan_json_v_arr_get(n, 2)));
+    return 0;
+}
+
+# ---- NoiseGenerator ----
+# The xorshift32 state lives BEHIND the `rng` pointer, so it is load64/store64
+# rather than an accessor. Which of the remaining fields matter depends on the
+# generator's type -- white uses only the rng, brown adds brown_prev, pink adds
+# the counter, running sum and all 16 octave values -- so the 16 octaves are
+# emitted only for pink and the loader reads however many are present.
+#must_use
+fn garjan_state_noise(ng) {
+    var a = bayan_json_v_arr_new();
+    bayan_json_v_arr_push(a, bayan_json_v_int_new(load64(NoiseGenerator_rng(ng))));
+    bayan_json_v_arr_push(a, bayan_json_v_int_new(NoiseGenerator_brown_prev(ng)));
+    bayan_json_v_arr_push(a, bayan_json_v_int_new(NoiseGenerator_pink_counter(ng)));
+    bayan_json_v_arr_push(a, bayan_json_v_int_new(NoiseGenerator_pink_running_sum(ng)));
+    if (NoiseGenerator_noise_type(ng) == NOISE_PINK) {
+        var oc = NoiseGenerator_pink_octaves(ng);
+        var i = 0;
+        while (i < vec_len(oc)) {
+            bayan_json_v_arr_push(a, bayan_json_v_int_new(vec_get(oc, i)));
+            i = i + 1;
+        }
+    }
+    return a;
+}
+
+fn garjan_state_noise_load(ng, n) {
+    if (n == 0) { return 0; }
+    var len = bayan_json_v_arr_len(n);
+    if (len < 4) { return 0; }
+    store64(NoiseGenerator_rng(ng), bayan_json_v_int(bayan_json_v_arr_get(n, 0)));
+    NoiseGenerator_set_brown_prev(ng, bayan_json_v_int(bayan_json_v_arr_get(n, 1)));
+    NoiseGenerator_set_pink_counter(ng, bayan_json_v_int(bayan_json_v_arr_get(n, 2)));
+    NoiseGenerator_set_pink_running_sum(ng, bayan_json_v_int(bayan_json_v_arr_get(n, 3)));
+    var oc = NoiseGenerator_pink_octaves(ng);
+    var i = 0;
+    while (i + 4 < len) {
+        if (i < vec_len(oc)) {
+            vec_set(oc, i, bayan_json_v_int(bayan_json_v_arr_get(n, i + 4)));
+        }
+        i = i + 1;
+    }
+    return 0;
+}
+
+# ---- splice ----
+# Emit a #derive(Serialize) params object with a "dsp" member added before its
+# closing brace. The derive-generated parser IGNORES keys it does not know
+# (verified), so `*Params_from_json_str` still reads the scalars out of the
+# combined document and the value-tree parser reads "dsp" from the same string.
+fn garjan_emit_with_dsp(sb, params_sb, dsp) {
+    var s = str_builder_build(params_sb);
+    str_builder_add(sb, str_from_buf(str_data(s), str_len(s) - 1));   # drop the '}'
+    str_builder_add_cstr(sb, ",\"dsp\":");
+    str_builder_add(sb, bayan_json_v_build(dsp));
+    str_builder_add_cstr(sb, "}");
+    return 0;
+}
+
+# Fetch the "dsp" object from a serialized synth, or 0 if absent (a document
+# written before 2.5.0 simply restores without live state, as it used to).
+#must_use
+fn garjan_dsp_node(json) {
+    var root = bayan_json_v_parse_buf(json, strlen(json));
+    if (root == 0) { return 0; }
+    return bayan_json_v_obj_get(root, "dsp");
+}
+
+# ---- ModalBank: the per-resonator state pair, interleaved re/im ----
+# Length varies with how many modes survived construction (< 20 Hz, >= Nyquist
+# and non-positive decay are excluded), so the loader writes only as many as the
+# rebuilt bank actually has. `mb` may legitimately be 0 -- footstep and rolling
+# leave it unset for non-resonant materials.
+#must_use
+fn garjan_state_modal(mb) {
+    var a = bayan_json_v_arr_new();
+    if (mb == 0) { return a; }
+    var re = ModalBank_state_re(mb);
+    var im = ModalBank_state_im(mb);
+    var i = 0;
+    while (i < vec_len(re)) {
+        bayan_json_v_arr_push(a, bayan_json_v_int_new(vec_get(re, i)));
+        bayan_json_v_arr_push(a, bayan_json_v_int_new(vec_get(im, i)));
+        i = i + 1;
+    }
+    return a;
+}
+
+fn garjan_state_modal_load(mb, n) {
+    if (mb == 0) { return 0; }
+    if (n == 0) { return 0; }
+    var re = ModalBank_state_re(mb);
+    var im = ModalBank_state_im(mb);
+    var cnt = bayan_json_v_arr_len(n) / 2;
+    var i = 0;
+    while (i < cnt) {
+        if (i < vec_len(re)) {
+            vec_set(re, i, bayan_json_v_int(bayan_json_v_arr_get(n, i * 2)));
+            vec_set(im, i, bayan_json_v_int(bayan_json_v_arr_get(n, i * 2 + 1)));
+        }
+        i = i + 1;
+    }
+    return 0;
+}
+
+# ---- Exciter: playback position, active flag, and its Rng (a garjan Rng
+# struct, not a bare xorshift word like the naad components use) ----
+#must_use
+fn garjan_state_exciter(ex) {
+    var a = bayan_json_v_arr_new();
+    if (ex == 0) { return a; }
+    bayan_json_v_arr_push(a, bayan_json_v_int_new(Exciter_position(ex)));
+    bayan_json_v_arr_push(a, bayan_json_v_int_new(Exciter_active(ex)));
+    var r = Exciter_rng(ex);
+    bayan_json_v_arr_push(a, bayan_json_v_int_new(Rng_state(r)));
+    bayan_json_v_arr_push(a, bayan_json_v_int_new(Rng_inc(r)));
+    return a;
+}
+
+fn garjan_state_exciter_load(ex, n) {
+    if (ex == 0) { return 0; }
+    if (n == 0) { return 0; }
+    if (bayan_json_v_arr_len(n) < 4) { return 0; }
+    Exciter_set_position(ex, bayan_json_v_int(bayan_json_v_arr_get(n, 0)));
+    Exciter_set_active(ex, bayan_json_v_int(bayan_json_v_arr_get(n, 1)));
+    var r = Exciter_rng(ex);
+    Rng_set_state(r, bayan_json_v_int(bayan_json_v_arr_get(n, 2)));
+    Rng_set_inc(r, bayan_json_v_int(bayan_json_v_arr_get(n, 3)));
+    return 0;
+}

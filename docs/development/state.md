@@ -5,13 +5,14 @@
 
 ## Version
 
-**2.4.0** (2026-08-30). Per-release detail is in the
+**2.5.0** (2026-08-30). Per-release detail is in the
 [CHANGELOG](../../CHANGELOG.md); this file is current state only.
 
 The 2.x line so far: the Rust→Cyrius port (2.0.0), a toolchain and dependency
 refresh (2.0.1), a P-1 security audit and its repairs (2.0.2-2.0.4), hot-path
 optimization (2.0.5, 2.3.0), parity completion — integration suite, benchmarks,
-examples (2.1.0) — and boundary validation (2.2.0, 2.4.0).
+examples (2.1.0) — boundary validation (2.2.0, 2.4.0), and serde live-state parity (2.5.0) — the
+last outstanding divergence from the Rust oracle.
 
 ## Toolchain
 
@@ -29,7 +30,7 @@ examples (2.1.0) — and boundary validation (2.2.0, 2.4.0).
 
 ## Tests
 
-- **33 module suites** in `tests/*.tcyr`, **797 assertions, all green**.
+- **33 module suites** in `tests/*.tcyr`, **825 assertions, all green**.
   `tests/garjan.tcyr` is the cross-module integration suite (288 of those),
   ported from `rust-old/tests/integration.rs`.
   Covers parity (incl. bit-exact PCG32), synthesis finiteness/energy, and
@@ -79,11 +80,9 @@ _None yet (kiran, joshua, dhvani + any AGNOS component needing environmental aud
 
 Sequencing lives in [`roadmap.md`](roadmap.md). Immediate:
 
-- **serde live-state round-trip parity** — the last open parity divergence, and
-  decided: implement in full. Naad's component state is all flat `f64`/`i64`,
-  so the existing `#derive(Serialize)` `*Params` structs can carry it. The
-  round-trip test must assert **continued output after restore**, not just JSON
-  equality — that is why this gap survived.
+- ✅ **serde live-state parity shipped in 2.5.0**
+  ([ADR-0008](../adr/0008-serde-carries-live-dsp-state.md)). All 21 synths
+  resume sample-identically after a restore. Nothing is queued behind it.
 - **Blocked upstream**: a stdlib `vec_with_capacity` (~695 KB wasted per second
   of synthesized audio) and a naad `filter_svf_process_sample_bandpass`
   (`whistle` allocates 32 B/sample = ~5 GB/hour). Neither is fixable inside

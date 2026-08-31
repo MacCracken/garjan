@@ -5,6 +5,72 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.5.0]
+
+Closes the last outstanding parity divergence: serde now carries the live DSP
+state, so a restored synth resumes exactly where it left off. See
+[ADR-0008](docs/adr/0008-serde-carries-live-dsp-state.md).
+
+### Fixed — a restored synth resumed with zeroed filter memory
+
+Rust derived `Serialize`/`Deserialize` over **all** fields, naad components
+included; the `#[cfg]` gated whether a field *existed*, not whether it was
+serialized. So a Rust save/restore round-tripped the live DSP state. The port
+dropped those fields and rebuilt the components from scalars, so a synth saved
+mid-stream resumed with **zeroed biquad memory, reset noise position and reset
+LFO phase** — audible as a discontinuity.
+
+**The gap survived three releases of serde testing because every serde test
+checked JSON round-trip idempotence** — serialize, deserialize, re-serialize,
+compare strings. That passes perfectly while every filter is silently zeroed.
+The check that detects it is to warm a synth, snapshot, restore, run **both**
+forward, and compare sample for sample. That is now done for all 21 synths.
+
+### How it is carried
+
+A `"dsp"` member is spliced into the existing `#derive(Serialize)` params
+object rather than flattening state into named fields, which works because:
+
+- the derive-generated parser **ignores unknown keys**, so
+  `*Params_from_json_str` still reads the scalars from the combined document;
+- bayan's value tree reads `"dsp"` from that same document and supports nested
+  arrays — so pink noise's 16 octave values are an array, not 16 named fields;
+- state is stored as raw **i64 bit patterns**, not JSON floats. In Cyrius an f64
+  *is* an i64 bit pattern, so the round-trip is exact by construction.
+
+| Component | State carried |
+|---|---|
+| `BiquadFilter` | `z1`, `z2` |
+| `StateVariableFilter` | `ic1eq`, `ic2eq` |
+| `Lfo` | `phase`, `sh_value`, xorshift word |
+| `NoiseGenerator` | rng word, `brown_prev`, `pink_counter`, `pink_running_sum`, + 16 octaves for pink |
+| `ModalBank` | `state_re`/`state_im` per surviving resonator |
+| `Exciter` | `position`, `active`, `Rng` state + inc |
+
+**Backward compatible** — a document written before 2.5.0 has no `"dsp"`
+member; the synth resumes without live state exactly as it did before.
+
+### Found while doing it
+
+- **`foliage` holds a modal bank named `snap_modal`**, which a grep for
+  `modal_bank` misses. It was caught only because the per-synth parity check
+  failed on foliage alone while the other 20 passed — a reminder that the
+  per-synth check is what has teeth, not the aggregate.
+- **bayan's object API is asymmetric by design**: `bayan_json_v_obj_set` takes
+  its key as a **`Str`**, `bayan_json_v_obj_get` takes a **cstring**. Passing a
+  cstring to `obj_set` builds a tree that segfaults when serialized. There is a
+  banner in `lib/bayan.cyr` saying so; it cost a debugging round anyway.
+
+### Verified
+
+- All 21 synths resume sample-identically, including every component type:
+  pink noise (wind, texture, surf, underwater), SVF (wind, whistle), LFO
+  (water, texture, underwater, foliage, whistle), modal banks and exciters
+  (impact, footstep, creak, rolling, cloth, friction, precipitation, foliage),
+  and the null-modal-bank case (footstep on non-resonant terrain).
+- Synthesis itself is unchanged — `scripts/audio-hash.cyr` bit-identical.
+- **825 assertions** across 33 suites (was 797), warning-clean.
+
 ## [2.4.0]
 
 Bounds the size parameters that drive allocation. See

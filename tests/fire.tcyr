@@ -55,6 +55,52 @@ fn main() {
     var evil = fire_from_json_str("{\"intensity\":0.5,\"crackle_rate\":20.0,\"sample_rate\":0.0,\"sample_position\":0,\"rng_state\":1,\"rng_inc\":1,\"dcb_x_prev\":0.0,\"dcb_y_prev\":0.0,\"dcb_r\":0.999}");
     assert(garjan_is_err(evil) == 1, "fire_from_json_str rejects sample_rate=0");
 
+    # --- 2.5.0: serde carries the naad components' LIVE state ---
+    # Rust derived Serialize over those fields, so a Rust save/restore resumed
+    # seamlessly; the port rebuilt them from scratch and resumed with zeroed
+    # filter memory (architecture note 001). The check that matters is not JSON
+    # equality -- that passed throughout -- but whether CONTINUED OUTPUT after a
+    # restore matches the synth that was never saved.
+    test_group("serde restores live DSP state");
+    var sa = fire_new(F64_HALF, f64_from(44100));
+    var warm = vec_new();
+    var wi = 0;
+    while (wi < 1024) { vec_push(warm, 0); wi = wi + 1; }
+    fire_process_block(sa, warm);                 # advance filters + noise
+
+    var ssb = str_builder_new();
+    fire_to_json(sa, ssb);
+    var sj = str_data(str_builder_build(ssb));
+    var sr2 = fire_from_json_str(sj);
+    assert(garjan_is_err(sr2) == 0, "warmed fire restores");
+
+    # Guard the guard: the state must actually be non-zero, or matching it
+    # would prove nothing.
+    assert(BiquadFilter_z1(Fire_roar_filter(sa)) != 0, "roar filter has non-zero memory to carry");
+    assert_eq(BiquadFilter_z1(Fire_roar_filter(sr2)), BiquadFilter_z1(Fire_roar_filter(sa)),
+      "roar filter z1 restored");
+    assert_eq(BiquadFilter_z2(Fire_roar_filter(sr2)), BiquadFilter_z2(Fire_roar_filter(sa)),
+      "roar filter z2 restored");
+
+    var ca = vec_new();
+    var cb = vec_new();
+    wi = 0;
+    while (wi < 1024) { vec_push(ca, 0); vec_push(cb, 0); wi = wi + 1; }
+    fire_process_block(sa, ca);
+    fire_process_block(sr2, cb);
+    var csame = 1;
+    wi = 0;
+    while (wi < vec_len(ca)) {
+        if (vec_get(ca, wi) != vec_get(cb, wi)) { csame = 0; }
+        wi = wi + 1;
+    }
+    assert_eq(csame, 1, "continued output after restore is sample-identical");
+
+    # A pre-2.5.0 document has no "dsp" member; it must still load.
+    var oldfmt = fire_from_json_str("{\"intensity\":0.5,\"crackle_rate\":20.0,\"sample_rate\":44100.0,\"sample_position\":0,\"rng_state\":1,\"rng_inc\":19999,\"dcb_x_prev\":0.0,\"dcb_y_prev\":0.0,\"dcb_r\":0.999}");
+    assert(garjan_is_err(oldfmt) == 0, "a document without \"dsp\" still loads");
+
+
     return assert_summary();
 }
 var ec = main();
