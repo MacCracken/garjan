@@ -4,144 +4,96 @@ How to use garjan in a game engine or audio application.
 
 ## Basic Usage
 
-```rust
-use garjan::prelude::*;
+Consumers include the bundled `dist/garjan.cyr` and declare garjan's deps
+(naad / hisab / goonj / sakshi + stdlib) in their own `cyrius.cyml`.
 
-// Create a synthesizer (sample rate set once at construction)
-let mut rain = Rain::new(RainIntensity::Heavy, 44100.0).unwrap();
+```cyrius
+include "dist/garjan.cyr"
 
-// Option A: One-shot (allocates output buffer)
-let samples = rain.synthesize(5.0).unwrap();
+fn main() {
+    alloc_init();
 
-// Option B: Streaming (zero allocation, real-time safe)
-let mut buffer = [0.0f32; 512]; // your audio callback buffer
-rain.process_block(&mut buffer);
+    # Sample rate is fixed at construction. Returns a pointer or a NEGATIVE
+    # GARJAN_ERR_* code -- there is no Result.
+    var rain = rain_new(RAIN_INTENSITY_HEAVY, f64_from(44100));
+    if (garjan_is_err(rain) == 1) { return 1; }
+
+    # Option A: one-shot. Allocates the output vec.
+    var samples = rain_synthesize(rain, f64_from(5));
+    if (garjan_is_err(samples) == 1) { return 1; }
+
+    # Option B: streaming into your own buffer. Allocates nothing.
+    var buffer = vec_new();
+    var i = 0;
+    while (i < 512) { vec_push(buffer, 0); i = i + 1; }
+    rain_process_block(rain, buffer);
+    return 0;
+}
 ```
 
 ## Real-Time Audio Callback
 
-For game engines, use `process_block` in the audio thread:
+Use `process_block` on the audio thread. It performs no allocation, so it is
+safe in a callback:
 
-```rust
-// In your audio callback (called ~86 times/sec at 44100 Hz, 512 samples)
-fn audio_callback(output: &mut [f32]) {
-    wind.process_block(output);
-    // Mix other sources additively:
-    let mut rain_buf = [0.0f32; 512];
-    rain.process_block(&mut rain_buf);
-    for (out, r) in output.iter_mut().zip(rain_buf.iter()) {
-        *out += r * 0.5; // mix at 50%
+```cyrius
+# Called ~86 times/sec at 44.1 kHz with 512-sample blocks.
+fn audio_callback(wind, rain, scratch, output) {
+    wind_process_block(wind, output);
+
+    # Mix other sources additively into the same buffer.
+    rain_process_block(rain, scratch);
+    var i = 0;
+    while (i < vec_len(output)) {
+        vec_set(output, i, f64_add(vec_get(output, i),
+          f64_mul(vec_get(scratch, i), F64_HALF)));   # rain at 50%
+        i = i + 1;
     }
+    return 0;
 }
 ```
 
-## Real-Time Parameter Control
+Allocate `scratch` **once**, outside the callback. The arena never frees, so an
+allocation on the audio thread accumulates for the life of the process.
 
-Continuous synthesizers expose setters for live parameter changes:
+> **One exception to the no-allocation rule.** `whistle_process_block`
+> allocates 32 bytes per sample — naad's `filter_svf_process_sample` returns a
+> heap `SvfOutput` and exposes no non-allocating band-pass variant (it has one
+> for low-pass). That is ~5 GB/hour, exhausting the 2 GiB arena in about 25
+> minutes. Blocked upstream; avoid `whistle` in long-running streams for now.
 
-```rust
-// Update from game state each frame
-friction.set_velocity(player_speed / max_speed);
-friction.set_pressure(contact_force.clamp(0.0, 1.0));
-wind.set_wind_speed(weather_system.wind_speed_normalized());
-```
+## Error handling
 
-## Triggered One-Shot Events
+Every constructor and `synthesize` returns a pointer/`GARJAN_OK`, or a negative
+code. Check with `garjan_is_err` and name it with `garjan_err_name`:
 
-Some synthesizers support triggered events:
+| Code | Meaning |
+|---|---|
+| `GARJAN_ERR_INVALID_PARAMETER` (-1) | bad sample rate, duration, enum id, or size |
+| `GARJAN_ERR_SYNTHESIS_FAILED` (-2) | a naad backend component rejected its params |
+| `GARJAN_ERR_COMPUTATION` (-3) | a numeric computation went invalid |
+| `GARJAN_ERR_ALLOCATION` (-4) | heap exhausted ([ADR-0005](../adr/0005-allocation-failure-is-an-error-code-not-an-abort.md)) |
 
-```rust
-// Footstep: auto-timed or manually triggered
-footstep.trigger_step(); // call when animation foot hits ground
+Accepted input ranges: sample rate 1 Hz–768 kHz, duration ≤ 600 s, buffer
+≤ 44.1 M samples, and enum ids strictly within their variant range
+([ADR-0007](../adr/0007-bounded-duration-and-sample-rate.md),
+[ADR-0006](../adr/0006-out-of-range-enum-ids-are-rejected.md)).
 
-// Whoosh: trigger on weapon swing
-whoosh.trigger();
+## Persistence
 
-// Branch snap: trigger on collision
-foliage.trigger_snap();
-```
+`<type>_to_json(p, sb)` / `<type>_from_json_str(json)` round-trip a
+synthesizer's parameters, RNG and DC-blocker state.
 
-## Voice Management
+**This is parameter persistence, not session snapshotting.** The naad
+components (filters, noise generators, LFOs) are rebuilt from the parameters
+rather than restored, so a synth saved mid-stream resumes with zeroed filter
+history — audible as a discontinuity. See
+[architecture note 001](../architecture/001-deserialize-does-not-restore-dsp-state.md).
 
-Use `VoicePool` to manage multiple concurrent sounds:
+## Where garjan stops
 
-```rust
-let mut pool = VoicePool::new(16, StealPolicy::LowestPriority);
+garjan produces raw mono sources. Propagation is **goonj**, mixing and
+scheduling **dhvani**, mechanical sound **ghurni**, vocal **prani/svara**.
+See [ADR-0003](../adr/0003-scope-boundaries.md).
 
-// Allocate voices with priority (higher = harder to steal)
-let slot = pool.allocate(5, tag_id);  // priority 5
-
-// Each audio frame:
-pool.tick(); // advance age counters
-
-// When sound finishes:
-pool.release(slot.unwrap());
-```
-
-## Using the Science Bridge
-
-If your game uses AGNOS science crates, convert their outputs to garjan parameters:
-
-```rust
-use garjan::bridge;
-
-// From badal (weather physics)
-let rain_rate_mm_hr = badal::precipitation::rain_rate(cloud_type, cape);
-if let Some(intensity) = bridge::rain_intensity_from_rate(rain_rate_mm_hr) {
-    let mut rain = Rain::new(intensity, 44100.0).unwrap();
-}
-
-// From temperature to thunder distance
-let distance = bridge::thunder_distance_from_flash(time_since_flash, temperature_c);
-let mut thunder = Thunder::new(distance, 44100.0).unwrap();
-
-// From flame temperature to fire intensity
-let intensity = bridge::fire_intensity_from_temperature(flame_temp_k);
-let mut fire = Fire::new(intensity, 44100.0).unwrap();
-```
-
-## Builder Pattern
-
-For synthesizers with many options:
-
-```rust
-use garjan::builder::PrecipitationBuilder;
-
-let mut hail = PrecipitationBuilder::new(44100.0)
-    .precip_type(PrecipitationType::Hail)
-    .stone_size(StoneSize::Large)
-    .surface(Terrain::Metal)
-    .build()
-    .unwrap();
-```
-
-## LOD (Level of Detail)
-
-Use `Quality` to reduce CPU for distant sources:
-
-```rust
-let quality = if distance > 100.0 {
-    Quality::Minimal
-} else if distance > 30.0 {
-    Quality::Reduced
-} else {
-    Quality::Full
-};
-
-// Scale mode count for modal synthesis
-let mode_count = quality.scale_modes(material.mode_config().mode_count);
-
-// Scale event rate for stochastic sounds
-let effective_rate = quality.scale_rate(base_event_rate);
-```
-
-## `no_std` Usage
-
-Disable default features for embedded/WASM:
-
-```toml
-[dependencies]
-garjan = { version = "1", default-features = false }
-```
-
-This disables naad (requires std) and uses the manual DSP fallback. All synthesizers work but with reduced audio quality.
+Runnable programs: [`docs/examples/`](../examples/).

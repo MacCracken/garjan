@@ -2,49 +2,73 @@
 
 ## Trust Boundaries
 
-garjan operates at the **library boundary**. It trusts the calling application to:
-- Provide valid numeric inputs (validated at entry points, but not on every setter call)
-- Handle `Result` errors appropriately
-- Initialize a tracing subscriber if logging output is desired
-- Mix and spatialize audio outputs (garjan produces raw mono samples)
+garjan operates at the **library boundary**. It trusts the calling application
+to:
+
+- handle negative error codes rather than dereferencing them as pointers
+- mix and spatialize the raw mono output it produces
+- not call `alloc_reset()` while any garjan object is still live — that
+  invalidates every pointer the allocator has ever handed out
 
 garjan does NOT trust:
-- Sample rate values (validated in all constructors)
-- Duration values (validated in all `synthesize` methods)
-- Deserialized data (enum validation via serde derive; parameters clamped on use)
 
-## Attack Surface
+- **sample rate** — validated in every constructor: rejects ≤ 0, NaN, infinity,
+  and anything outside 1 Hz – 768 kHz
+- **duration** — validated in every `synthesize`: rejects ≤ 0, NaN, infinity,
+  and anything over 600 s
+- **the resulting sample count** — checked separately, because two individually
+  legal inputs can still imply an illegal buffer (600 s at 768 kHz is 461 M
+  samples). Capped at 44.1 M
+- **enum ids** — validated at 21 constructors and 10 table dispatchers. Ported
+  Rust enums are plain integers, so an unvalidated id would fall through an
+  `if`/`elif` chain's final `else` and silently select the last variant
+- **deserialized JSON** — the highest-risk surface; see below
 
-### Input validation
-All public entry points validate critical parameters:
-- `validate_sample_rate`: rejects ≤0, NaN, Infinity
-- `validate_duration`: rejects ≤0, NaN, Infinity
-- Real-time setters: `.clamp(0.0, 1.0)` on all intensity/velocity/pressure/speed values
-- Modal bank: modes outside [20 Hz, Nyquist] are silently excluded
-- Poisson rate: clamped to [0, 30] to prevent excessive iteration
+## Attack surface: deserialization
 
-### Numerical stability
-- Modal resonator radius clamped to [0.0, 0.9999] — prevents blowup
-- DC blocker coefficient clamped to [0.9, 0.9999] — prevents oscillation
-- All synthesis outputs are finite (verified by test suite)
+`*_from_json_str` is the only entry point taking fully attacker-controlled
+input. Three defects were found and fixed here in 2.0.2 (see
+[the audit](../audit/2026-08-30-audit.md)):
 
-### Memory safety
-- Zero `unsafe` code in the entire crate
-- No raw pointer manipulation
-- `alloc::format!` used only in error paths, never in `process_block` hot path
-- Impact excitation buffer pre-allocated to avoid hot-path allocation
+- `*_from_json_str` discarded `*_build_naad`'s error code at 20 of 21 sites, so
+  a document with `"sample_rate":0.0` returned a **non-negative pointer** whose
+  naad component fields were never assigned — the caller's `garjan_is_err`
+  check passed and the first `process_block` dereferenced null. Reproduced as a
+  SIGSEGV.
+- `voice_pool_from_json_str` sized the pool from the `max_voices` scalar rather
+  than the `slots` array, so a ~40-byte document could exhaust memory.
+- `insect_from_json_str` restored `swarm_count` without its 1..8 clamp, making
+  one `process_block` unbounded.
 
-### Denial of service
-- Very large `duration` values in `synthesize` will allocate proportionally large buffers. Callers should bound duration to reasonable values (e.g., ≤60 seconds).
-- `process_block` with caller-provided buffers has no allocation risk.
-- All loops are bounded (no infinite loops possible with clamped inputs).
+All three are pinned by regression tests driving genuinely hostile documents.
 
-## Dependency Risk
+## Attack surface: resource exhaustion
 
-| Dependency | Type | unsafe | I/O | Risk |
-|---|---|---|---|---|
-| serde | Serialization | No (derive) | No | Low |
-| thiserror | Error derive | No (proc macro) | No | Minimal |
-| libm | Math fallback | No | No | Minimal |
-| naad (opt) | DSP primitives | No | No | Low |
-| tracing (opt) | Logging facade | No | No | Minimal |
+- **The arena never frees.** Nothing is reclaimed until `alloc_reset()`, which
+  invalidates every outstanding pointer. Long-running consumers should treat
+  synth construction as an epoch-scoped operation.
+- `process_block` allocates nothing, pinned by test — **except `whistle`**,
+  which allocates 32 B/sample via naad's `SvfOutput` (~5 GB/hour, arena
+  exhausted in ~25 min). Blocked on an upstream naad addition.
+- `*_synthesize` grows its output vector by doubling from capacity 16, ~3x
+  overhead, all of it retained. Blocked on a stdlib `vec_with_capacity`.
+
+## Failure modes
+
+- **Allocation failure is detectable.** `alloc` returns `0` on exhaustion and
+  `0` is `GARJAN_OK`, so a raw `alloc` failure would pass every error check and
+  be written through as a null pointer. All allocation goes through
+  `garjan_alloc`, which maps it to `GARJAN_ERR_ALLOCATION`
+  ([ADR-0005](../adr/0005-allocation-failure-is-an-error-code-not-an-abort.md)).
+  **Invariant: `src/*.cyr` contains no raw `alloc(` outside `garjan_alloc`.**
+- **No panics or aborts.** Failures are returned as codes; garjan never
+  terminates the host process. Rust's allocator aborted on OOM; the port
+  deliberately does not.
+- garjan emits log events through sakshi but installs no sink; verbosity is a
+  runtime setting (`sakshi_set_level`), not a build feature.
+
+## Non-goals
+
+garjan does not sandbox the caller, authenticate input, or defend against a
+hostile *host*. It defends against malformed **data** — bad parameters and
+hostile JSON — not against a compromised process.

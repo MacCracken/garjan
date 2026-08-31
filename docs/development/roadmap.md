@@ -1,299 +1,171 @@
 # garjan — Roadmap
 
-> Milestone plan for the 2.x line. State lives in [`state.md`](state.md);
-> this file is the **sequencing** — what ships, in what order, against what
-> dependency gates.
->
-> **Numbering note.** The pre-port file planned a v0.1.0 → v1.0 line. The
-> Rust→Cyrius port took a major bump to **2.0.0** (the public surface moved
-> language), so that scaffolding no longer described this project. It has been
-> replaced with the 2.x arc below. v1.0 criteria are retained, re-scoped, as
-> **2.x maturity criteria** — they were never met and are still the right bar.
+> Sequencing for the 2.x line: what ships, in what order, against what gates.
+> Live state is in [`state.md`](state.md); completed detail is in the
+> [CHANGELOG](../../CHANGELOG.md) — this file carries only what is still open,
+> plus enough context to pick each item up cold.
 
-## Where the port actually stands
+## Next up
 
-Verified 2026-08-30 and **re-verified 2026-08-30** after the first pass was
-found to have asserted things it had not checked. Method in
-[Port completeness](#port-completeness).
+### serde live-state round-trip parity
 
-- **30 of 34** `rust-old/src` modules have a `.cyr` counterpart.
-- **All 106 enum variants are ported, and 103 of them preserve Rust's exact
-  discriminant value.** This is the check that matters: Rust enums became
-  module-prefixed ints, so a variant that survived by *name* but landed on the
-  wrong *value* would silently return the wrong material/terrain/intensity
-  table with no compile error. The 3 exceptions are `GarjanError`'s variants,
-  deliberately remapped from 0/1/2 to negative codes (`GARJAN_ERR_*`) because
-  the port signals failure by sign.
-  - Five enums share variant names (`Small`/`Medium`/`Large`,
-    `Moderate`/`Heavy`), so `StoneSize`, `UnderwaterDepth`, `BirdSize`,
-    `SurfIntensity`, `RainIntensity` and `Material` were additionally pinned
-    against their exact constant prefix — a name-suffix match alone could have
-    matched the wrong family.
-- **~223 of 242** public `fn`/`struct`/`enum` items were compared. The
-  remainder is `math.rs` (10 — superseded, see architecture note
-  [002](../architecture/002-where-the-transcendentals-come-from.md)) and
-  `integration/soorat.rs` (9 — the known deferral).
-  - ⚠ The first pass reported "219 items" and implied full coverage. Its
-    extractor used `glob('*.rs')` rather than `rglob`, so it **silently skipped
-    `integration/` altogether**. soorat was known to be unported only from a
-    separate file-existence check. Use `rglob`.
-- **No `pub const`, `pub static`, `pub trait`, or manual `impl … for …`** exist
-  in `rust-old/src`, and no `Default` derive — so the behavioral surface really
-  is fns, structs and enums. One `pub type` (`Result<T>`), replaced by integer
-  error codes.
-- Not ported, **correctly**:
-  - `lib.rs` — verified to contain only `mod`/`pub mod` declarations, a
-    `prelude` of re-exports, and a `#[cfg(test)]` Send+Sync assertion. No
-    behavior. (Note `dsp`, `math` and `rng` were *private* modules in Rust; the
-    port exposes their functions in the flat namespace, so the port's surface
-    is slightly *wider* than the crate's.)
-  - `math.rs` — an f32 `sin/cos/exp/sqrt/powf` shim. Superseded by cycc's f64
-    intrinsics plus ganita's `f64_pow`; accuracy measured, see note 002.
-  - `integration/mod.rs` — 7 lines: a doc comment and a `#[cfg]`-gated
-    `pub mod soorat`.
-- **Also dropped, deliberately: ~232 lines of non-naad fallback code across 19
-  ported modules.** Rust carried dual code paths ([ADR-0002](../adr/0002-dual-code-paths.md));
-  the port always uses the naad backend and drops the `#[cfg(not(feature =
-  "naad-backend"))]` branch. The module-level "30 of 34" figure does not capture
-  this — the port is "30 of 34 files, minus the fallback branch in 19 of them".
-  Only 7 of those 19 modules say so in their header; the rest state it only
-  indirectly.
-- **`VoicePool::active_voices` has no direct equivalent.** Rust returned
-  `impl Iterator<Item = (usize, &VoiceSlot)>` filtered to active slots; Cyrius
-  has no iterators. The capability is reachable by looping `voice_pool_slot(p, i)`
-  and testing `VoiceSlot_active`, and `voice_pool_active_count` gives the count —
-  but it is an API-shape gap, not a like-for-like port. `slot_mut` *is* covered:
-  `voice_pool_slot` is bounds-checked and returns 0 for out-of-range, matching
-  `.get_mut()`'s `None`, and Cyrius pointers are mutable.
-- Outstanding: `integration/soorat.rs` (315 lines), and — until 2.1.0 —
-  `examples/` and `tests/integration.rs`.
+**The last open parity divergence, and the next thing to build.**
+
+Rust derived `Serialize`/`Deserialize` over *all* fields, naad components
+included, so a save/restore resumed with filter history intact. The port drops
+those fields from `*Params` and rebuilds the components from scratch, so a synth
+saved mid-stream resumes with **zeroed filter state** — audible as a
+discontinuity. Full background:
+[architecture note 001](../architecture/001-deserialize-does-not-restore-dsp-state.md).
+
+**Decided: implement full parity.** Verbose but mechanical, and it needs no
+hand-rolled JSON — the `*Params` structs are flat `#derive(Serialize)` types and
+every piece of naad state is a plain `f64`/`i64`.
+
+State to carry, all reachable through naad's existing accessors:
+
+| Component | Fields | Notes |
+|---|---|---|
+| `BiquadFilter` | `z1`, `z2` | coefficients are re-derived from the params already stored |
+| `StateVariableFilter` | `ic1eq`, `ic2eq` | |
+| `Lfo` | `phase`, `sh_value` | |
+| `NoiseGenerator` | rng state, `pink_counter`, `pink_running_sum`, `brown_prev`, 16 × `pink_octaves` | 20 fields; garjan uses white ×11, pink ×9, brown ×5 |
+
+Plan:
+
+1. Shared state-transfer helpers, one pair per component type.
+2. Prove it end-to-end on **one** synth with a round-trip test that asserts
+   *continued output after restore* matches the un-saved original — not just
+   that the JSON round-trips, which is what the current serde tests check and
+   why this gap survived.
+3. Roll out to the remaining 18.
+
+It **changes the JSON format**, so it lands as a minor bump with an ADR.
+
+---
+
+## Open, blocked upstream
+
+Neither can be fixed inside garjan without coupling to a dependency's internals.
+
+- **`vec_with_capacity` in the Cyrius stdlib.** Every `*_synthesize` builds its
+  output by pushing from capacity 16. Measured: **1,048,472 bytes retained per
+  second of audio against an ideal 352,824** — ~3x overhead, never reclaimed.
+  `lib/vec.cyr` exposes only `vec_new()`, which hardcodes capacity 16;
+  hand-building the vector header would couple garjan to its private
+  `[data][len][cap]` layout, and `CLAUDE.md` forbids modifying `lib/`.
+- **`filter_svf_process_sample_bandpass` in naad.** `whistle_process_block`
+  allocates **32 B/sample** because naad's `filter_svf_process_sample` returns a
+  heap `SvfOutput`; naad has a non-allocating `_lowpass` variant but no
+  band-pass one. That is 1.41 MB/s, **5.08 GB/hour** — the 2 GiB arena is gone
+  in ~25 minutes of continuous whistle. Pinned by a test so it cannot worsen,
+  and called out in the README and integration guide.
+
+- **Port `integration/soorat.rs`** (315 lines: `PrecipitationField`,
+  `FireEmitter`, `WindField`). Blocked — soorat has not landed in Cyrius. It was
+  feature-gated in Rust and is the one genuinely unported *feature*.
+
+---
+
+## Open, unscheduled
+
+- **Performance beyond 2.3.0.** `insect` is still the slowest at ~23x real-time,
+  but measurement says most of what remains is irreducible: per 352,800
+  voice-calls, biquad 11.9 ms + `f64_sin` 10.6 ms + noise 7.1 ms accounts for
+  ~30 of its 42.6 ms. Going further needs an algorithmic change — a recurrence
+  oscillator instead of a `sin` per voice per sample — which would **not** be
+  bit-exact and so needs an ADR. Smaller garjan-side wins remain in `bubble`,
+  `foliage`, `precipitation`, `whoosh`, `impact`.
+- **A downstream consumer.** The last unmet maturity criterion.
+
+## 3.0.0 — breaking, if it happens
+
+- **Allocator ownership.** The arena never frees, and `alloc_reset()`
+  invalidates *every* outstanding pointer, so it is only usable at a clean epoch
+  boundary. A caller that constructs and discards synths in a loop still grows
+  memory. Fixing it properly means a lifetime model in the public API.
+
+---
 
 ## 2.x maturity criteria
 
 - [x] Rust → Cyrius surface parity verified (function-level diff against `rust-old/`)
-- [x] Test coverage adequate for the surface area — 2.1.0 replaced the
-      two-assertion placeholder with a 288-assertion cross-module suite (764
-      total), and benchmarks now cover all 26 ops rather than 5
-- [x] Benchmarks captured — in [`BENCHMARKS.md`](../../BENCHMARKS.md) at the
-      repo root (the old criterion said `docs/benchmarks.md`; the root file is
-      the real one and the criterion was corrected, not the file moved)
-- [ ] At least one downstream consumer green — **none yet**
+- [x] Test coverage adequate for the surface area — 33 suites, 797 assertions,
+      including a 288-assertion cross-module suite
+- [x] Benchmarks captured — 26 ops in [`BENCHMARKS.md`](../../BENCHMARKS.md)
+- [x] Security audit written up — [`docs/audit/`](../audit/2026-08-30-audit.md)
 - [x] CHANGELOG complete from 2.0.0 onward
-- [x] Security audit written up — [`docs/audit/2026-08-30-audit.md`](../audit/2026-08-30-audit.md)
+- [ ] **At least one downstream consumer green** — none yet
 
----
+## Shipped
 
-## 2.0.x — stabilization ✅ mostly shipped
-
-Patch line. No API changes, no audio changes.
-
-| Version | Status | Content |
-|---|---|---|
-| 2.0.0 | ✅ 2026-07-03 | Full Rust→Cyrius port; 32 modules |
-| 2.0.1 | ✅ 2026-08-29 | Toolchain 6.3.44 → 6.5.36; deps to latest |
-| 2.0.2 | ✅ 2026-08-30 | P-1 audit: 3 JSON-reachable defects; `cyrius audit` fmt gate |
-| 2.0.3 | ✅ 2026-08-30 | Allocation-failure guard ([ADR-0005](../adr/0005-allocation-failure-is-an-error-code-not-an-abort.md)) |
-| 2.0.4 | ✅ 2026-08-30 | Arena lifetime: per-block allocations → zero |
-| 2.0.5 | ✅ 2026-08-30 | Per-sample hot paths; bit-exact (`scripts/audio-hash.cyr`) |
-
-### 2.0.6 — documentation accuracy ✅ (docs only, shipped untagged)
-
-Nothing here changed behavior, so it rides along with 2.0.5 rather than taking
-a tag of its own.
-
-- ✅ **Removed the false `#[serde(skip)]` premise** from 35 comment sites across
-  17 modules. `rust-old/src` contains zero `serde(skip)`; Rust derived
-  serialization over *all* fields, naad components included. The authoritative
-  explanation now lives in architecture note
-  [001](../architecture/001-deserialize-does-not-restore-dsp-state.md), and the
-  comments point at it instead of restating a false premise 35 times.
-- ✅ **Filled `CLAUDE.md`'s `## Goal`** — grounded in
-  [ADR-0003](../adr/0003-scope-boundaries.md)'s boundary table rather than
-  invented: garjan owns environmental/nature sound *sources*; propagation is
-  goonj, mixing dhvani, vocal prani/svara, mechanical ghurni.
-- ✅ **Populated `docs/architecture/README.md`**'s empty index with note 001.
-- ✅ **Resolved the ADR location split** — `adr-001`..`adr-004` moved from
-  `docs/architecture/` to `docs/adr/0001`..`0004`, the home both `CLAUDE.md`
-  and the two READMEs already declared. Renamed to the four-digit convention;
-  **not** renumbered and **not** reformatted (they predate the template and
-  reference the pre-port Rust version line — rewriting them would blur what was
-  decided when). Inbound links updated; all 34 relative doc links verified.
-
----
-
-## 2.1.x — parity completion ✅ shipped 2.1.0
-
-Everything Rust shipped that the port had not. Additive; no behavior change to
-existing APIs.
-
-- ✅ **Ported `tests/integration.rs` → `tests/garjan.tcyr`.** The placeholder
-  (`assert(1, "true is true")`) is replaced by a real cross-module suite:
-  **2 → 288 assertions**, taking the project from 478 to **764** overall.
-  Scoped deliberately: Rust's 134 tests include many per-type serde
-  round-trips and per-synth constructor checks the 33 per-module suites
-  already cover, so re-porting them verbatim would duplicate rather than add.
-  This file owns what no per-module suite *can* assert —
-  the uniform validation contract across all 21 constructors, exhaustive enum
-  variant sweeps (all 10 materials, all 32 terrain × movement pairs, every
-  intensity/type/size), cross-synth relative invariants (heavier rain louder
-  than light; closer thunder louder than distant), the uniform silence gates,
-  empty-buffer and multi-block streaming, determinism replay, builder-vs-direct
-  equivalence, bridge→synth wiring, LOD monotonicity, and voice-pool stealing.
-  The variant sweeps matter most: Rust enums became module-prefixed ints, so a
-  dropped variant produces no compile error — it silently falls into the final
-  `else`.
-- ✅ **Ported `examples/` (5 programs) → `docs/examples/`** with a README —
-  `weather_scene`, `forest_ambience`, `combat_impacts`, `error_handling`,
-  `logging`. All build and run.
-- ✅ **Expanded `tests/garjan.bcyr` from 5 to all 26 benchmarks.** This
-  overturned the optimization priority: **`insect` (swarm of 8) is the hot spot
-  at ~20x real-time**, five times slower than the next synth, while `wind` —
-  which the old five-benchmark set named as the worst target — is mid-table.
-  It also revealed the old `cloth` number was measuring a silent fast-path.
-- ✅ **Wrote [`docs/audit/2026-08-30-audit.md`](../audit/2026-08-30-audit.md)**,
-  including the refuted findings.
-- ⛔ **Pre-size `*_synthesize` output vectors — BLOCKED UPSTREAM.** Measured:
-  1,048,472 bytes retained per second of audio against an ideal 352,824 (~3x
-  overhead, ~695 KB wasted per call, never reclaimed). Cannot be fixed from
-  garjan: the Cyrius stdlib has no `vec_with_capacity` / `vec_reserve`, and
-  `vec_new()` hardcodes capacity 16. Hand-building the vector header would
-  couple garjan to `lib/vec.cyr`'s private `[data][len][cap]` layout — silent
-  corruption on any upstream change — and `CLAUDE.md` forbids modifying `lib/`.
-  **Needs a stdlib addition.** Moved to the gated section.
-
----
-
-## 2.2.x — deliberate divergences _(each needs an ADR)_ — 2.2.0 shipped
-
-Behavior changes where the port must knowingly differ from the oracle. Per
-`CLAUDE.md`, none of these may land without an ADR.
-
-- **serde live-state round-trip parity — NEEDS A DECISION, sized below.**
-  Rust serialized the naad component state as ordinary derived fields; the port
-  drops them from `*Params` and rebuilds fresh, so a mid-stream save/restore
-  loses filter and noise state Rust preserved (architecture note
-  [001](../architecture/001-deserialize-does-not-restore-dsp-state.md)).
-
-  **Feasible** — naad exposes full accessors, including the live state:
-  `BiquadFilter` z1/z2, `StateVariableFilter` ic1eq/ic2eq, `Lfo` phase/sh_value,
-  and `NoiseGenerator`'s rng + pink_counter + pink_running_sum + brown_prev +
-  a 16-element pink_octaves array.
-
-  **But expensive**: per component that is 2 fields for a biquad, 2 for an SVF,
-  and **20 for a noise generator**. `AmbientTexture` alone has 3 noise
-  generators, 3 biquads and an LFO — roughly **70 new `*Params` fields**, versus
-  about 10 scalars today, and the pink-octave array needs array (de)serializing.
-  Across 19 synths that is a large, format-breaking change whose only benefit is
-  exact mid-stream session snapshotting, for which there is no consumer yet.
-
-  **Decided: implement full parity (option a).** Tractable after all — the
-  `*Params` structs are flat `#derive(Serialize)` types and every piece of naad
-  state is an `f64`/`i64`, including pink noise's 16 octaves, so it is verbose
-  but mechanical and needs no hand-rolled JSON. Plan: a shared set of
-  state-transfer helpers (biquad `z1`/`z2`, SVF `ic1eq`/`ic2eq`, LFO
-  `phase`/`sh_value`, noise rng + `pink_counter`/`pink_running_sum`/16 octaves/
-  `brown_prev`), proven end-to-end on one synth with a round-trip test that
-  asserts continued output matches, then rolled out to the remaining 18.
-  **Next up.**
-- ✅ **Upper bounds on `duration` / `sample_rate` — shipped 2.4.0**
-  ([ADR-0007](../adr/0007-bounded-duration-and-sample-rate.md)). 600 s,
-  1 Hz-768 kHz, and a 44.1 M **sample-count** cap which is the binding
-  constraint — neither input alone catches 600 s at 768 kHz.
-- **Out-of-range enum ids.** Rust's exhaustive `match` over closed enums is
-  ported as `if/elif` chains whose final `else` silently absorbs any invalid
-  integer, yielding the last variant's table rather than an error. Decide
-  whether the Cyrius surface should reject unknown ids.
-
----
-
-## 2.3.x — performance ✅ 2.3.0 shipped
-
-- ✅ **`insect` swarm — done in 2.3.0.** 49.9 -> 42.6 ms (wing-buzz -25%,
-  cricket -24%, cicada -14%), bit-identical. Per-voice invariants hoisted, the
-  type branched on once outside the loop, and `TAU*mod_rate*t` computed per
-  sample instead of per voice. **What remains is mostly irreducible**: measured
-  per 352,800 voice-calls, biquad 11.9 ms + `f64_sin` 10.6 ms + noise 7.1 ms is
-  ~30 of the 42.6 ms. Going further needs an algorithmic change (a recurrence
-  oscillator rather than a `sin` per voice per sample) that would not be
-  bit-exact.
-- **Do not hoist constants for speed** — cycc already folds them (measured at
-  empty-loop cost). Hoist accessor reads (~0.54 ms per 352,800) instead.
-- **naad-level per-sample work.** 2.0.5 took the garjan-side hoisting wins.
-  Profiling points into the naad bundle's per-sample noise generation and
-  biquad/SVF filtering. Needs upstream or algorithmic work, not more hoisting.
-- Remaining garjan-side per-event conversions in `bubble`, `foliage`,
-  `precipitation`, `insect`, `whoosh`, `impact` — small, individually.
-- Gate every change on `scripts/audio-hash.cyr` staying bit-identical.
-
----
-
-## Gated — not scheduled
-
-- **`vec_with_capacity` in the Cyrius stdlib.** Without it, every
-  `*_synthesize` wastes ~695 KB per second of audio to doubling reallocation,
-  permanently. garjan cannot fix this without coupling to `lib/vec.cyr`'s
-  private layout. Blocked on an upstream addition; see the 2.1.x entry for the
-  measurement.
-- **Port `integration/soorat.rs`** (315 lines: `PrecipitationField`,
-  `FireEmitter`, `WindField` — visualization data for downstream rendering).
-  **Blocked**: soorat has not landed in Cyrius. Feature-gated `soorat-compat`
-  in Rust, so it was never part of the default surface. Schedule when the
-  dependency exists; until then this is the one genuinely unported *feature*.
-
-## 3.0.0 — breaking, if it happens
-
-- **Allocator ownership.** The arena never frees. `alloc_reset()` invalidates
-  *every* outstanding pointer, so it is only usable at a clean epoch boundary —
-  a caller that constructs and discards synths in a loop still grows memory.
-  Fixing this properly means an ownership/lifetime model in the public API.
-- Any surface change falling out of the 2.2.x decisions.
+| | |
+|---|---|
+| 2.0.0 | Full Rust→Cyrius port, 32 modules |
+| 2.0.1 | Toolchain 6.3.44 → 6.5.36; all deps to latest |
+| 2.0.2 | P-1 audit: 3 JSON-reachable defects; `cyrius audit` fmt gate |
+| 2.0.3 | Allocation-failure guard ([ADR-0005](../adr/0005-allocation-failure-is-an-error-code-not-an-abort.md)) |
+| 2.0.4 | Arena lifetime: per-block allocations → zero |
+| 2.0.5 | Per-sample hot paths; bit-exact |
+| 2.0.6 | Docs accuracy (untagged); ADRs relocated to `docs/adr/` |
+| 2.1.0 | Integration suite (2 → 288 assertions), 26 benchmarks, 5 examples, audit write-up |
+| 2.2.0 | Out-of-range enum ids rejected ([ADR-0006](../adr/0006-out-of-range-enum-ids-are-rejected.md)) |
+| 2.3.0 | `insect` hot spot: 49.9 → 42.6 ms, bit-exact |
+| 2.4.0 | Duration / sample-rate / sample-count caps ([ADR-0007](../adr/0007-bounded-duration-and-sample-rate.md)) |
 
 ---
 
 ## Port completeness
 
-Method, so it can be re-run after any upstream change. The first pass used a
-weaker version of this and reported completeness it had not established, so use
-these, not a name-existence check.
+Verified 2026-08-30, then **re-verified** after the first pass was found to have
+asserted things it had not checked. Re-run these after any upstream change.
+
+- **30 of 34** `rust-old/src` modules have a `.cyr` counterpart.
+- **All 106 enum variants ported, 103 preserving Rust's exact discriminant.**
+  The 3 exceptions are `GarjanError`, deliberately remapped to negative codes.
+- **~223 of 242** public items compared. The remainder is `math.rs` (superseded
+  — [note 002](../architecture/002-where-the-transcendentals-come-from.md)) and
+  `integration/soorat.rs` (deferred).
+- Correctly not ported: `lib.rs` (module declarations, a prelude, and a
+  `#[cfg(test)]` Send+Sync assertion — no behavior), `math.rs`, and
+  `integration/mod.rs` (7 lines).
+- **Also dropped deliberately: ~232 lines of non-naad fallback across 19 ported
+  modules** ([ADR-0002](../adr/0002-dual-code-paths.md)). The module count alone
+  overstates completeness.
+- One API-shape gap: `VoicePool::active_voices` returned an iterator; Cyrius has
+  none. Reachable by looping `voice_pool_slot` + `VoiceSlot_active`.
+
+### Method
 
 **1. Module level** — note `rglob`, not `glob`; the first pass used `glob` and
-silently skipped `rust-old/src/integration/`:
+silently skipped `rust-old/src/integration/`.
 
 ```sh
 find rust-old/src -name '*.rs' | while read f; do
   b=$(basename "$f" .rs); [ -f "src/$b.cyr" ] || echo "NO .cyr: $f"; done
 ```
 
-**2. Enum discriminants — the check that matters.** A missing `pub fn` fails
-the build at its call site. A missing enum *variant* does not: Rust enums became
-module-prefixed ints, so a variant that is absent, or present but bound to the
-wrong value, silently returns a different table entry. Compare Rust's
-declaration order (implicit discriminants 0,1,2… unless explicit) against the
+**2. Enum discriminants — the check that matters.** A missing `pub fn` fails the
+build at its call site; a missing or mis-valued enum *variant* does not, because
+ported enums are plain integers. Compare Rust's declaration order against the
 Cyrius constant's value, and pin families whose variant names collide
-(`Small`/`Medium`/`Large`, `Moderate`/`Heavy`) by exact prefix rather than
-suffix match.
+(`Small`/`Medium`/`Large`, `Moderate`/`Heavy`) by exact prefix, not suffix match.
 
-**3. Surface beyond fn/struct/enum.** Confirm these stay empty, or the
-extractor is under-counting:
+**3. Surface beyond fn/struct/enum.** Confirm these stay empty:
 
 ```sh
 grep -rnE '^\s*pub\s+(const|static|trait|type)\s' rust-old/src/
 grep -rn ' for ' rust-old/src/ | grep -E '^\S+:[0-9]+:\s*impl'   # manual trait impls
-grep -rn 'derive(.*Default' rust-old/src/                          # non-zero defaults
+grep -rn 'derive(.*Default' rust-old/src/                        # non-zero defaults
 ```
 
-**4. Account for the dropped fallback.** The module count alone overstates
-completeness: 19 modules also dropped their `#[cfg(not(feature =
-"naad-backend"))]` branch (~232 lines). Re-measure rather than trusting that
-number:
+**4. Account for the dropped fallback**, which the module count hides:
 
 ```sh
 grep -rc 'cfg(not(feature = "naad-backend"))' rust-old/src/
 ```
 
-**5. Do not confuse "a symbol exists" with "it does the same thing."** Verify
-formulas and constants, not just names — e.g. `DcBlocker`'s clamp bounds were
-checked as bit patterns (`0x3FECCCCCCCCCCCCD` == 0.9, `0x3FEFFF2E48E8A71E` ==
-0.9999) rather than read as decimals, and the transcendentals were measured
-against libm rather than assumed (note
-[002](../architecture/002-where-the-transcendentals-come-from.md)).
+**5. "A symbol exists" is not "it does the same thing."** Verify formulas and
+constants — `DcBlocker`'s clamp bounds were checked as bit patterns
+(`0x3FECCCCCCCCCCCCD` == 0.9), and the transcendentals measured against libm
+rather than assumed.

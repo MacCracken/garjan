@@ -67,13 +67,17 @@ fn main() {
     # Moderate rain generator
     var rain = rain_new(RAIN_INTENSITY_MODERATE, f64_from(44100));
 
-    # Modal impact on metal
+    # Modal impact on metal. The table lookups return a pointer or a negative
+    # code -- an out-of-range material id is rejected, not silently defaulted.
     var props = material_properties(MATERIAL_METAL);
+    if (garjan_is_err(props) == 1) { return 1; }
     var mc = material_mode_config(MATERIAL_METAL);
+    if (garjan_is_err(mc) == 1) { return 1; }
     var specs = generate_modes(props, MaterialModeConfig_pattern(mc),
-                               MaterialModeConfig_mode_count(mc),
-                               MaterialModeConfig_damping_factor(mc));
+      MaterialModeConfig_mode_count(mc),
+      MaterialModeConfig_damping_factor(mc));
     var bank = modal_bank_new(specs, f64_from(44100));
+    if (garjan_is_err(bank) == 1) { return 1; }
 
     return 0;
 }
@@ -84,23 +88,41 @@ syscall(60, r);
 Every public type also serializes to / from JSON (`<type>_to_json(p, sb)` /
 `<type>_from_json_str(json)`), including the stateful synthesizers.
 
+> **Round-tripping persists parameters, not a live session.** Scalars, RNG and
+> DC-blocker state survive; the naad components (filters, noise generators,
+> LFOs) are rebuilt from the parameters rather than restored, so a synth saved
+> mid-stream resumes with zeroed filter history. Rust preserved that state —
+> this is a known divergence, see
+> [architecture note 001](docs/architecture/001-deserialize-does-not-restore-dsp-state.md).
+
 ## Performance
 
-Every synthesizer runs comfortably above real-time. Measurements from
-`cyrius bench tests/garjan.bcyr` (`process_block` of 1 s of audio at 44.1 kHz,
-x86_64 Linux):
+Every synthesizer runs comfortably above real-time. 26 benchmarks
+(`cyrius bench tests/garjan.bcyr`, `process_block` of 1 s of audio at 44.1 kHz,
+x86_64 Linux) — a representative slice, full table in
+[`BENCHMARKS.md`](BENCHMARKS.md):
 
-| Synthesizer | Time for 1s audio | Real-time factor |
+| Synthesizer | Time for 1 s audio | Real-time factor |
 |---|---|---|
-| Cloth (Flag) | 1.03 ms | ~970x |
-| Rain (Moderate) | 3.84 ms | ~260x |
-| Fire | 4.94 ms | ~200x |
-| Thunder | 5.65 ms | ~180x |
-| Wind | 11.6 ms | ~85x |
+| Precipitation (hail) | 1.88 ms | ~530x |
+| Cloth (Flag) | 2.02 ms | ~495x |
+| Rain (Moderate) | 3.86 ms | ~259x |
+| Fire | 4.24 ms | ~236x |
+| Wind | 10.44 ms | ~96x |
+| Texture (Forest) | 16.77 ms | ~60x |
+| **Insect (swarm of 8)** | **42.57 ms** | **~23x** |
+
+`insect` is the slowest: its inner loop runs once per swarm voice, so cost
+scales linearly with `swarm_count` (max 8). Most of what remains there is
+per-voice DSP the algorithm genuinely requires — see `BENCHMARKS.md` for the
+component breakdown.
 
 The Cyrius port widened `f32` → `f64` and calls the naad DSP bundle unoptimized,
 so per-sample cost is higher than the original Rust crate — still far above
 real-time for any realistic voice count.
+
+Five runnable programs live in [`docs/examples/`](docs/examples/) —
+weather layering, forest ambience, combat impacts, error handling, and logging.
 
 ## What the Rust feature flags became
 
@@ -116,9 +138,19 @@ Cyrius has no cargo-style features; the Rust flags map to always-on wiring:
 ## Design
 
 - **No samples**: every sound is synthesized from math
-- **No hot-path allocations**: `process_block` never allocates
-- **Deterministic**: seeded RNG, bit-identical replay guaranteed
-- **`no_std` compatible**: `libm` fallback when std unavailable
+- **No hot-path allocations**: `process_block` allocates nothing, pinned by a
+  test. One documented exception — `whistle` allocates 32 B/sample because
+  naad's `filter_svf_process_sample` returns a heap `SvfOutput` and exposes no
+  non-allocating band-pass variant (it has one for low-pass). Blocked upstream;
+  avoid `whistle` for long-running streams until it lands.
+- **Deterministic**: seeded RNG, bit-identical replay guaranteed. Enforced
+  across refactors by [`scripts/audio-hash.cyr`](scripts/audio-hash.cyr) — the
+  test suite checks finiteness and energy, *not* exact sample values.
+- **Validated at the boundary**: constructors reject out-of-range enum ids,
+  sample rates outside 1 Hz–768 kHz, durations over 600 s, and buffers over
+  44.1 M samples, rather than silently producing the wrong thing
+  ([ADR-0006](docs/adr/0006-out-of-range-enum-ids-are-rejected.md),
+  [ADR-0007](docs/adr/0007-bounded-duration-and-sample-rate.md))
 - **Composable**: synthesizers are independent, caller mixes
 - **Physically grounded**: modal resonance, Poisson processes, stick-slip models
 

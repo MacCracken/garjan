@@ -5,100 +5,103 @@
 ```
 garjan/
 ├── Core synthesis
-│   ├── weather.rs      Thunder, Rain, Wind
-│   ├── fire.rs         Fire (crackle + roar)
-│   ├── water.rs        Stream, Drip, Splash, Waves
-│   ├── texture.rs      AmbientTexture (6 environments)
-│   ├── impact.rs       Impact (10 materials, modal synthesis)
-│   ├── precipitation.rs Hail, Snow, SurfaceRain
-│   ├── underwater.rs   Submerged ambience
-│   └── surf.rs         Breaking wave cycle
+│   ├── weather.cyr     Thunder, Rain, Wind
+│   ├── fire.cyr        Fire (crackle + roar)
+│   ├── water.cyr       Stream, Drip, Splash, Waves
+│   ├── texture.cyr     AmbientTexture (6 environments)
+│   ├── impact.cyr      Impact (10 materials, modal synthesis)
+│   ├── precipitation.cyr Hail, Snow, SurfaceRain
+│   ├── underwater.cyr  Submerged ambience
+│   └── surf.cyr        Breaking wave cycle
 │
 ├── Contact & surface
-│   ├── footstep.rs     Terrain-aware step sequences
-│   ├── friction.rs     Stick-slip (scrape, slide, grind)
-│   ├── creak.rs        Low-freq stick-slip (door, hinge, rope)
-│   ├── rolling.rs      Ball, wheel, boulder, barrel
-│   └── foliage.rs      Leaf rustle, grass swish, branch snap
+│   ├── footstep.cyr    Terrain-aware step sequences
+│   ├── friction.cyr    Stick-slip (scrape, slide, grind)
+│   ├── creak.cyr       Low-freq stick-slip (door, hinge, rope)
+│   ├── rolling.cyr     Ball, wheel, boulder, barrel
+│   └── foliage.cyr     Leaf rustle, grass swish, branch snap
 │
 ├── Aerodynamic
-│   ├── whoosh.rs       Object pass-by / swing
-│   ├── whistle.rs      Wind through openings
-│   └── cloth.rs        Fabric flapping
+│   ├── whoosh.cyr      Object pass-by / swing
+│   ├── whistle.cyr     Wind through openings
+│   └── cloth.cyr       Fabric flapping
 │
 ├── Creature & fluid
-│   ├── insect.rs       Wing buzz, chirp, cicada + swarm
-│   ├── wingflap.rs     Bird wing displacement
-│   └── bubble.rs       Minnaert resonance bubbles
+│   ├── insect.cyr      Wing buzz, chirp, cicada + swarm
+│   ├── wingflap.cyr    Bird wing displacement
+│   └── bubble.cyr      Minnaert resonance bubbles
 │
 ├── Engine
-│   ├── modal.rs        Modal bank (SoA resonator array)
-│   ├── voice.rs        VoicePool (priority polyphony)
-│   ├── lod.rs          Quality scaling
-│   ├── bridge.rs       Science crate parameter conversion
-│   └── builder.rs      Ergonomic constructors
+│   ├── modal.cyr       Modal bank (SoA resonator array)
+│   ├── voice.cyr       VoicePool (priority polyphony)
+│   ├── lod.cyr         Quality scaling
+│   ├── bridge.cyr      Science crate parameter conversion
+│   └── builder.cyr     Ergonomic constructors
 │
 ├── Shared types
-│   ├── contact.rs      Terrain, MovementType, FrictionType, etc.
-│   ├── aero.rs         WhooshType, WhistleSource, ClothType
-│   ├── creature.rs     InsectType, BubbleType
-│   ├── material.rs     Material, MaterialProperties, mode configs
-│   └── error.rs        GarjanError
+│   ├── contact.cyr     Terrain, MovementType, FrictionType, etc.
+│   ├── aero.cyr        WhooshType, WhistleSource, ClothType
+│   ├── creature.cyr    InsectType, BubbleType
+│   ├── material.cyr    Material, MaterialProperties, mode configs
+│   └── error.cyr       GarjanError
 │
 └── Internal
-    ├── dsp.rs          DcBlocker, validate_sample_rate/duration
-    ├── math.rs         no_std compat (sin, cos, exp, sqrt, powf)
-    └── rng.rs          PCG32 PRNG with Poisson distribution
+    ├── dsp.cyr         DcBlocker, validate_sample_rate/duration
+    ├── math.rs        no_std compat (sin, cos, exp, sqrt, powf)
+    └── rng.cyr         PCG32 PRNG with Poisson distribution
 ```
 
 ## Synthesizer Pattern
 
-Every synthesizer follows the same pattern:
+Every synthesizer follows the same shape. Cyrius has no `Result`, no generics
+and no module system, so the Rust pattern maps like this:
 
-```rust
-pub struct MySynth {
-    sample_rate: f32,
-    rng: Rng,
-    dc_blocker: DcBlocker,
-    sample_position: usize,
-    // naad types behind cfg gate
-    #[cfg(feature = "naad-backend")]
-    filter: naad::filter::BiquadFilter,
+```cyrius
+#derive(accessors)
+struct MySynth { sample_rate; rng; dc_blocker; sample_position; filter; }
+
+# Constructor: validates the enum id AND the sample rate, then returns a heap
+# pointer or a NEGATIVE GARJAN_ERR_* code. Never a Result.
+#must_use
+fn my_synth_new(my_type, sample_rate) {
+    if (garjan_enum_invalid(my_type, MY_TYPE_LAST) == 1) { return GARJAN_ERR_INVALID_PARAMETER; }
+    var e = garjan_validate_sample_rate(sample_rate);
+    if (garjan_is_err(e) == 1) { return e; }
+    var self = garjan_alloc(sizeof(MySynth));     # never raw alloc
+    if (garjan_is_err(self) == 1) { return self; }
+    # ...
+    var b = my_synth_build_naad(self);
+    if (garjan_is_err(b) == 1) { return b; }
+    return self;
 }
 
-impl MySynth {
-    // Constructor: validates sample_rate, returns Result
-    pub fn new(..., sample_rate: f32) -> Result<Self> { ... }
-
-    // One-shot: allocates output, calls process_block
-    pub fn synthesize(&mut self, duration: f32) -> Result<Vec<f32>> { ... }
-
-    // Streaming: writes into caller's buffer, zero allocation
-    pub fn process_block(&mut self, output: &mut [f32]) { ... }
+# One-shot: allocates the output vec, then calls process_block.
+#must_use
+fn my_synth_synthesize(self, duration) {
+    var e = garjan_validate_duration(duration);
+    if (garjan_is_err(e) == 1) { return e; }
+    var num = f64_to(f64_mul(MySynth_sample_rate(self), duration));
+    var ga_ncheck = garjan_validate_sample_count(num);
+    if (garjan_is_err(ga_ncheck) == 1) { return ga_ncheck; }
+    # ...
 }
+
+# Streaming: writes into the caller's vec. Must allocate nothing.
+fn my_synth_process_block(self, output) { ... }
 ```
 
-## Dual Code Paths
+## Things the port does differently from the Rust crate
 
-All DSP operations have two implementations:
+| Rust | Cyrius port |
+|---|---|
+| `Result<T, GarjanError>` | pointer or negative `GARJAN_ERR_*`; check `garjan_is_err` |
+| `enum Material` | `MATERIAL_*` integer constants, validated at the boundary |
+| `#[cfg(feature = "naad-backend")]` dual paths | naad always on; the fallback path was dropped ([ADR-0002](../adr/0002-dual-code-paths.md)) |
+| `#[derive(Serialize)]` over live DSP state | scalars only; naad components rebuilt ([note 001](001-deserialize-does-not-restore-dsp-state.md)) |
+| `tracing` behind a feature | sakshi, always compiled, gated at runtime |
+| f32 throughout | f64 throughout ([note 002](002-where-the-transcendentals-come-from.md)) |
+| module system, `lib.rs`, prelude | one flat namespace; `[lib] modules` in `cyrius.cyml` sets the order |
 
-- **`naad-backend` (default)**: Uses naad's filters (BiquadFilter, StateVariableFilter), noise generators (White, Pink, Brown), and LFOs for proper spectral shaping.
-- **Fallback**: Manual DSP using the internal Rng and math module. Lower quality but works in `no_std` environments.
-
-Both paths produce finite, deterministic output from the same seeded PRNG.
-
-## Data Flow
-
-```
-Constructor params ──> Synthesizer struct (stores state)
-                           │
-Game loop:                 │
-  set_velocity(0.5) ──────┤  (real-time parameter updates)
-  set_intensity(0.8) ─────┤
-                           │
-  process_block(&mut buf) ─┤──> Noise/oscillator generation
-                           │──> Filter chain (naad or fallback)
-                           │──> Modal bank (if applicable)
-                           │──> DC blocker
-                           └──> Output samples in buf
-```
+Because the port is f64 and the oracle was f32, **parity with `rust-old` is
+structural — same formulas, constants and control flow — never sample-for-sample
+equality.** See note 002.

@@ -661,6 +661,63 @@ fn main() {
     assert(garjan_is_err(garjan_validate_sample_count(GARJAN_MAX_SAMPLES + 1)) == 1, "one over the cap rejected");
 
 
+    # =====================================================================
+    # Hot-path allocation contract. README states "process_block never
+    # allocates"; this pins it. The arena never frees, so anything allocated
+    # per block accumulates for the life of the process.
+    # =====================================================================
+    test_group("process_block does not allocate");
+    var nb = mkbuf(1024);
+    var na_fire = fire_new(F64_HALF, SR);
+    fire_process_block(na_fire, nb);
+    var na0 = alloc_used();
+    var na_i = 0;
+    while (na_i < 20) { fire_process_block(na_fire, nb); na_i = na_i + 1; }
+    assert_eq(alloc_used() - na0, 0, "fire allocates nothing per block");
+
+    var na_tx = texture_new(TEXTURE_TYPE_FOREST, F64_HALF, SR);
+    texture_process_block(na_tx, nb);
+    na0 = alloc_used();
+    na_i = 0;
+    while (na_i < 20) { texture_process_block(na_tx, nb); na_i = na_i + 1; }
+    assert_eq(alloc_used() - na0, 0, "texture allocates nothing per block");
+
+    var na_ins = insect_new_swarm(INSECT_CICADA_DRONE, 4, SR);
+    insect_set_intensity(na_ins, F64_ONE);
+    insect_process_block(na_ins, nb);
+    na0 = alloc_used();
+    na_i = 0;
+    while (na_i < 20) { insect_process_block(na_ins, nb); na_i = na_i + 1; }
+    assert_eq(alloc_used() - na0, 0, "insect allocates nothing per block");
+
+    var na_sf = surf_new(SURF_MODERATE, SR);
+    surf_process_block(na_sf, nb);
+    na0 = alloc_used();
+    na_i = 0;
+    while (na_i < 20) { surf_process_block(na_sf, nb); na_i = na_i + 1; }
+    assert_eq(alloc_used() - na0, 0, "surf allocates nothing per block");
+
+    # KNOWN EXCEPTION -- whistle. naad's filter_svf_process_sample returns an
+    # SvfOutput STRUCT (4 f64) and allocates one per sample; naad exposes a
+    # non-allocating `_lowpass` variant but no `_bandpass`, which is what
+    # whistle needs. 32 bytes/sample is 1.41 MB/s, 5.08 GB/hour -- it exhausts
+    # ALLOC_MAX (2 GiB) in about 25 minutes of continuous streaming.
+    #
+    # Bounded here so it cannot get WORSE. When naad gains
+    # filter_svf_process_sample_bandpass this should become 0 and the assert
+    # below should be tightened to match the others.
+    test_group("whistle: known per-sample allocation (blocked on naad)");
+    var na_wi = whistle_new(WHISTLE_PIPE, SR);
+    whistle_set_wind_speed(na_wi, f64_from(15));
+    whistle_process_block(na_wi, nb);
+    na0 = alloc_used();
+    na_i = 0;
+    while (na_i < 20) { whistle_process_block(na_wi, nb); na_i = na_i + 1; }
+    var na_wd = alloc_used() - na0;
+    assert(na_wd > 0, "whistle still allocates (documented naad gap)");
+    assert(na_wd <= 20 * 1024 * 32, "whistle allocation has not grown beyond 32 B/sample");
+
+
     return assert_summary();
 }
 
