@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.5.2] - Unblocked by cyrius 6.6.3
+
+Toolchain-pin release. `cyrius` 6.6.2 -> **6.6.3**; no source change.
+
+6.6.2 could not compile this project. `#inline` became a real directive at cyrius
+v6.5.63, which taught the compiler's PASS 2 to arm the directive — but PASS 1, the
+declaration-collection scan, was never taught to CONSUME the token. An unconsumed
+directive there falls through to the catchall and **terminates the scan**, so every
+declaration after the first `#inline` went unregistered and the next `#derive`d
+struct reached the parser as an unknown top-level token. The error named the struct,
+which was innocent, hundreds of lines from the real trigger.
+
+cyrius 6.6.3 closes both halves in all seven per-target compiler forks. Re-vendored
+and rebuilt against it; tests green.
+
 ## [2.5.1]
 
 Full audit sweep of everything added since 2.0.2. **Three defects fixed, one

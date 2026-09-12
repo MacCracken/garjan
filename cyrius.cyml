@@ -5,7 +5,7 @@ description = "garjan — environmental & nature sound synthesis (thunder, rain,
 license = "GPL-3.0-only"
 repository = "https://github.com/MacCracken/garjan"
 language = "cyrius"
-cyrius = "6.5.36"
+cyrius = "6.6.3"
 
 [build]
 entry = "src/main.cyr"
