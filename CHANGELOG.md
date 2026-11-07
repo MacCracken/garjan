@@ -5,6 +5,58 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.0] - Onto the cyrius 6.7.x language minor
+
+Toolchain and dependency release. `cyrius` 6.6.20 -> **6.7.9**, `naad` 2.2.5 -> **2.3.0**,
+`hisab` 3.3.7 -> **3.4.0**, `goonj` 2.0.6 -> **2.1.0**, `sakshi` 2.5.7 -> **2.5.8**, with
+bayan 1.5.13 and ganita 1.2.15 from the snapshot. This is the matched set for 6.7.9: naad
+2.3.0, hisab 3.4.0 and goonj 2.1.0 pin it exactly, sakshi 2.5.8 is the copy 6.7.9 folds, and
+the next tag of each dependency needs 6.7.18. **No garjan source or test changes, and no
+sample moves.** It is a minor because the floor moves for consumers who adopt this dep set.
+
+### Changed
+
+- ⚠ **Adopting this dep set needs cyrius 6.7.2 or later.** sakshi 2.5.8 declares its syscall
+  numbers `const`, which arrives at 6.7.2, and goonj pulls sakshi in. Measured with a
+  consumer of this bundle on these tags: 6.7.2 and 6.7.9 build and run, 6.7.1 and 6.6.20
+  fail at compile time. The failure is loud, not silent.
+- **A consumer on older tags is unaffected.** `dist/garjan.cyr` differs from 2.5.3 only in
+  its version line, and it does not carry the dependencies. It builds under dhvani's cyrius
+  6.6.10 with dhvani's own naad, hisab, goonj and sakshi tags, with no undefined function,
+  reachable or not, and all 21 synths round-trip through JSON there.
+- `lib/` and `cyrius.lock` are regenerated. `lib/boxed.cyr` and `lib/tagged.cyr` are refreshed
+  by hand from the snapshot again: nothing requires them, so `cyrius deps` left them at
+  their 6.6.20 bytes, and both `--verify` and `--locked` pass over that.
+- hisab's ganita demand falls from 20 symbols to 18, and the smoke binary grows from 2.85
+  to 3.19 MB with the dependency bundles.
+
+### Verified
+
+- **Audio output is bit-identical to 2.5.3.** 21 synths and 258,048 samples over three
+  blocks, compared raw, show no difference, and every `scripts/audio-hash.cyr` hash matches.
+  The same comparison moved 71,426 samples at the last bump, so it can see a change.
+- **Hostile sweep, 6.6.20 against 6.7.9.** 4,628 cases, each in its own process, change
+  no outcome, with no crash or hang.
+- **`cyrius fuzz` passes all 19,603 documents, and the harness still fails when it should.**
+  Against an unmutated control on 6.7.9, the same seven mutants as 2.5.3 are each caught.
+- **The language changes do not reach garjan.** `src/`, `tests/`, `scripts/` and the examples
+  have no lone `!`, which was a no-op until 6.7.3 and so would have flipped, no `~`, no unary
+  `-`, and no name 6.7.x reserves. 6.7.7's arity check on forward calls finds nothing.
+- No arity change across the 49 library fns garjan calls, none of them is gone, and naad's
+  filter and noise enums are unchanged. The collision audit is zero across 424 symbols
+  and all 37 vendored files. Trig and `exp` accuracy against libm is unchanged.
+- `lib/`: 34 of 37 files byte-identical to the 6.7.9 snapshot, the other three byte-identical
+  to their tags' `dist/`. `cyrius deps --verify` passes all 37.
+- `cyrius audit` exits 0, the build has no warnings, and all 33 suites pass, 825 assertions.
+- Benchmarks are flat: median -1.2% across the 26 ops over three interleaved pairs, with
+  ranges overlapping on 23. The machine was at a load average near 25, so
+  [`BENCHMARKS.md`](BENCHMARKS.md) keeps 6.6.20's figures until a quiet run replaces them.
+
+### Known issues
+
+Still open from 2.5.3 and recorded in [`state.md`](docs/development/state.md):
+`precipitation_new` and `precipitation_from_json_str` bound `surface` with the wrong enum.
+
 ## [2.5.3] - cyrius 6.6.20, and the buffer a saturating `f64_to` stopped bounding
 
 Toolchain and dependency release, plus the one regression that move exposed. `cyrius`

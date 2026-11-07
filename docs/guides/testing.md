@@ -8,7 +8,7 @@ garjan is a Cyrius project. There is no cargo — `cyrius test` auto-discovers
 ```sh
 cyrius test                      # all 33 suites
 cyrius test tests/fire.tcyr      # one suite
-cyrius fuzz                      # tests/garjan.fcyr, 13 to 31 s
+cyrius fuzz                      # tests/garjan.fcyr, under a minute
 cyrius bench tests/garjan.bcyr   # 26 benchmarks
 cyrius audit                     # fmt / lint / docs / tests / bench
 ```

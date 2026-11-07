@@ -50,6 +50,11 @@ noise.
 > table is the machine, not the toolchain, so compare only same-machine runs.
 > `surf` runs a 2 s buffer, so its factor is 2000 / time; the table used to divide
 > 1000 by it, which understated the row by half.
+>
+> **Moving from 6.6.20 to 6.7.9 was flat as well**: median -1.2% across the 26 ops over
+> three interleaved pairs, with ranges overlapping on 23 of them. That machine sat at a
+> load average near 25, about double the times above, so this table keeps 6.6.20's
+> figures until a quiet run can replace them.
 
 > **Corrected in 2.2.0.** The `surf` and `underwater` rows previously measured
 > the wrong configuration. `surf_new` and `underwater_new` take **enum ids**

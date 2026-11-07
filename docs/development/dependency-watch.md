@@ -36,7 +36,7 @@ Two consequences drive every rule below:
    done
    ```
 
-   Expected: `0` for every row. It was 0 at 2.5.3 across garjan's 424 symbols.
+   Expected: `0` for every row. It was 0 at 2.6.0 across garjan's 424 symbols.
 
 ## naad
 
@@ -84,12 +84,16 @@ gate at runtime with `sakshi_set_level`.
 **Note:** as in the Rust era, garjan emits events but installs no subscriber —
 that stays the consuming application's job.
 
+**Take the tag hisab declares, not the newest.** At 6.7.9 that is 2.5.8, which is
+also the copy the toolchain folds. 2.5.9 and 2.5.10 pin 6.7.9 too, but hisab found
+2.5.10 warns on every compile that `lib/` shadows the toolchain's copy.
+
 ## Cyrius toolchain + vendored stdlib
 
-**Status:** pinned to **6.6.20**
-([tag `6.6.20`](https://github.com/MacCracken/cyrius/releases/tag/6.6.20),
-2026-10-07), the last 6.6.x. naad 2.2.5, hisab 3.3.7 and goonj 2.0.6 pin it
-exactly; their next tags need 6.7.x, so the next move takes all of them together.
+**Status:** pinned to **6.7.9**
+([tag `6.7.9`](https://github.com/MacCracken/cyrius/releases/tag/6.7.9),
+2026-10-11). naad 2.3.0, hisab 3.4.0 and goonj 2.1.0 pin it exactly; their next
+tags need 6.7.18, so the next move takes all of them together.
 The pin tracks published releases only; never pin to
 `main` or an unreleased tag, because CI installs the pin through the canonical
 upstream installer, which resolves release artifacts
@@ -132,14 +136,24 @@ build here proves nothing about an older pin. The deprecation warning on
 That is why `garjan_json_get` exists. Before replacing a stdlib call, check that the
 replacement exists in the oldest consumer's `~/.cyrius/versions/<pin>/lib/`.
 
+The same goes for syntax. `src/` must stay off 6.7.x features until dhvani moves:
+`const` and `do` stop its 6.6.10 build, but a `!` is worse, because before 6.7.3 it
+compiled as a silent no-op.
+
+**Upgrade gotcha — a consumer's floor can move with no garjan change.** naad 2.3.0,
+goonj 2.1.0 and sakshi 2.5.8 need cyrius 6.7.2 or later, because sakshi declares its
+syscall numbers `const`. The bundle `dist/garjan.cyr` does not carry them, so a
+consumer on older tags is unaffected, and one that adopts this dep set gets a loud
+compile error below 6.7.2. Measure the floor at each bump.
+
 **Upgrade gotcha — `f64_le` / `f64_ge` left `lib/` at 6.6.13.** They are compiler
 builtins now, and `f64_fmod` is gone from `lib/` too. So a diff of `lib/` alone reports
 them as removed; compile a call before treating that as a break.
 
 **Upgrade gotcha — `cyrius deps` only re-vendors what something still requires.** A
 file that lost its last requirer stays in `lib/` at its old version, and the lock
-keeps its old hash. After a bump, compare `lib/` against the snapshot in
-`~/.cyrius/versions/<pin>/lib/` instead of trusting `git status`.
+keeps its old hash. `cyrius deps --verify` and `--locked` both pass over it. After a
+bump, compare `lib/` against the snapshot in `~/.cyrius/versions/<pin>/lib/`.
 
 **Upgrade gotcha — 6.6.20 fails closed on stale lock rows.** Delete `cyrius.lock`
 and re-run `cyrius deps` rather than editing it.

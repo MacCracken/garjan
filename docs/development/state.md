@@ -5,7 +5,7 @@
 
 ## Version
 
-**2.5.3** (2026-11-07). Per-release detail is in the
+**2.6.0** (2026-11-07). Per-release detail is in the
 [CHANGELOG](../../CHANGELOG.md); this file is current state only.
 
 The 2.x line so far: the Rust→Cyrius port (2.0.0), a toolchain and dependency
@@ -13,12 +13,13 @@ refresh (2.0.1), a P-1 security audit and its repairs (2.0.2-2.0.4), hot-path
 optimization (2.0.5, 2.3.0), parity completion — integration suite, benchmarks,
 examples (2.1.0) — boundary validation (2.2.0, 2.4.0), serde live-state parity
 (2.5.0, the last outstanding divergence from the Rust oracle), a second full
-audit sweep (2.5.1), and toolchain moves to cyrius 6.6.3 (2.5.2) and 6.6.20 (2.5.3).
+audit sweep (2.5.1), and toolchain moves to cyrius 6.6.3 (2.5.2), 6.6.20 (2.5.3) and
+6.7.9 (2.6.0).
 
 ## Toolchain
 
-- **Cyrius pin**: `6.6.20` (in `cyrius.cyml [package].cyrius`), the last 6.6.x
-  release. The next tag of naad, hisab and goonj each needs 6.7.x.
+- **Cyrius pin**: `6.7.9` (in `cyrius.cyml [package].cyrius`). The next tag of naad,
+  hisab and goonj each needs 6.7.18.
 
 ## Source
 
@@ -42,8 +43,8 @@ audit sweep (2.5.1), and toolchain moves to cyrius 6.6.3 (2.5.2) and 6.6.20 (2.5
   `dist/garjan.cyr` as untrusted, as it did on 6.6.3), `cyrius distlib --check` in
   sync, 0 lines > 120 chars in `src/` or `tests/`.
 - **Fuzz**: `tests/garjan.fcyr` drives **19,603 hostile documents** through all 22
-  `*_from_json_str` entry points in 13 to 31 s, each in a forked child with a time and
-  memory limit. CI runs it, and releases gate on CI. It covers JSON only: constructors
+  `*_from_json_str` entry points in under a minute (13 s quiet on 6.6.20, 45 s on 6.7.9
+  at a load average near 25), each in a forked child with a time and memory limit. CI runs it, and releases gate on CI. It covers JSON only: constructors
   and setters are still swept by hand, as
   [`dependency-watch.md`](dependency-watch.md) describes.
 - ⚠ **`surface` is bounded by the wrong enum.** `precipitation_new` and
@@ -73,14 +74,14 @@ Declared in `cyrius.cyml`:
 
 - **stdlib** — syscalls, string, alloc, str, fmt, vec, io, args, assert, math,
   ganita, bayan, bench
-- **naad** 2.2.5 (noise/filter/LFO via the dist bundle)
-- **hisab** 3.3.7, **goonj** 2.0.6 (naad's transitive deps, resolved here)
-- **sakshi** 2.5.7 (logging — `src/logging.cyr`)
+- **naad** 2.3.0 (noise/filter/LFO via the dist bundle)
+- **hisab** 3.4.0, **goonj** 2.1.0 (naad's transitive deps, resolved here)
+- **sakshi** 2.5.8 (logging — `src/logging.cyr`)
 
 These tags are what the dependencies themselves pin, so the flattened graph is
-consistent: naad 2.2.5 → hisab 3.3.7 + goonj 2.0.6; goonj 2.0.6 → hisab 3.3.7;
-hisab 3.3.7 → sakshi 2.5.7, which is also the sakshi folded into cyrius 6.6.20.
-`lib/` is 34 of 37 files byte-identical to the 6.6.20 snapshot, plus the naad,
+consistent: naad 2.3.0 → hisab 3.4.0 + goonj 2.1.0; goonj 2.1.0 → hisab 3.4.0;
+hisab 3.4.0 → sakshi 2.5.8, which is also the sakshi folded into cyrius 6.7.9.
+`lib/` is 34 of 37 files byte-identical to the 6.7.9 snapshot, plus the naad,
 hisab and goonj bundles byte-identical to their tags. `lib/boxed.cyr`,
 `lib/callback.cyr` and `lib/tagged.cyr` are vendored but no longer referenced.
 Symbol-collision audit: garjan's 424 top-level `fn`/`var` symbols intersect every
@@ -89,9 +90,11 @@ diagnostic for a duplicate top-level `var`.
 
 ## Consumers
 
-- **dhvani** pins garjan 2.5.2 on cyrius 6.6.10. The 2.5.3 bundle builds and
+- **dhvani** pins garjan 2.5.2 on cyrius 6.6.10. The 2.6.0 bundle builds and
   round-trips all 21 synths under that toolchain and dhvani's own naad / hisab /
-  goonj / sakshi tags. It is why `garjan_json_get` exists: see
+  goonj / sakshi tags, so it can take 2.6.0 without moving anything else. Adopting
+  garjan's own dep set would need cyrius 6.7.2. dhvani's pin is why `garjan_json_get`
+  exists and why `src/` stays off 6.7.x syntax: see
   [`dependency-watch.md`](dependency-watch.md).
 
 Expected: kiran, joshua, and any AGNOS component needing environmental audio.

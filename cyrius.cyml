@@ -5,7 +5,7 @@ description = "garjan — environmental & nature sound synthesis (thunder, rain,
 license = "GPL-3.0-only"
 repository = "https://github.com/MacCracken/garjan"
 language = "cyrius"
-cyrius = "6.6.20"
+cyrius = "6.7.9"
 
 [build]
 entry = "src/main.cyr"
@@ -58,7 +58,7 @@ modules = [
 
 # stdlib: alloc/vec/str for heap+buffers; math (clamp/min/max/lerp/F64_*) +
 # ganita for f64_pow (garjan's only direct ganita call) AND, more importantly,
-# for the 20 symbols hisab needs (ganita_f64_acos/atan2/cosh/hypot/pow/sinh + the
+# for the 18 symbols hisab needs (ganita_f64_acos/atan2/cosh/hypot/pow/sinh + the
 # ganita_mat_* linear-algebra family), goonj's 6 and naad's 3 -- dropping it breaks the deps,
 # not garjan's own code. NOTE sin/cos/exp/sqrt/abs are cycc INTRINSICS, not
 # ganita: verify with `grep -l '^fn f64_sin(' lib/*.cyr` (no match). bayan
@@ -87,21 +87,21 @@ stdlib = [
 # hisab + goonj + sakshi symbols, resolved from THIS manifest below.
 [deps.naad]
 git = "https://github.com/MacCracken/naad.git"
-tag = "2.2.5"
+tag = "2.3.0"
 modules = ["dist/naad.cyr"]
 
 # hisab — math/geometry. Referenced by naad's bundle (HVec3/HComplex/FFT/
 # ganita least-squares). Pinned to the tag naad itself consumes.
 [deps.hisab]
 git = "https://github.com/MacCracken/hisab.git"
-tag = "3.3.7"
+tag = "3.4.0"
 modules = ["dist/hisab.cyr"]
 
 # goonj — acoustics engine. Referenced by naad's acoustics/* modules
 # (present in the monolithic bundle). Pulls sakshi + hisab transitively.
 [deps.goonj]
 git = "https://github.com/MacCracken/goonj.git"
-tag = "2.0.6"
+tag = "2.1.0"
 modules = ["dist/goonj.cyr"]
 
 # sakshi — structured logging. garjan calls it directly (src/logging.cyr →
@@ -109,5 +109,5 @@ modules = ["dist/goonj.cyr"]
 # crate gated behind `tracing`. Also arrives transitively via hisab/goonj.
 [deps.sakshi]
 git = "https://github.com/MacCracken/sakshi.git"
-tag = "2.5.7"
+tag = "2.5.8"
 modules = ["dist/sakshi.cyr"]
