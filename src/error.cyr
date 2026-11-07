@@ -104,3 +104,12 @@ fn garjan_is_finite(x) {
 fn garjan_frac(num, den) {
     return f64_div(f64_from(num), f64_from(den));
 }
+
+# Look up a member of a JSON object by literal key: the value, or 0 when `v` is
+# null, not an object, or has no such member. Goes through the Str lookup because
+# dist/garjan.cyr compiles under the CONSUMER's toolchain: the bare
+# bayan_json_v_obj_get warns from cyrius 6.6.13, and bayan_json_v_obj_get_by_cstr
+# does not exist before it. Move to _by_cstr once every consumer pin reaches 6.6.13.
+fn garjan_json_get(v, key) {
+    return bayan_json_v_obj_get_by_str(v, str_from(key));
+}

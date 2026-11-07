@@ -9,8 +9,13 @@
 #
 # Requires the sakshi bundle (auto-prepended via cyrius.cyml) + strlen (stdlib).
 
+# Logs a NUL-terminated cstring at fatal level through sakshi. Returns 0.
 fn garjan_log_fatal(msg) { sakshi_fatal(msg, strlen(msg)); return 0; }
+# Logs a NUL-terminated cstring at error level through sakshi. Returns 0.
 fn garjan_log_error(msg) { sakshi_error(msg, strlen(msg)); return 0; }
+# Logs a NUL-terminated cstring at warn level through sakshi. Returns 0.
 fn garjan_log_warn(msg)  { sakshi_warn(msg, strlen(msg));  return 0; }
+# Logs a NUL-terminated cstring at info level through sakshi. Returns 0.
 fn garjan_log_info(msg)  { sakshi_info(msg, strlen(msg));  return 0; }
+# Logs a NUL-terminated cstring at debug level through sakshi. Returns 0.
 fn garjan_log_debug(msg) { sakshi_debug(msg, strlen(msg)); return 0; }

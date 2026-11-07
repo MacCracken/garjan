@@ -15,6 +15,8 @@ var WHOOSH_THROW      = 3;
 #derive(accessors)
 struct WhooshConfig { duration; brightness; low_freq; }
 
+# Looks up the preset for a WHOOSH_* id. Returns a new WhooshConfig,
+# GARJAN_ERR_INVALID_PARAMETER for an out-of-range id, or GARJAN_ERR_ALLOCATION.
 #must_use
 fn aero_whoosh_config(ty) {
     if (garjan_enum_invalid(ty, WHOOSH_THROW) == 1) { return GARJAN_ERR_INVALID_PARAMETER; }
@@ -51,6 +53,8 @@ var WHISTLE_WIRE   = 3;
 #derive(accessors)
 struct WhistleConfig { base_freq; bandwidth; noise_mix; }
 
+# Looks up the preset for a WHISTLE_* id. Returns a new WhistleConfig,
+# GARJAN_ERR_INVALID_PARAMETER for an out-of-range id, or GARJAN_ERR_ALLOCATION.
 #must_use
 fn aero_whistle_config(ty) {
     if (garjan_enum_invalid(ty, WHISTLE_WIRE) == 1) { return GARJAN_ERR_INVALID_PARAMETER; }
@@ -87,6 +91,8 @@ var CLOTH_TARP = 3;
 #derive(accessors)
 struct ClothConfig { flap_rate; amplitude; filter_freq; use_modal; }
 
+# Looks up the preset for a CLOTH_* id. Returns a new ClothConfig,
+# GARJAN_ERR_INVALID_PARAMETER for an out-of-range id, or GARJAN_ERR_ALLOCATION.
 #must_use
 fn aero_cloth_config(ty) {
     if (garjan_enum_invalid(ty, CLOTH_TARP) == 1) { return GARJAN_ERR_INVALID_PARAMETER; }

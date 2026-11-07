@@ -11,6 +11,7 @@ include "src/aero.cyr"
 include "src/creature.cyr"
 include "src/footstep.cyr"
 
+# Runs the parity tests for src/footstep.cyr. Returns the failure count, used as the exit code.
 fn main() {
     alloc_init();
 
@@ -69,7 +70,8 @@ fn main() {
     var g2 = footstep_from_json_str(jstr);
     var sb2 = str_builder_new();
     footstep_to_json(g2, sb2);
-    assert(memeq(jstr, str_data(str_builder_build(sb2)), strlen(jstr)) == 1, "footstep params json roundtrip idempotent");
+    assert(memeq(jstr, str_data(str_builder_build(sb2)), strlen(jstr)) == 1,
+      "footstep params json roundtrip idempotent");
     # restored synth resumes the SAME main rng sequence
     assert_eq(rng_next_u32(Footstep_rng(g)), rng_next_u32(Footstep_rng(g2)), "restored footstep resumes rng");
 

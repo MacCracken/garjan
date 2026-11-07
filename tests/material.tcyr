@@ -6,15 +6,20 @@ include "src/rng.cyr"
 include "src/material.cyr"
 include "src/modal.cyr"
 
+# Runs the parity tests for src/material.cyr. Returns the failure count, used as the exit code.
 fn main() {
     alloc_init();
 
     test_group("properties");
     var m = material_properties(MATERIAL_METAL);
-    assert(f64_lt(f64_abs(f64_sub(MaterialProperties_resonance(m), f64_from(2500))), GARJAN_EPSILON) == 1, "metal resonance 2500");
-    assert(f64_lt(f64_abs(f64_sub(MaterialProperties_brightness(m), f64_div(f64_from(9), f64_from(10)))), GARJAN_EPSILON) == 1, "metal brightness 0.9");
+    assert(f64_lt(f64_abs(f64_sub(MaterialProperties_resonance(m), f64_from(2500))), GARJAN_EPSILON) == 1,
+      "metal resonance 2500");
+    assert(f64_lt(f64_abs(f64_sub(MaterialProperties_brightness(m), f64_div(f64_from(9), f64_from(10)))),
+        GARJAN_EPSILON) == 1,
+      "metal brightness 0.9");
     var g = material_properties(MATERIAL_GLASS);
-    assert(f64_lt(f64_abs(f64_sub(MaterialProperties_transient(g), F64_ONE)), GARJAN_EPSILON) == 1, "glass transient 1.0");
+    assert(f64_lt(f64_abs(f64_sub(MaterialProperties_transient(g), F64_ONE)), GARJAN_EPSILON) == 1,
+      "glass transient 1.0");
 
     test_group("mode_config");
     var c = material_mode_config(MATERIAL_METAL);

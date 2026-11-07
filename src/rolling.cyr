@@ -158,7 +158,6 @@ fn rolling_set_velocity(self, velocity) {
 }
 
 # Surface noise: one pink sample through the bandpass surface_filter.
-#inline
 #must_use
 fn rolling_generate_noise(self) {
     var raw = noise_next_sample(Rolling_noise_gen(self));
@@ -279,6 +278,7 @@ fn rolling_to_json(self, sb) {
 #must_use
 fn rolling_from_json_str(json) {
     var p = RollingParams_from_json_str(json);
+    if (p == 0) { return GARJAN_ERR_INVALID_PARAMETER; }   # not a JSON object
     # Deserialize must validate what the constructor validates. Before 2.5.1
     # this path relied on a downstream naad component rejecting a bad
     # sample_rate -- which bubble's build_naad cannot do, since it only
@@ -321,9 +321,9 @@ fn rolling_from_json_str(json) {
     # returns 0 and the synth resumes without it, exactly as it used to.
     var dsp = garjan_dsp_node(json);
     if (dsp != 0) {
-        garjan_state_modal_load(Rolling_modal_bank(self), bayan_json_v_obj_get(dsp, "mb"));
-        garjan_state_biquad_load(Rolling_surface_filter(self), bayan_json_v_obj_get(dsp, "sf"));
-        garjan_state_noise_load(Rolling_noise_gen(self), bayan_json_v_obj_get(dsp, "ng"));
+        garjan_state_modal_load(Rolling_modal_bank(self), garjan_json_get(dsp, "mb"));
+        garjan_state_biquad_load(Rolling_surface_filter(self), garjan_json_get(dsp, "sf"));
+        garjan_state_noise_load(Rolling_noise_gen(self), garjan_json_get(dsp, "ng"));
     }
     return self;
 }

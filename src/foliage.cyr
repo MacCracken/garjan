@@ -365,6 +365,7 @@ fn foliage_to_json(self, sb) {
 #must_use
 fn foliage_from_json_str(json) {
     var p = FoliageParams_from_json_str(json);
+    if (p == 0) { return GARJAN_ERR_INVALID_PARAMETER; }   # not a JSON object
     # Deserialize must validate what the constructor validates. Before 2.5.1
     # this path relied on a downstream naad component rejecting a bad
     # sample_rate -- which bubble's build_naad cannot do, since it only
@@ -418,11 +419,11 @@ fn foliage_from_json_str(json) {
     # returns 0 and the synth resumes without it, exactly as it used to.
     var dsp = garjan_dsp_node(json);
     if (dsp != 0) {
-        garjan_state_exciter_load(Foliage_snap_exciter(self), bayan_json_v_obj_get(dsp, "se"));
-        garjan_state_modal_load(Foliage_snap_modal(self), bayan_json_v_obj_get(dsp, "sm"));
-        garjan_state_biquad_load(Foliage_rustle_filter(self), bayan_json_v_obj_get(dsp, "rf"));
-        garjan_state_noise_load(Foliage_rustle_noise(self), bayan_json_v_obj_get(dsp, "rn"));
-        garjan_state_lfo_load(Foliage_wind_lfo(self), bayan_json_v_obj_get(dsp, "wl"));
+        garjan_state_exciter_load(Foliage_snap_exciter(self), garjan_json_get(dsp, "se"));
+        garjan_state_modal_load(Foliage_snap_modal(self), garjan_json_get(dsp, "sm"));
+        garjan_state_biquad_load(Foliage_rustle_filter(self), garjan_json_get(dsp, "rf"));
+        garjan_state_noise_load(Foliage_rustle_noise(self), garjan_json_get(dsp, "rn"));
+        garjan_state_lfo_load(Foliage_wind_lfo(self), garjan_json_get(dsp, "wl"));
     }
     return self;
 }

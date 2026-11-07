@@ -52,6 +52,45 @@ var NAN_BITS = 0x7FF8000000000000;
 
 # ---- helpers -------------------------------------------------------------
 
+# Feeds `doc` to all 22 deserializers. Returns how many refused it.
+fn refused_by(doc) {
+    var n = garjan_is_err(fire_from_json_str(doc));
+    n = n + garjan_is_err(thunder_from_json_str(doc));
+    n = n + garjan_is_err(rain_from_json_str(doc));
+    n = n + garjan_is_err(wind_from_json_str(doc));
+    n = n + garjan_is_err(cloth_from_json_str(doc));
+    n = n + garjan_is_err(surf_from_json_str(doc));
+    n = n + garjan_is_err(texture_from_json_str(doc));
+    n = n + garjan_is_err(rolling_from_json_str(doc));
+    n = n + garjan_is_err(water_from_json_str(doc));
+    n = n + garjan_is_err(whoosh_from_json_str(doc));
+    n = n + garjan_is_err(precipitation_from_json_str(doc));
+    n = n + garjan_is_err(foliage_from_json_str(doc));
+    n = n + garjan_is_err(bubble_from_json_str(doc));
+    n = n + garjan_is_err(friction_from_json_str(doc));
+    n = n + garjan_is_err(footstep_from_json_str(doc));
+    n = n + garjan_is_err(impact_from_json_str(doc));
+    n = n + garjan_is_err(insect_from_json_str(doc));
+    n = n + garjan_is_err(underwater_from_json_str(doc));
+    n = n + garjan_is_err(creak_from_json_str(doc));
+    n = n + garjan_is_err(wingflap_from_json_str(doc));
+    n = n + garjan_is_err(whistle_from_json_str(doc));
+    n = n + garjan_is_err(voice_pool_from_json_str(doc));
+    return n;
+}
+
+# Joins four literal pieces into one NUL-terminated document, so a long JSON string can
+# span source lines and still reach the parser byte for byte.
+fn json_doc(a, b, c, d) {
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, a);
+    str_builder_add_cstr(sb, b);
+    str_builder_add_cstr(sb, c);
+    str_builder_add_cstr(sb, d);
+    return str_data(str_builder_build(sb));
+}
+
+# Returns a new vec of `n` zeroed samples.
 #must_use
 fn mkbuf(n) {
     var v = vec_new();
@@ -116,6 +155,7 @@ fn same_samples(a, b) {
     return 1;
 }
 
+# Runs the cross-module integration suite. Returns the failure count, used as the exit code.
 fn main() {
     alloc_init();
     # Quiet the deliberate bad-input warnings. sakshi emits when
@@ -625,7 +665,8 @@ fn main() {
     assert(garjan_is_err(footstep_new(8, MOVEMENT_WALK, SR)) == 1, "footstep_new rejects terrain 8 (max 7)");
     assert(garjan_is_err(footstep_new(TERRAIN_WOOD, 4, SR)) == 1, "footstep_new rejects movement 4 (max 3)");
     assert(garjan_is_err(rain_new(4, SR)) == 1, "rain_new rejects intensity 4 (max 3)");
-    assert(garjan_is_err(precipitation_new(3, STONE_SMALL, MATERIAL_STONE, SR)) == 1, "precipitation_new rejects precip 3");
+    assert(garjan_is_err(precipitation_new(3, STONE_SMALL, MATERIAL_STONE, SR)) == 1,
+      "precipitation_new rejects precip 3");
     assert(garjan_is_err(voice_pool_new(4, 99)) == 1, "voice_pool_new rejects steal policy 99");
     assert(garjan_is_err(material_properties(99)) == 1, "material_properties rejects 99");
     assert(garjan_is_err(material_mode_config(0 - 1)) == 1, "material_mode_config rejects -1");
@@ -648,7 +689,6 @@ fn main() {
     }
     assert_eq(okm, 10, "all 10 material ids accepted");
 
-
     # =====================================================================
     # Size caps (2.4.0). rust-old/src/dsp.rs validated duration and sample_rate
     # as positive-and-finite ONLY, so 1e8 s passed validation and then sized a
@@ -659,8 +699,10 @@ fn main() {
     assert(garjan_is_err(fire_synthesize(cf, f64_from(100000000))) == 1, "1e8 s duration rejected");
     assert(garjan_is_err(fire_synthesize(cf, f64_from(GARJAN_MAX_DURATION_S + 1))) == 1, "duration above cap rejected");
     assert(garjan_is_err(fire_synthesize(cf, f64_from(GARJAN_MAX_DURATION_S))) == 0, "duration at the cap accepted");
-    assert(garjan_is_err(fire_new(F64_HALF, f64_from(GARJAN_MAX_SAMPLE_RATE_HZ + 1))) == 1, "sample_rate above cap rejected");
-    assert(garjan_is_err(fire_new(F64_HALF, f64_from(GARJAN_MAX_SAMPLE_RATE_HZ))) == 0, "sample_rate at the cap accepted");
+    assert(garjan_is_err(fire_new(F64_HALF, f64_from(GARJAN_MAX_SAMPLE_RATE_HZ + 1))) == 1,
+      "sample_rate above cap rejected");
+    assert(garjan_is_err(fire_new(F64_HALF, f64_from(GARJAN_MAX_SAMPLE_RATE_HZ))) == 0,
+      "sample_rate at the cap accepted");
     assert(garjan_is_err(fire_new(F64_HALF, F64_HALF)) == 1, "sub-1 Hz sample_rate rejected");
     assert(garjan_is_err(fire_new(F64_HALF, f64_from(8000))) == 0, "8 kHz still accepted");
 
@@ -674,7 +716,6 @@ fn main() {
     assert(garjan_is_err(fire_synthesize(chi, f64_from(50))) == 0, "50 s at 768 kHz accepted");
     assert_eq(garjan_validate_sample_count(GARJAN_MAX_SAMPLES), GARJAN_OK, "sample count at cap ok");
     assert(garjan_is_err(garjan_validate_sample_count(GARJAN_MAX_SAMPLES + 1)) == 1, "one over the cap rejected");
-
 
     # =====================================================================
     # Hot-path allocation contract. README states "process_block never
@@ -731,7 +772,6 @@ fn main() {
     var na_wd = alloc_used() - na0;
     assert(na_wd > 0, "whistle still allocates (documented naad gap)");
     assert(na_wd <= 20 * 1024 * 32, "whistle allocation has not grown beyond 32 B/sample");
-
 
     # =====================================================================
     # serde live-state parity (2.5.0). Rust derived Serialize over the naad
@@ -942,7 +982,6 @@ fn main() {
     foliage_process_block(v1, pa); foliage_process_block(v2, sp_pb);
     assert_eq(same_samples(pa, sp_pb), 1, "foliage resumes identically (exciter + snap_modal)");
 
-
     # =====================================================================
     # Deserialize validates what the constructor validates (2.5.1).
     #
@@ -956,24 +995,48 @@ fn main() {
     test_group("from_json rejects what new() rejects");
     # bubble is the case with no validating component downstream
     assert(garjan_is_err(bubble_new(BUBBLE_BOILING, 0)) == 1, "bubble_new rejects sr=0");
-    assert(garjan_is_err(bubble_from_json_str("{\"bubble_type\":0,\"sample_rate\":0.0,\"sample_position\":0,\"intensity\":1.0,\"rng_state\":1,\"rng_inc\":1,\"dcb_x_prev\":0.0,\"dcb_y_prev\":0.0,\"dcb_r\":0.999}")) == 1,
+    assert(garjan_is_err(bubble_from_json_str(json_doc(
+            "{\"bubble_type\":0,\"sample_rate\":0.0,",
+            "\"sample_position\":0,\"intensity\":1.0,",
+            "\"rng_state\":1,\"rng_inc\":1,\"dcb_x_prev\":0.0,",
+            "\"dcb_y_prev\":0.0,\"dcb_r\":0.999}"))) == 1,
       "bubble_from_json rejects sr=0 too");
-    assert(garjan_is_err(bubble_from_json_str("{\"bubble_type\":99,\"sample_rate\":44100.0,\"sample_position\":0,\"intensity\":1.0,\"rng_state\":1,\"rng_inc\":1,\"dcb_x_prev\":0.0,\"dcb_y_prev\":0.0,\"dcb_r\":0.999}")) == 1,
+    assert(garjan_is_err(bubble_from_json_str(json_doc(
+            "{\"bubble_type\":99,\"sample_rate\":44100.0,",
+            "\"sample_position\":0,\"intensity\":1.0,",
+            "\"rng_state\":1,\"rng_inc\":1,\"dcb_x_prev\":0.0,",
+            "\"dcb_y_prev\":0.0,\"dcb_r\":0.999}"))) == 1,
       "bubble_from_json rejects an out-of-range enum id");
-    assert(garjan_is_err(texture_from_json_str("{\"texture_type\":99,\"sample_rate\":44100.0,\"sample_position\":0,\"level\":0.5,\"rng_state\":1,\"rng_inc\":1,\"dcb_x_prev\":0.0,\"dcb_y_prev\":0.0,\"dcb_r\":0.999}")) == 1,
+    assert(garjan_is_err(texture_from_json_str(json_doc(
+            "{\"texture_type\":99,\"sample_rate\":44100.0,",
+            "\"sample_position\":0,\"level\":0.5,",
+            "\"rng_state\":1,\"rng_inc\":1,\"dcb_x_prev\":0.0,",
+            "\"dcb_y_prev\":0.0,\"dcb_r\":0.999}"))) == 1,
       "texture_from_json rejects an out-of-range enum id");
-    assert(garjan_is_err(texture_from_json_str("{\"texture_type\":0,\"sample_rate\":0.0,\"sample_position\":0,\"level\":0.5,\"rng_state\":1,\"rng_inc\":1,\"dcb_x_prev\":0.0,\"dcb_y_prev\":0.0,\"dcb_r\":0.999}")) == 1,
+    assert(garjan_is_err(texture_from_json_str(json_doc(
+            "{\"texture_type\":0,\"sample_rate\":0.0,",
+            "\"sample_position\":0,\"level\":0.5,",
+            "\"rng_state\":1,\"rng_inc\":1,\"dcb_x_prev\":0.0,",
+            "\"dcb_y_prev\":0.0,\"dcb_r\":0.999}"))) == 1,
       "texture_from_json rejects sr=0");
 
     test_group("hostile dsp payloads cannot corrupt a restore");
     # Type confusion and over-length arrays in the 2.5.0 "dsp" member. Each must
     # either be rejected or produce a synth that renders finite audio.
     var v51_hb = mkbuf(128);
-    var v51_h1 = fire_from_json_str("{\"intensity\":0.5,\"crackle_rate\":20.0,\"sample_rate\":44100.0,\"sample_position\":0,\"rng_state\":1,\"rng_inc\":19999,\"dcb_x_prev\":0.0,\"dcb_y_prev\":0.0,\"dcb_r\":0.999,\"dsp\":\"pwn\"}");
+    var v51_h1 = fire_from_json_str(json_doc(
+        "{\"intensity\":0.5,\"crackle_rate\":20.0,",
+        "\"sample_rate\":44100.0,\"sample_position\":0,",
+        "\"rng_state\":1,\"rng_inc\":19999,\"dcb_x_prev\":0.0,",
+        "\"dcb_y_prev\":0.0,\"dcb_r\":0.999,\"dsp\":\"pwn\"}"));
     assert(garjan_is_err(v51_h1) == 0, "dsp as a string still loads");
     fire_process_block(v51_h1, v51_hb);
     assert_eq(all_finite(v51_hb), 1, "...and renders finite");
-    var v51_h2 = fire_from_json_str("{\"intensity\":0.5,\"crackle_rate\":20.0,\"sample_rate\":44100.0,\"sample_position\":0,\"rng_state\":1,\"rng_inc\":19999,\"dcb_x_prev\":0.0,\"dcb_y_prev\":0.0,\"dcb_r\":0.999,\"dsp\":{\"rf\":[\"a\",\"b\"],\"rn\":[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30]}}");
+    var v51_h2 = fire_from_json_str(json_doc(
+        "{\"intensity\":0.5,\"crackle_rate\":20.0,\"sample_rate\":44100.0,",
+        "\"sample_position\":0,\"rng_state\":1,\"rng_inc\":19999,\"dcb_x_prev\":0.0,",
+        "\"dcb_y_prev\":0.0,\"dcb_r\":0.999,\"dsp\":{\"rf\":[\"a\",\"b\"],\"rn\":[1,2,",
+        "3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30]}}"));
     assert(garjan_is_err(v51_h2) == 0, "wrong-typed and over-length dsp arrays still load");
     v51_hb = mkbuf(128);
     fire_process_block(v51_h2, v51_hb);
@@ -988,6 +1051,45 @@ fn main() {
     assert(garjan_is_err(ivout) == 0, "normal velocity synthesis works");
     assert(vec_len(ivout) > 0, "...and produces samples");
 
+    # --- 2.5.3: found by tests/garjan.fcyr ---
+    # The derived readers return 0 for anything but an object, and all 21 synths read a
+    # field through that 0, so these were a SIGSEGV.
+    test_group("a non-object document is refused by every deserializer");
+    assert_eq(refused_by(""), 22, "empty document");
+    assert_eq(refused_by("null"), 22, "null");
+    assert_eq(refused_by("1"), 22, "number");
+    assert_eq(refused_by("true"), 22, "bool");
+    assert_eq(refused_by("\"x\""), 22, "string");
+    assert_eq(refused_by("[]"), 22, "array");
+    assert_eq(refused_by("not json"), 22, "not JSON");
+    assert_eq(refused_by("["), 22, "unterminated array");
+
+    # The derived reader stores a JSON null as NaN, and rng_poisson never returned on NaN.
+    test_group("a NaN event rate cannot stall synthesis");
+    var nan_rate = f64_div(0, 0);
+    var nan_buf = mkbuf(256);
+    var nan_fire = fire_new(nan_rate, SR);
+    if (garjan_is_err(nan_fire) == 0) { fire_process_block(nan_fire, nan_buf); }
+    var nan_bu = bubble_new(BUBBLE_BOILING, SR);
+    bubble_set_intensity(nan_bu, nan_rate);
+    bubble_process_block(nan_bu, nan_buf);
+    var nan_cl = cloth_new(CLOTH_FLAG, SR);
+    cloth_set_wind_speed(nan_cl, nan_rate);
+    cloth_process_block(nan_cl, nan_buf);
+    var nan_pr = precipitation_new(PRECIP_HAIL, STONE_MEDIUM, TERRAIN_METAL, SR);
+    precipitation_set_intensity(nan_pr, nan_rate);
+    precipitation_process_block(nan_pr, nan_buf);
+    var nan_uw = underwater_new(UNDERWATER_DEPTH_MEDIUM, SR);
+    underwater_set_intensity(nan_uw, nan_rate);
+    underwater_process_block(nan_uw, nan_buf);
+    var nan_doc = fire_from_json_str(json_doc(
+        "{\"intensity\":0.5,\"crackle_rate\":null,",
+        "\"sample_rate\":44100.0,\"sample_position\":0,",
+        "\"rng_state\":1,\"rng_inc\":19999,\"dcb_x_prev\":0.0,",
+        "\"dcb_y_prev\":0.0,\"dcb_r\":0.999}"));
+    assert(garjan_is_err(nan_doc) == 0, "a null crackle_rate loads");
+    fire_process_block(nan_doc, nan_buf);
+    assert(1 == 1, "every NaN-rate synth returned");
 
     return assert_summary();
 }

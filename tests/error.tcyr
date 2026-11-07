@@ -3,6 +3,7 @@
 
 include "src/error.cyr"
 
+# Runs the parity tests for src/error.cyr. Returns the failure count, used as the exit code.
 fn main() {
     alloc_init();
 
@@ -33,7 +34,6 @@ fn main() {
     assert_eq(garjan_is_err(garjan_alloc(0 - 1)), 1, "...which garjan_is_err DOES detect");
     assert_eq(garjan_is_err(garjan_alloc(ALLOC_MAX + 1)), 1, "oversized request rejected");
     assert(garjan_alloc(64) > 0, "a valid request still returns a real pointer");
-
 
     return assert_summary();
 }

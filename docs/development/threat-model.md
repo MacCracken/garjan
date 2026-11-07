@@ -24,7 +24,8 @@ garjan does NOT trust:
   `if`/`elif` chain's final `else` and silently select the last variant
 - **deserialized JSON** — the highest-risk surface; see below. Since 2.5.1 the
   deserialize path validates *everything the constructor validates*: sample
-  rate, enum ids, and the size of any buffer it implies. It no longer relies on
+  rate, enum ids, and the size of any buffer it implies (one buffer was missed
+  until 2.5.3, below). It no longer relies on
   a downstream naad component happening to reject bad input
 
 ## Attack surface: deserialization
@@ -44,6 +45,26 @@ input. Three defects were found and fixed here in 2.0.2 (see
   one `process_block` unbounded.
 
 All three are pinned by regression tests driving genuinely hostile documents.
+
+The 2.5.3 toolchain move found one more. `impact_build_naad` sized its excitation
+buffer from the document's `prop_decay` with only a `< 0` floor. Past 2^63 samples
+`f64_to` used to return `INT64_MIN`, so the floor caught it by accident; from cyrius
+6.6.8 it saturates to `INT64_MAX`, and the sizing loop ran until the process died.
+It now takes `garjan_validate_sample_count`, as every other vector-sizing path does.
+
+The first real fuzz harness, also at 2.5.3, found three more, all fixed and all
+older than that release:
+
+- **any non-object document crashed all 21 synths.** The derived reader returns 0 for
+  `""`, `null`, `[]` or `not json`, and every `*_from_json_str` read a field through it.
+- **an out-of-range `steal_policy` crashed `voice_pool_from_json_str`**, which
+  dereferenced `voice_pool_new`'s error return.
+- **a JSON `null` could hang synthesis forever.** It restores as NaN, and
+  `rng_poisson` never returned on a NaN rate
+  ([ADR-0009](../adr/0009-a-nan-event-rate-means-no-events.md)).
+
+The lesson is that a claim about what JSON can spell is not a claim about what
+deserialization produces. `cyrius fuzz` now holds this surface, and CI runs it.
 
 The 2.5.1 sweep found two more of the same shape, both now fixed:
 

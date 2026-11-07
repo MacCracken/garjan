@@ -21,6 +21,8 @@ var BUBBLE_POURING    = 3;
 #derive(accessors)
 struct InsectConfig { base_freq; mod_rate; chirp_rate; amplitude; }
 
+# Looks up the preset for an INSECT_* id. Returns a new InsectConfig,
+# GARJAN_ERR_INVALID_PARAMETER for an out-of-range id, or GARJAN_ERR_ALLOCATION.
 #must_use
 fn creature_insect_config(ty) {
     if (garjan_enum_invalid(ty, INSECT_CICADA_DRONE) == 1) { return GARJAN_ERR_INVALID_PARAMETER; }
@@ -50,6 +52,8 @@ fn creature_insect_config(ty) {
 #derive(accessors)
 struct BubbleConfig { base_freq; event_rate; freq_spread; decay; }
 
+# Looks up the preset for a BUBBLE_* id. Returns a new BubbleConfig,
+# GARJAN_ERR_INVALID_PARAMETER for an out-of-range id, or GARJAN_ERR_ALLOCATION.
 #must_use
 fn creature_bubble_config(ty) {
     if (garjan_enum_invalid(ty, BUBBLE_POURING) == 1) { return GARJAN_ERR_INVALID_PARAMETER; }

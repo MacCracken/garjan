@@ -23,7 +23,6 @@ struct Rng {
 
 # Advance the generator, returning the next 32-bit output. Not #must_use:
 # the PCG seeding path (rng_new) calls it purely to advance state.
-#inline
 fn rng_next_u32(self) {
     var old = Rng_state(self);
     Rng_set_state(self, (old * RNG_PCG_MUL) + Rng_inc(self));   # wraps at 64 bits
@@ -58,7 +57,6 @@ fn rng_seed(self, seed) {
 }
 
 # Value in [-1.0, 1.0]. bits = (next_u32 >> 1), scaled by 1/i32::MAX.
-#inline
 #must_use
 fn rng_next_f32(self) {
     var bits = rng_next_u32(self) >> 1;                       # 0 .. 2^31-1
@@ -73,7 +71,6 @@ fn rng_next_f32_unsigned(self) {
 }
 
 # Value in [lo, hi): lo + (hi-lo) * unsigned.
-#inline
 #must_use
 fn rng_next_f32_range(self, lo, hi) {
     return f64_add(lo, f64_mul(f64_sub(hi, lo), rng_next_f32_unsigned(self)));
@@ -83,6 +80,9 @@ fn rng_next_f32_range(self, lo, hi) {
 #must_use
 fn rng_poisson(self, rate) {
     var r = f64_clamp(rate, 0, RNG_POISSON_MAX);
+    # NaN survives the clamp and nothing is less than NaN, so the loop below would never
+    # exit. A JSON null restores as NaN, and infinity times zero makes one. See ADR-0009.
+    if (garjan_is_finite(r) == 0) { return 0; }
     var l = f64_exp(f64_neg(r));
     var k = 0;
     var p = F64_ONE;

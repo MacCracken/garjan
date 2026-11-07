@@ -21,6 +21,7 @@ fn _buf(n) {
     return v;
 }
 
+# Runs and reports the 26 throughput benchmarks. Returns 0.
 fn main() {
     alloc_init();
     sakshi_set_level(SK_ERROR);   # lower = quieter; drop WARN noise while timing

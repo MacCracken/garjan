@@ -40,6 +40,8 @@ fn terrain_resonant_material(t) {
 #derive(accessors)
 struct TerrainNoiseConfig { noise_type; filter_freq; filter_q; highpass; amplitude; }
 
+# Looks up the contact-noise preset for a TERRAIN_* id. Returns a new TerrainNoiseConfig,
+# GARJAN_ERR_INVALID_PARAMETER for an out-of-range id, or GARJAN_ERR_ALLOCATION.
 #must_use
 fn terrain_noise_config(t) {
     if (garjan_enum_invalid(t, TERRAIN_WET) == 1) { return GARJAN_ERR_INVALID_PARAMETER; }
@@ -108,6 +110,8 @@ var MOVEMENT_JUMP_LAND = 3;
 #derive(accessors)
 struct MovementConfig { step_interval; force; excitation_duration; }
 
+# Looks up the preset for a MOVEMENT_* id. Returns a new MovementConfig,
+# GARJAN_ERR_INVALID_PARAMETER for an out-of-range id, or GARJAN_ERR_ALLOCATION.
 #must_use
 fn movement_config(m) {
     if (garjan_enum_invalid(m, MOVEMENT_JUMP_LAND) == 1) { return GARJAN_ERR_INVALID_PARAMETER; }

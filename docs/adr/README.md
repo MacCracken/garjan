@@ -27,6 +27,7 @@ Decisions about garjan — what we chose, the context, and the consequences we a
 - [0006 — Out-of-range enum ids are rejected, not absorbed](0006-out-of-range-enum-ids-are-rejected.md) — Accepted, 2026-08-30
 - [0007 — Duration and sample rate are bounded](0007-bounded-duration-and-sample-rate.md) — Accepted, 2026-08-30
 - [0008 — serde carries live DSP state](0008-serde-carries-live-dsp-state.md) — Accepted, 2026-08-30. Closes architecture note 001.
+- [0009 — A NaN event rate means no events](0009-a-nan-event-rate-means-no-events.md) — Accepted, 2026-11-07. A deliberate divergence: `rust-old` hangs on this input.
 
 > **Format note.** 0001-0004 were written before these conventions and before
 > the port; they use `## Status` / `Accepted (vN)` headings rather than the

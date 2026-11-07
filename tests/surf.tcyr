@@ -11,6 +11,7 @@ include "src/aero.cyr"
 include "src/creature.cyr"
 include "src/surf.cyr"
 
+# Runs the parity tests for src/surf.cyr. Returns the failure count, used as the exit code.
 fn main() {
     alloc_init();
 
@@ -19,8 +20,10 @@ fn main() {
     assert(garjan_is_err(s) == 0, "surf_new ok");
     assert(garjan_is_err(surf_new(SURF_MODERATE, 0)) == 1, "surf_new rejects sr=0");
     # Moderate config: break_amp = 0.35, wash_amp = 0.2, period = 6s.
-    assert(f64_lt(f64_abs(f64_sub(Surf_break_amp(s), f64_div(f64_from(35), f64_from(100)))), GARJAN_EPSILON) == 1, "break_amp 0.35");
-    assert(f64_lt(f64_abs(f64_sub(Surf_wash_amp(s), f64_div(f64_from(2), f64_from(10)))), GARJAN_EPSILON) == 1, "wash_amp 0.2");
+    assert(f64_lt(f64_abs(f64_sub(Surf_break_amp(s), f64_div(f64_from(35), f64_from(100)))), GARJAN_EPSILON) == 1,
+      "break_amp 0.35");
+    assert(f64_lt(f64_abs(f64_sub(Surf_wash_amp(s), f64_div(f64_from(2), f64_from(10)))), GARJAN_EPSILON) == 1,
+      "wash_amp 0.2");
     # wave_period_samples = 6 * 44100 = 264600.
     assert_eq(Surf_wave_period_samples(s), 264600, "wave_period_samples 264600");
 

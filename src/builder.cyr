@@ -29,10 +29,13 @@ fn precipitation_builder_new(sample_rate) {
     return b;
 }
 
+# Sets the precipitation type (PRECIP_*). Returns `b`; precipitation_new checks the id at build.
 #must_use
 fn precipitation_builder_precip_type(b, t) { PrecipitationBuilder_set_precip_type(b, t); return b; }
+# Sets the stone size (STONE_*). Returns `b`; precipitation_new checks the id at build.
 #must_use
 fn precipitation_builder_stone_size(b, s) { PrecipitationBuilder_set_stone_size(b, s); return b; }
+# Sets the surface being struck. Returns `b`; precipitation_new checks the id at build.
 #must_use
 fn precipitation_builder_surface(b, t) { PrecipitationBuilder_set_surface(b, t); return b; }
 
@@ -66,11 +69,14 @@ fn footstep_builder_new(sample_rate) {
     return b;
 }
 
+# Sets the terrain (TERRAIN_*). Returns `b`; footstep_new checks the id at build.
 #must_use
 fn footstep_builder_terrain(b, t) { FootstepBuilder_set_terrain(b, t); return b; }
+# Sets the movement (MOVEMENT_*). Returns `b`; footstep_new checks the id at build.
 #must_use
 fn footstep_builder_movement(b, m) { FootstepBuilder_set_movement(b, m); return b; }
 
+# Builds a Footstep from the builder's settings. Returns it, or footstep_new's error code.
 #must_use
 fn footstep_builder_build(b) {
     return footstep_new(
@@ -99,11 +105,14 @@ fn friction_builder_new(sample_rate) {
     return b;
 }
 
+# Sets the friction type (FRICTION_*). Returns `b`; friction_new checks the id at build.
 #must_use
 fn friction_builder_friction_type(b, t) { FrictionBuilder_set_friction_type(b, t); return b; }
+# Sets the surface material (MATERIAL_*). Returns `b`; friction_new checks the id at build.
 #must_use
 fn friction_builder_surface(b, m) { FrictionBuilder_set_surface(b, m); return b; }
 
+# Builds a Friction from the builder's settings. Returns it, or friction_new's error code.
 #must_use
 fn friction_builder_build(b) {
     return friction_new(

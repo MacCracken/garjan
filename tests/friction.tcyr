@@ -11,6 +11,7 @@ include "src/aero.cyr"
 include "src/creature.cyr"
 include "src/friction.cyr"
 
+# Runs the parity tests for src/friction.cyr. Returns the failure count, used as the exit code.
 fn main() {
     alloc_init();
 
@@ -20,7 +21,9 @@ fn main() {
     assert(garjan_is_err(friction_new(FRICTION_SCRAPE, MATERIAL_METAL, 0)) == 1, "friction_new rejects sr=0");
     # Scrape: base_rate=200, stick_threshold=0.8, noise_mix=0.3
     assert(f64_lt(f64_abs(f64_sub(Friction_base_rate(f), f64_from(200))), GARJAN_EPSILON) == 1, "scrape base_rate 200");
-    assert(f64_lt(f64_abs(f64_sub(Friction_stick_threshold(f), f64_div(f64_from(8), f64_from(10)))), GARJAN_EPSILON) == 1, "scrape stick_threshold 0.8");
+    assert(f64_lt(f64_abs(f64_sub(Friction_stick_threshold(f), f64_div(f64_from(8), f64_from(10)))),
+        GARJAN_EPSILON) == 1,
+      "scrape stick_threshold 0.8");
     # default velocity 0.0, pressure 0.5
     assert(f64_lt(f64_abs(Friction_velocity(f)), GARJAN_EPSILON) == 1, "default velocity 0");
     assert(f64_lt(f64_abs(f64_sub(Friction_pressure(f), F64_HALF)), GARJAN_EPSILON) == 1, "default pressure 0.5");

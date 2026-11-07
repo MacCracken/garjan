@@ -11,6 +11,19 @@ include "src/aero.cyr"
 include "src/creature.cyr"
 include "src/impact.cyr"
 
+# An impact document whose only hostile field is prop_decay, written as raw JSON
+# number text so the test controls exactly what the parser sees.
+fn impact_doc_with_decay(decay_text) {
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, "{\"material\":0,\"sample_rate\":44100.0,\"sample_position\":0,");
+    str_builder_add_cstr(sb, "\"prop_resonance\":2500.0,\"prop_bandwidth\":200.0,\"prop_decay\":");
+    str_builder_add_cstr(sb, decay_text);
+    str_builder_add_cstr(sb, ",\"prop_brightness\":0.8,\"prop_transient\":0.9,\"rng_state\":1,\"rng_inc\":5381,");
+    str_builder_add_cstr(sb, "\"dcb_x_prev\":0.0,\"dcb_y_prev\":0.0,\"dcb_r\":0.999}");
+    return str_data(str_builder_build(sb));
+}
+
+# Runs the parity tests for src/impact.cyr. Returns the failure count, used as the exit code.
 fn main() {
     alloc_init();
 
@@ -25,8 +38,11 @@ fn main() {
     assert_eq(impact_material(ii), MATERIAL_STONE, "interaction uses surface material");
 
     test_group("force_and_exc");
-    assert(f64_lt(f64_abs(f64_sub(impact_type_force(IMPACT_CRASH), F64_ONE)), GARJAN_EPSILON) == 1, "crash force = 1.0");
-    assert(f64_lt(f64_abs(f64_sub(impact_type_force(IMPACT_TAP), f64_div(f64_from(2), f64_from(10)))), GARJAN_EPSILON) == 1, "tap force = 0.2");
+    assert(f64_lt(f64_abs(f64_sub(impact_type_force(IMPACT_CRASH), F64_ONE)), GARJAN_EPSILON) == 1,
+      "crash force = 1.0");
+    assert(f64_lt(f64_abs(f64_sub(impact_type_force(IMPACT_TAP), f64_div(f64_from(2), f64_from(10)))),
+        GARJAN_EPSILON) == 1,
+      "tap force = 0.2");
     assert_eq(impact_type_exc_type(IMPACT_TAP), EXCITATION_HALF_SINE, "tap uses half-sine");
     assert_eq(impact_type_exc_type(IMPACT_STRIKE), EXCITATION_NOISE_BURST, "strike uses noise burst");
 
@@ -93,6 +109,20 @@ fn main() {
     var ia_b = 0;
     while (ia_b < 50) { impact_process_block(ia, IMPACT_STRIKE, ia_out); ia_b = ia_b + 1; }
     assert_eq(alloc_used() - ia_before, 0, "50 impact blocks allocate 0 bytes");
+
+    # --- 2.5.3: a hostile prop_decay must not size the excitation buffer ---
+    # cyrius 6.6.8 made f64_to saturate. Past 2^63 samples used to land on INT64_MIN,
+    # which impact_build_naad's `< 0` floor clamped to an empty buffer by accident; it
+    # now lands on INT64_MAX and the sizing loop ran until memory ran out.
+    test_group("hostile prop_decay is refused at load");
+    assert(garjan_is_err(impact_from_json_str(impact_doc_with_decay("1e308"))) == 1,
+      "prop_decay overflowing to +Inf samples rejected");
+    assert(garjan_is_err(impact_from_json_str(impact_doc_with_decay("1e19"))) == 1,
+      "prop_decay past 2^63 samples rejected");
+    assert(garjan_is_err(impact_from_json_str(impact_doc_with_decay("1e10"))) == 1,
+      "prop_decay inside i64 but past GARJAN_MAX_SAMPLES rejected");
+    assert(garjan_is_err(impact_from_json_str(impact_doc_with_decay("1.5"))) == 0,
+      "a real material's prop_decay still loads");
 
     return assert_summary();
 }

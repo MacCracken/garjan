@@ -25,6 +25,7 @@ struct VoiceSlot {
     tag: i64;
 }
 
+# Builds an inactive VoiceSlot with zero priority, age and tag. Returns it, or GARJAN_ERR_ALLOCATION.
 #must_use
 fn voice_slot_new() {
     var s = garjan_alloc(sizeof(VoiceSlot));
@@ -40,6 +41,8 @@ fn voice_slot_new() {
 #derive(accessors)
 struct VoicePool { slots; steal_policy; max_voices; }
 
+# Builds a pool of idle slots with a STEAL_* policy; a count below 1 becomes 1. Returns it,
+# GARJAN_ERR_INVALID_PARAMETER for an out-of-range policy, or GARJAN_ERR_ALLOCATION.
 #must_use
 fn voice_pool_new(max_voices_arg, steal_policy) {
     if (garjan_enum_invalid(steal_policy, STEAL_NONE) == 1) { return GARJAN_ERR_INVALID_PARAMETER; }
@@ -61,10 +64,12 @@ fn voice_pool_new(max_voices_arg, steal_policy) {
     return p;
 }
 
+# Returns the pool's slot count, fixed when it was built.
 #inline
 #must_use
 fn voice_pool_max_voices(p) { return VoicePool_max_voices(p); }
 
+# Returns how many slots are active right now.
 #must_use
 fn voice_pool_active_count(p) {
     var slots = VoicePool_slots(p);
@@ -220,9 +225,12 @@ fn voice_pool_to_json(p, sb) {
 #must_use
 fn voice_pool_from_json_str(json) {
     var root = bayan_json_v_parse_buf(json, strlen(json));
-    var sp = bayan_json_v_int(bayan_json_v_obj_get(root, "steal_policy"));
-    var mv = bayan_json_v_int(bayan_json_v_obj_get(root, "max_voices"));
-    var slots_val = bayan_json_v_obj_get(root, "slots");
+    var sp = bayan_json_v_int(garjan_json_get(root, "steal_policy"));
+    var mv = bayan_json_v_int(garjan_json_get(root, "max_voices"));
+    var slots_val = garjan_json_get(root, "slots");
+    # voice_pool_to_json always writes slots, so a document without them is not a pool.
+    # This also catches a root that failed to parse or is not an object.
+    if (slots_val == 0) { return GARJAN_ERR_INVALID_PARAMETER; }
     var n = bayan_json_v_arr_len(slots_val);
     # The pool is sized from the `slots` ARRAY, never from the `max_voices`
     # scalar. Rust derives Deserialize on `slots: Vec<VoiceSlot>`, so serde
@@ -234,6 +242,7 @@ fn voice_pool_from_json_str(json) {
     # iteration, against a bump allocator that never frees.
     if (mv > n) { mv = n; }
     var p = voice_pool_new(mv, sp);
+    if (garjan_is_err(p) == 1) { return p; }
     var dst = VoicePool_slots(p);
     var cap = vec_len(dst);
     var i = 0;
@@ -241,10 +250,10 @@ fn voice_pool_from_json_str(json) {
         if (i < cap) {
             var elem = bayan_json_v_arr_get(slots_val, i);
             var s = vec_get(dst, i);
-            VoiceSlot_set_active(s, bayan_json_v_int(bayan_json_v_obj_get(elem, "active")));
-            VoiceSlot_set_priority(s, bayan_json_v_int(bayan_json_v_obj_get(elem, "priority")));
-            VoiceSlot_set_age(s, bayan_json_v_int(bayan_json_v_obj_get(elem, "age")));
-            VoiceSlot_set_tag(s, bayan_json_v_int(bayan_json_v_obj_get(elem, "tag")));
+            VoiceSlot_set_active(s, bayan_json_v_int(garjan_json_get(elem, "active")));
+            VoiceSlot_set_priority(s, bayan_json_v_int(garjan_json_get(elem, "priority")));
+            VoiceSlot_set_age(s, bayan_json_v_int(garjan_json_get(elem, "age")));
+            VoiceSlot_set_tag(s, bayan_json_v_int(garjan_json_get(elem, "tag")));
         }
         i = i + 1;
     }

@@ -12,6 +12,7 @@ include "src/footstep.cyr"
 include "src/friction.cyr"
 include "src/builder.cyr"
 
+# Runs the parity tests for src/builder.cyr. Returns the failure count, used as the exit code.
 fn main() {
     alloc_init();
 

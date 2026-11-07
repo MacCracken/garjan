@@ -11,6 +11,7 @@ include "src/aero.cyr"
 include "src/creature.cyr"
 include "src/whoosh.cyr"
 
+# Runs the parity tests for src/whoosh.cyr. Returns the failure count, used as the exit code.
 fn main() {
     alloc_init();
 
@@ -21,7 +22,8 @@ fn main() {
     # SWING config: duration 0.3, brightness 0.7, low_freq 0.2.
     # envelope_samples = 0.3 * 44100 = 13230
     assert_eq(Whoosh_envelope_samples(w), 13230, "envelope_samples 13230");
-    assert(f64_lt(f64_abs(f64_sub(Whoosh_brightness(w), f64_div(f64_from(7), f64_from(10)))), GARJAN_EPSILON) == 1, "brightness 0.7");
+    assert(f64_lt(f64_abs(f64_sub(Whoosh_brightness(w), f64_div(f64_from(7), f64_from(10)))), GARJAN_EPSILON) == 1,
+      "brightness 0.7");
     # default speed = 0.5
     assert(f64_lt(f64_abs(f64_sub(Whoosh_speed(w), F64_HALF)), GARJAN_EPSILON) == 1, "default speed 0.5");
 

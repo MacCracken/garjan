@@ -48,3 +48,9 @@ jobs:
         # stub didn't exist (Issue 1) and also wouldn't ever exercise
         # tests/${proj}.tcyr.
         run: cyrius test
+
+      - name: Fuzz
+        # tests/garjan.fcyr drives hostile JSON through all 22 deserializers. Each case
+        # runs in its own forked child with a time and memory limit, and the run is
+        # deterministic, so a red result here reproduces locally with `cyrius fuzz`.
+        run: cyrius fuzz

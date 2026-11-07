@@ -29,6 +29,8 @@ struct MaterialProperties {
     transient: f64;
 }
 
+# Builds a MaterialProperties: resonance and bandwidth in Hz, decay in s, brightness and
+# transient 0-1. Values are stored as given. Returns it, or GARJAN_ERR_ALLOCATION.
 #must_use
 fn material_properties_new(resonance, bandwidth, decay, brightness, transient) {
     var p = garjan_alloc(sizeof(MaterialProperties));
@@ -50,6 +52,8 @@ struct MaterialModeConfig {
     damping_factor: f64;
 }
 
+# Builds a MaterialModeConfig from a MODE_PATTERN_* id, a mode count and a damping factor.
+# Values are stored as given. Returns it, or GARJAN_ERR_ALLOCATION.
 #must_use
 fn material_mode_config_new(pattern, mode_count, damping_factor) {
     var c = garjan_alloc(sizeof(MaterialModeConfig));

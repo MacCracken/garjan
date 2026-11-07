@@ -7,6 +7,7 @@ include "src/material.cyr"
 include "src/modal.cyr"
 include "src/contact.cyr"
 
+# Runs the parity tests for src/contact.cyr. Returns the failure count, used as the exit code.
 fn main() {
     alloc_init();
 
@@ -19,11 +20,14 @@ fn main() {
     var g = terrain_noise_config(TERRAIN_GRAVEL);
     assert_eq(TerrainNoiseConfig_noise_type(g), CONTACT_NOISE_PINK, "gravel pink");
     assert_eq(TerrainNoiseConfig_highpass(g), 1, "gravel highpass");
-    assert(f64_lt(f64_abs(f64_sub(TerrainNoiseConfig_filter_freq(g), f64_from(1500))), GARJAN_EPSILON) == 1, "gravel 1500hz");
+    assert(f64_lt(f64_abs(f64_sub(TerrainNoiseConfig_filter_freq(g), f64_from(1500))), GARJAN_EPSILON) == 1,
+      "gravel 1500hz");
 
     test_group("movement");
     var r = movement_config(MOVEMENT_RUN);
-    assert(f64_lt(f64_abs(f64_sub(MovementConfig_step_interval(r), f64_div(f64_from(3), f64_from(10)))), GARJAN_EPSILON) == 1, "run step 0.3");
+    assert(f64_lt(f64_abs(f64_sub(MovementConfig_step_interval(r), f64_div(f64_from(3), f64_from(10)))),
+        GARJAN_EPSILON) == 1,
+      "run step 0.3");
     var jl = movement_config(MOVEMENT_JUMP_LAND);
     assert(f64_lt(f64_abs(MovementConfig_step_interval(jl)), GARJAN_EPSILON) == 1, "jumpland one-shot (0)");
 

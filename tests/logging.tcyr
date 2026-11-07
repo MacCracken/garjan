@@ -2,6 +2,7 @@
 
 include "src/logging.cyr"
 
+# Runs the sakshi wiring smoke test for src/logging.cyr. Returns the failure count, used as the exit code.
 fn main() {
     alloc_init();
     test_group("logging_smoke");

@@ -1,14 +1,779 @@
-# garjan fuzz harness
+# garjan.fcyr -- fuzz harness for the JSON deserialize boundary.
+#
+# `*_from_json_str` is garjan's only entry point taking fully attacker-controlled
+# input (docs/development/threat-model.md). This drives all 22 of them, the 21
+# synths plus the voice pool, with hostile documents derived from each one's own
+# `*_to_json` output, then renders whatever a document manages to restore.
+#
+# Every case runs in its own forked child under a time and memory limit:
+#   - one crash must not end the run, so the remaining cases still report;
+#   - garjan's allocator never frees, so a shared process would run out;
+#   - a hang or a runaway allocation has to fail the case, not stall the machine.
+# A child passes if it refuses the document, or accepts it and survives rendering.
+# Anything else fails the case. The run is deterministic: every sweep is exhaustive
+# and the random stage is seeded, so a failure recurs until it is fixed.
+#
+# A pass must not be vacuous, so the run also fails unless every entry point loads
+# its own unmutated document, exercises some mutated ones and refuses others.
+#
+# Uses fork, setrlimit and alarm, so it is x86_64 Linux only, like CI.
+#
+# Run:    cyrius fuzz
+# Replay: cyrius build tests/garjan.fcyr build/fuzz && ./build/fuzz <entry> '<document>'
+# A replay runs in this process, so a crash lands in a debugger.
 
-fn fuzz_main(data, len) {
-    if (len == 0) { return 0; }
+include "src/error.cyr"
+include "src/logging.cyr"
+include "src/dsp.cyr"
+include "src/rng.cyr"
+include "src/lod.cyr"
+include "src/material.cyr"
+include "src/modal.cyr"
+include "src/contact.cyr"
+include "src/aero.cyr"
+include "src/creature.cyr"
+include "src/voice.cyr"
+include "src/fire.cyr"
+include "src/weather.cyr"
+include "src/water.cyr"
+include "src/precipitation.cyr"
+include "src/bubble.cyr"
+include "src/impact.cyr"
+include "src/footstep.cyr"
+include "src/friction.cyr"
+include "src/creak.cyr"
+include "src/rolling.cyr"
+include "src/foliage.cyr"
+include "src/whoosh.cyr"
+include "src/whistle.cyr"
+include "src/cloth.cyr"
+include "src/insect.cyr"
+include "src/wingflap.cyr"
+include "src/underwater.cyr"
+include "src/surf.cyr"
+include "src/texture.cyr"
+include "src/bridge.cyr"
+include "src/builder.cyr"
+
+var ENTRY_COUNT = 22;
+var ENTRY_VOICE = 21;
+
+var FUZZ_SEED = 0x6761726A616E;              # "garjan"
+var FUZZ_RANDOM_CASES = 3000;
+var FUZZ_ARRAY_CAP = 3;                      # numbers swept per array
+var FUZZ_CUTS = 24;                          # truncation points per document
+var FUZZ_NEST_DEPTH = 100000;                # brackets in the deep-nesting documents
+var FUZZ_MAX_FAILS = 5;                      # stop early: a hang costs a whole timeout
+var FUZZ_CASE_TIMEOUT_S = 30;                # above the slowest legal render
+var FUZZ_CASE_MEM_BYTES = 2147483648;        # two full GARJAN_MAX_SAMPLES vectors fit
+var FUZZ_BUF_BYTES = 1048576;
+var FUZZ_MAX_NUMBERS = 4096;
+
+var FUZZ_SYS_SETRLIMIT = 160;
+var FUZZ_SYS_ALARM = 37;
+var FUZZ_RLIMIT_CORE = 4;
+var FUZZ_RLIMIT_AS = 9;
+var FUZZ_SIGALRM = 14;
+
+var CHILD_REFUSED = 10;
+var CHILD_EXERCISED = 11;
+
+var FUZZ_BUF0 = 0;
+var FUZZ_BUF1 = 0;
+var FUZZ_BASE = 0;                           # each entry's unmutated document
+var FUZZ_EXERCISED = 0;                      # per-entry tally
+var FUZZ_REFUSED = 0;                        # per-entry tally
+var FUZZ_CASES = 0;
+var FUZZ_FAILS = 0;
+var NUM_START = 0;
+var NUM_END = 0;
+var NUM_COUNT = 0;
+var sink = 0;
+
+# Writes a NUL-terminated cstring to stdout.
+fn put(s) {
+    return sys_write(1, s, strlen(s));
+}
+
+# Returns the entry point's name for reports.
+fn entry_name(e) {
+    if (e == 0) { return "fire"; }
+    if (e == 1) { return "thunder"; }
+    if (e == 2) { return "rain"; }
+    if (e == 3) { return "wind"; }
+    if (e == 4) { return "cloth"; }
+    if (e == 5) { return "surf"; }
+    if (e == 6) { return "texture"; }
+    if (e == 7) { return "rolling"; }
+    if (e == 8) { return "water"; }
+    if (e == 9) { return "whoosh"; }
+    if (e == 10) { return "precipitation"; }
+    if (e == 11) { return "foliage"; }
+    if (e == 12) { return "bubble"; }
+    if (e == 13) { return "friction"; }
+    if (e == 14) { return "footstep"; }
+    if (e == 15) { return "impact"; }
+    if (e == 16) { return "insect"; }
+    if (e == 17) { return "underwater"; }
+    if (e == 18) { return "creak"; }
+    if (e == 19) { return "wingflap"; }
+    if (e == 20) { return "whistle"; }
+    return "voice_pool";
+}
+
+# Builds the fixture whose document seeds entry `e`. Same configurations as
+# scripts/audio-hash.cyr, except impact uses stone, whose short decay keeps cases cheap.
+fn entry_make(e, sr) {
+    if (e == 0) { return fire_new(F64_HALF, sr); }
+    if (e == 1) { return thunder_new(f64_from(10), sr); }
+    if (e == 2) { return rain_new(RAIN_INTENSITY_MODERATE, sr); }
+    if (e == 3) { return wind_new(f64_from(15), F64_HALF, sr); }
+    if (e == 4) { return cloth_new(CLOTH_FLAG, sr); }
+    if (e == 5) { return surf_new(SURF_MODERATE, sr); }
+    if (e == 6) { return texture_new(TEXTURE_TYPE_FOREST, F64_HALF, sr); }
+    if (e == 7) { return rolling_new(MATERIAL_WOOD, MATERIAL_STONE, sr); }
+    if (e == 8) { return water_new(WATER_STREAM, F64_HALF, sr); }
+    if (e == 9) { return whoosh_new(WHOOSH_SWING, sr); }
+    if (e == 10) { return precipitation_new(PRECIP_HAIL, STONE_MEDIUM, TERRAIN_METAL, sr); }
+    if (e == 11) { return foliage_new(FOLIAGE_LEAF_RUSTLE, sr); }
+    if (e == 12) { return bubble_new(BUBBLE_UNDERWATER, sr); }
+    if (e == 13) { return friction_new(FRICTION_SLIDE, MATERIAL_WOOD, sr); }
+    if (e == 14) { return footstep_new(TERRAIN_GRAVEL, MOVEMENT_WALK, sr); }
+    if (e == 15) { return impact_new(MATERIAL_STONE, sr); }
+    if (e == 16) { return insect_new_swarm(INSECT_CICADA_DRONE, 3, sr); }
+    if (e == 17) { return underwater_new(UNDERWATER_DEPTH_MEDIUM, sr); }
+    if (e == 18) { return creak_new(MATERIAL_WOOD, sr); }
+    if (e == 19) { return wingflap_new(BIRD_SIZE_MEDIUM, sr); }
+    if (e == 20) { return whistle_new(WHISTLE_PIPE, sr); }
+    return voice_pool_new(4, STEAL_OLDEST);
+}
+
+# Serializes object `o` of entry `e` into builder `sb`. Returns the entry's result.
+fn entry_dump(e, o, sb) {
+    if (e == 0) { return fire_to_json(o, sb); }
+    if (e == 1) { return thunder_to_json(o, sb); }
+    if (e == 2) { return rain_to_json(o, sb); }
+    if (e == 3) { return wind_to_json(o, sb); }
+    if (e == 4) { return cloth_to_json(o, sb); }
+    if (e == 5) { return surf_to_json(o, sb); }
+    if (e == 6) { return texture_to_json(o, sb); }
+    if (e == 7) { return rolling_to_json(o, sb); }
+    if (e == 8) { return water_to_json(o, sb); }
+    if (e == 9) { return whoosh_to_json(o, sb); }
+    if (e == 10) { return precipitation_to_json(o, sb); }
+    if (e == 11) { return foliage_to_json(o, sb); }
+    if (e == 12) { return bubble_to_json(o, sb); }
+    if (e == 13) { return friction_to_json(o, sb); }
+    if (e == 14) { return footstep_to_json(o, sb); }
+    if (e == 15) { return impact_to_json(o, sb); }
+    if (e == 16) { return insect_to_json(o, sb); }
+    if (e == 17) { return underwater_to_json(o, sb); }
+    if (e == 18) { return creak_to_json(o, sb); }
+    if (e == 19) { return wingflap_to_json(o, sb); }
+    if (e == 20) { return whistle_to_json(o, sb); }
+    return voice_pool_to_json(o, sb);
+}
+
+# Restores entry `e` from a document. Returns the object, or a negative GARJAN_* code.
+fn entry_load(e, json) {
+    if (e == 0) { return fire_from_json_str(json); }
+    if (e == 1) { return thunder_from_json_str(json); }
+    if (e == 2) { return rain_from_json_str(json); }
+    if (e == 3) { return wind_from_json_str(json); }
+    if (e == 4) { return cloth_from_json_str(json); }
+    if (e == 5) { return surf_from_json_str(json); }
+    if (e == 6) { return texture_from_json_str(json); }
+    if (e == 7) { return rolling_from_json_str(json); }
+    if (e == 8) { return water_from_json_str(json); }
+    if (e == 9) { return whoosh_from_json_str(json); }
+    if (e == 10) { return precipitation_from_json_str(json); }
+    if (e == 11) { return foliage_from_json_str(json); }
+    if (e == 12) { return bubble_from_json_str(json); }
+    if (e == 13) { return friction_from_json_str(json); }
+    if (e == 14) { return footstep_from_json_str(json); }
+    if (e == 15) { return impact_from_json_str(json); }
+    if (e == 16) { return insect_from_json_str(json); }
+    if (e == 17) { return underwater_from_json_str(json); }
+    if (e == 18) { return creak_from_json_str(json); }
+    if (e == 19) { return wingflap_from_json_str(json); }
+    if (e == 20) { return whistle_from_json_str(json); }
+    return voice_pool_from_json_str(json);
+}
+
+# Renders one block of synth `o` into `b`. Does nothing for the voice pool.
+fn entry_block(e, o, b) {
+    if (e == 0) { return fire_process_block(o, b); }
+    if (e == 1) { return thunder_process_block(o, b); }
+    if (e == 2) { return rain_process_block(o, b); }
+    if (e == 3) { return wind_process_block(o, b); }
+    if (e == 4) { return cloth_process_block(o, b); }
+    if (e == 5) { return surf_process_block(o, b); }
+    if (e == 6) { return texture_process_block(o, b); }
+    if (e == 7) { return rolling_process_block(o, b); }
+    if (e == 8) { return water_process_block(o, b); }
+    if (e == 9) { return whoosh_process_block(o, b); }
+    if (e == 10) { return precipitation_process_block(o, b); }
+    if (e == 11) { return foliage_process_block(o, b); }
+    if (e == 12) { return bubble_process_block(o, b); }
+    if (e == 13) { return friction_process_block(o, b); }
+    if (e == 14) { return footstep_process_block(o, b); }
+    if (e == 15) { return impact_process_block(o, IMPACT_STRIKE, b); }
+    if (e == 16) { return insect_process_block(o, b); }
+    if (e == 17) { return underwater_process_block(o, b); }
+    if (e == 18) { return creak_process_block(o, b); }
+    if (e == 19) { return wingflap_process_block(o, b); }
+    if (e == 20) { return whistle_process_block(o, b); }
     return 0;
 }
 
+# Synthesizes `dur` seconds from synth `o`. Does nothing for the voice pool.
+fn entry_synth(e, o, dur) {
+    if (e == 0) { return fire_synthesize(o, dur); }
+    if (e == 1) { return thunder_synthesize(o, dur); }
+    if (e == 2) { return rain_synthesize(o, dur); }
+    if (e == 3) { return wind_synthesize(o, dur); }
+    if (e == 4) { return cloth_synthesize(o, dur); }
+    if (e == 5) { return surf_synthesize(o, dur); }
+    if (e == 6) { return texture_synthesize(o, dur); }
+    if (e == 7) { return rolling_synthesize(o, dur); }
+    if (e == 8) { return water_synthesize(o, dur); }
+    if (e == 9) { return whoosh_synthesize(o, dur); }
+    if (e == 10) { return precipitation_synthesize(o, dur); }
+    if (e == 11) { return foliage_synthesize(o, dur); }
+    if (e == 12) { return bubble_synthesize(o, dur); }
+    if (e == 13) { return friction_synthesize(o, dur); }
+    if (e == 14) { return footstep_synthesize(o, dur); }
+    if (e == 15) { return impact_synthesize(o, IMPACT_STRIKE); }
+    if (e == 16) { return insect_synthesize(o, dur); }
+    if (e == 17) { return underwater_synthesize(o, dur); }
+    if (e == 18) { return creak_synthesize(o, dur); }
+    if (e == 19) { return wingflap_synthesize(o, dur); }
+    if (e == 20) { return whistle_synthesize(o, dur); }
+    return 0;
+}
+
+# Excites a synth that would otherwise render silence past its live paths.
+fn entry_excite(e, o) {
+    if (e == 9) { return whoosh_trigger(o); }
+    if (e == 11) { return foliage_trigger_snap(o); }
+    if (e == 14) { return footstep_trigger_step(o); }
+    return 0;
+}
+
+# Renders a restored object and serializes it back, so hostile state reaches the
+# DSP loops and the writer as well as the loader.
+fn exercise_object(e, o) {
+    var sb = str_builder_new();
+    if (e == ENTRY_VOICE) {
+        sink = voice_pool_allocate(o, 1, 1);
+        sink = voice_pool_tick(o);
+        sink = voice_pool_active_count(o);
+        sink = voice_pool_release_all(o);
+    } else {
+        var b = vec_new();
+        var i = 0;
+        while (i < 256) { vec_push(b, 0); i = i + 1; }
+        sink = entry_excite(e, o);
+        sink = entry_block(e, o, b);
+        sink = entry_block(e, o, b);
+        sink = entry_synth(e, o, f64_div(F64_ONE, f64_from(50)));
+    }
+    sink = entry_dump(e, o, sb);
+    return 0;
+}
+
+# Loads and exercises one document. Returns CHILD_REFUSED or CHILD_EXERCISED.
+fn exercise(e, doc) {
+    var o = entry_load(e, doc);
+    if (garjan_is_err(o) == 1) { return CHILD_REFUSED; }
+    exercise_object(e, o);
+    return CHILD_EXERCISED;
+}
+
+# Limits this child: no core file, bounded address space, and SIGALRM on a hang.
+fn limit_child() {
+    var lim[16];
+    store64(&lim, FUZZ_CASE_MEM_BYTES);
+    store64(&lim + 8, FUZZ_CASE_MEM_BYTES);
+    syscall(FUZZ_SYS_SETRLIMIT, FUZZ_RLIMIT_AS, &lim);
+    store64(&lim, 0);
+    store64(&lim + 8, 0);
+    syscall(FUZZ_SYS_SETRLIMIT, FUZZ_RLIMIT_CORE, &lim);
+    syscall(FUZZ_SYS_ALARM, FUZZ_CASE_TIMEOUT_S);
+    return 0;
+}
+
+# Prints one failed case with enough to replay it. Long documents are cut for display.
+fn report(stage, e, doc, status) {
+    FUZZ_FAILS = FUZZ_FAILS + 1;
+    put("fuzz: FAIL entry ");
+    fmt_int(e);
+    put(" (");
+    put(entry_name(e));
+    put(") stage ");
+    put(stage);
+    put(": ");
+    if (WIFSIGNALED(status) == 1) {
+        if (WTERMSIG(status) == FUZZ_SIGALRM) {
+            put("hang");
+        } else {
+            put("signal ");
+            fmt_int(WTERMSIG(status));
+        }
+    } else {
+        put("exit ");
+        fmt_int(WEXITSTATUS(status));
+    }
+    put("\n  ");
+    var n = strlen(doc);
+    if (n > 2000) { n = 2000; }
+    sys_write(1, doc, n);
+    put("\n");
+    return 0;
+}
+
+# Runs one document in a forked child and tallies the outcome. Returns the child's
+# verdict, or 0 once the case failed or the run hit FUZZ_MAX_FAILS.
+fn run_case(stage, e, doc) {
+    if (FUZZ_FAILS >= FUZZ_MAX_FAILS) { return 0; }
+    FUZZ_CASES = FUZZ_CASES + 1;
+    var pid = sys_fork();
+    if (pid < 0) {
+        put("fuzz: fork failed\n");
+        sys_exit(2);
+    }
+    if (pid == 0) {
+        limit_child();
+        sys_exit(exercise(e, doc));
+    }
+    var st[8];
+    store64(&st, 0);
+    sys_waitpid(pid, &st, 0);
+    var status = load64(&st);
+    if (WIFEXITED(status) == 1) {
+        var code = WEXITSTATUS(status);
+        if (code == CHILD_REFUSED) {
+            store64(FUZZ_REFUSED + e * 8, load64(FUZZ_REFUSED + e * 8) + 1);
+            return code;
+        }
+        if (code == CHILD_EXERCISED) {
+            store64(FUZZ_EXERCISED + e * 8, load64(FUZZ_EXERCISED + e * 8) + 1);
+            return code;
+        }
+    }
+    report(stage, e, doc, status);
+    return 0;
+}
+
+# Writes `base` with bytes [start, end) replaced by `text` into `dst`. Returns `dst`.
+fn splice(dst, base, start, end, text) {
+    var blen = strlen(base);
+    var tlen = strlen(text);
+    memcpy(dst, base, start);
+    memcpy(dst + start, text, tlen);
+    memcpy(dst + start + tlen, base + end, blen - end);
+    store8(dst + start + tlen + blen - end, 0);
+    return dst;
+}
+
+# Returns the i-th value that replaces a number: overflow, truncation and division
+# edge cases first, then the wrong JSON types.
+fn hostile(i) {
+    if (i == 0) { return "0"; }
+    if (i == 1) { return "0.0"; }
+    if (i == 2) { return "-0.0"; }
+    if (i == 3) { return "-1"; }
+    if (i == 4) { return "1e10"; }
+    if (i == 5) { return "1e308"; }
+    if (i == 6) { return "-1e308"; }
+    if (i == 7) { return "1e999"; }
+    if (i == 8) { return "-1e999"; }
+    if (i == 9) { return "9.3e18"; }
+    if (i == 10) { return "1e19"; }
+    if (i == 11) { return "1e-320"; }
+    if (i == 12) { return "9223372036854775807"; }
+    if (i == 13) { return "-9223372036854775808"; }
+    if (i == 14) { return "18446744073709551616"; }
+    if (i == 15) { return "null"; }
+    if (i == 16) { return "true"; }
+    if (i == 17) { return "\"x\""; }
+    if (i == 18) { return "[]"; }
+    if (i == 19) { return "{}"; }
+    return 0;
+}
+
+# Returns the i-th value that replaces a "dsp" node: wrong types, short, long and nested.
+fn dsp_shape(i) {
+    if (i == 0) { return "null"; }
+    if (i == 1) { return "1"; }
+    if (i == 2) { return "\"x\""; }
+    if (i == 3) { return "[]"; }
+    if (i == 4) { return "{}"; }
+    if (i == 5) { return "[[]]"; }
+    if (i == 6) { return "[1]"; }
+    if (i == 7) { return "[\"a\",\"b\",\"c\",\"d\",\"e\"]"; }
+    if (i == 8) { return "[null,null,null,null,null,null]"; }
+    if (i == 9) { return "[[1],[2],[3],[4],[5],[6]]"; }
+    if (i == 10) { return "{\"a\":1}"; }
+    if (i == 11) { return "[1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]"; }
+    return 0;
+}
+
+# Returns the i-th document that is not derived from a fixture.
+fn garbage(i) {
+    if (i == 0) { return ""; }
+    if (i == 1) { return " "; }
+    if (i == 2) { return "null"; }
+    if (i == 3) { return "1"; }
+    if (i == 4) { return "true"; }
+    if (i == 5) { return "\"x\""; }
+    if (i == 6) { return "[]"; }
+    if (i == 7) { return "{}"; }
+    if (i == 8) { return "not json"; }
+    if (i == 9) { return "{"; }
+    if (i == 10) { return "["; }
+    if (i == 11) { return "{\""; }
+    if (i == 12) { return "{\"a\""; }
+    if (i == 13) { return "{\"a\":"; }
+    if (i == 14) { return "{\"a\":1"; }
+    if (i == 15) { return "{\"dsp\":"; }
+    if (i == 16) { return "{\"sample_rate\":44100.0}"; }
+    return 0;
+}
+
+# Returns 1 for a byte that can continue a JSON number.
+fn is_number_byte(c) {
+    if (c >= 48 && c <= 57) { return 1; }
+    if (c == 45 || c == 43 || c == 46 || c == 69 || c == 101) { return 1; }
+    return 0;
+}
+
+# Records the span of each number in `doc` in NUM_START / NUM_END. With `top_only` set,
+# only members of the root object count. At most `cap` numbers are taken per array.
+fn scan_numbers(doc, top_only, cap) {
+    var n = strlen(doc);
+    var i = 0;
+    var braces = 0;
+    var brackets = 0;
+    var in_array = 0;
+    NUM_COUNT = 0;
+    while (i < n) {
+        var c = load8(doc + i);
+        if (c == 34) {
+            i = i + 1;
+            while (i < n && load8(doc + i) != 34) { i = i + 1; }
+            i = i + 1;
+        } elif (c == 45 || (c >= 48 && c <= 57)) {
+            var start = i;
+            while (i < n && is_number_byte(load8(doc + i)) == 1) { i = i + 1; }
+            var keep = 1;
+            if (top_only == 1 && (braces != 1 || brackets != 0)) { keep = 0; }
+            if (brackets > 0) {
+                if (in_array >= cap) { keep = 0; }
+                in_array = in_array + 1;
+            }
+            if (keep == 1 && NUM_COUNT < FUZZ_MAX_NUMBERS) {
+                store64(NUM_START + NUM_COUNT * 8, start);
+                store64(NUM_END + NUM_COUNT * 8, i);
+                NUM_COUNT = NUM_COUNT + 1;
+            }
+        } else {
+            if (c == 123) { braces = braces + 1; }
+            if (c == 125) { braces = braces - 1; }
+            if (c == 91) {
+                brackets = brackets + 1;
+                in_array = 0;
+            }
+            if (c == 93) { brackets = brackets - 1; }
+            i = i + 1;
+        }
+    }
+    return NUM_COUNT;
+}
+
+# Replaces each number in turn with each hostile value.
+fn sweep_numbers(e, base) {
+    scan_numbers(base, 0, FUZZ_ARRAY_CAP);
+    var i = 0;
+    while (i < NUM_COUNT) {
+        var h = 0;
+        while (hostile(h) != 0) {
+            var doc = splice(FUZZ_BUF0, base, load64(NUM_START + i * 8), load64(NUM_END + i * 8), hostile(h));
+            run_case("numbers", e, doc);
+            h = h + 1;
+        }
+        i = i + 1;
+    }
+    return 0;
+}
+
+# Sets numbers `a` and `b` of the last scan to `ta` and `tb`, the later one first so
+# the earlier offsets stay valid, and runs the result.
+fn run_pair(e, base, a, ta, b, tb) {
+    var d = splice(FUZZ_BUF0, base, load64(NUM_START + b * 8), load64(NUM_END + b * 8), tb);
+    run_case("pairs", e, splice(FUZZ_BUF1, d, load64(NUM_START + a * 8), load64(NUM_END + a * 8), ta));
+    return 0;
+}
+
+# Sets every pair of root members to 0 and infinity, both ways round. No single field
+# can spell NaN, but a product of two can, and so can an infinity minus an infinity.
+fn sweep_pairs(e, base) {
+    scan_numbers(base, 1, 0);
+    var a = 0;
+    while (a < NUM_COUNT) {
+        var b = a + 1;
+        while (b < NUM_COUNT) {
+            run_pair(e, base, a, "0", b, "1e999");
+            run_pair(e, base, a, "1e999", b, "0");
+            run_pair(e, base, a, "1e999", b, "-1e999");
+            b = b + 1;
+        }
+        a = a + 1;
+    }
+    return 0;
+}
+
+# Renames each object key in turn, which removes that field from the document.
+fn sweep_keys(e, base) {
+    var n = strlen(base);
+    var i = 0;
+    while (i < n) {
+        if (load8(base + i) == 34) {
+            var close = i + 1;
+            while (close < n && load8(base + close) != 34) { close = close + 1; }
+            if (load8(base + close + 1) == 58) {
+                run_case("keys", e, splice(FUZZ_BUF0, base, i + 1, i + 2, "~"));
+            }
+            i = close;
+        }
+        i = i + 1;
+    }
+    return 0;
+}
+
+# Cuts the document at evenly spaced offsets.
+fn sweep_truncation(e, base) {
+    var n = strlen(base);
+    var i = 0;
+    while (i < FUZZ_CUTS) {
+        run_case("truncate", e, splice(FUZZ_BUF0, base, n * i / FUZZ_CUTS, n, ""));
+        i = i + 1;
+    }
+    return 0;
+}
+
+# Returns the offset of `"dsp":` in `doc`, or -1.
+fn find_dsp(doc) {
+    var n = strlen(doc);
+    var i = 0;
+    while (i + 6 < n) {
+        if (memeq(doc + i, "\"dsp\":", 6) == 1) { return i; }
+        i = i + 1;
+    }
+    return 0 - 1;
+}
+
+# Returns the offset just past the bracketed value that starts at `start`.
+fn value_end(doc, start) {
+    var depth = 0;
+    var i = start;
+    var n = strlen(doc);
+    while (i < n) {
+        var c = load8(doc + i);
+        if (c == 91 || c == 123) { depth = depth + 1; }
+        if (c == 93 || c == 125) {
+            depth = depth - 1;
+            if (depth == 0) { return i + 1; }
+        }
+        i = i + 1;
+    }
+    return n;
+}
+
+# Replaces the "dsp" node, then each of its member arrays, with each hostile shape.
+fn sweep_dsp(e, base) {
+    var at = find_dsp(base);
+    if (at < 0) { return 0; }
+    var start = at + 6;
+    var end = value_end(base, start);
+    var s = 0;
+    while (dsp_shape(s) != 0) {
+        run_case("dsp", e, splice(FUZZ_BUF0, base, start, end, dsp_shape(s)));
+        var i = start + 1;
+        while (i < end) {
+            if (load8(base + i) == 91) {
+                var close = value_end(base, i);
+                run_case("dsp", e, splice(FUZZ_BUF0, base, i, close, dsp_shape(s)));
+                i = close;
+            }
+            i = i + 1;
+        }
+        s = s + 1;
+    }
+    return 0;
+}
+
+# Writes a document with FUZZ_NEST_DEPTH unclosed `open` bytes as its "dsp" value.
+fn nested_doc(dst, base, open) {
+    var at = find_dsp(base);
+    if (at < 0) { at = 0; }
+    memcpy(dst, base, at + 6);
+    var i = 0;
+    while (i < FUZZ_NEST_DEPTH) {
+        store8(dst + at + 6 + i, open);
+        i = i + 1;
+    }
+    store8(dst + at + 6 + FUZZ_NEST_DEPTH, 0);
+    return dst;
+}
+
+# Feeds documents that owe nothing to a fixture, and nesting deep enough to expose a
+# recursive parser.
+fn sweep_garbage(e, base) {
+    var g = 0;
+    while (g == 0 || garbage(g) != 0) {
+        run_case("garbage", e, garbage(g));
+        g = g + 1;
+    }
+    run_case("nesting", e, nested_doc(FUZZ_BUF0, base, 91));
+    run_case("nesting", e, nested_doc(FUZZ_BUF0, base, 123));
+    return 0;
+}
+
+# Applies one random edit of `src` into `dst`: swap a number for a hostile value,
+# overwrite a byte with a structural one, or delete a short span. Returns `dst`.
+fn random_edit(rng, dst, src) {
+    var n = strlen(src);
+    if (n == 0) { return splice(dst, src, 0, 0, "{"); }
+    var op = rng_next_u32(rng) % 3;
+    if (op == 0 && scan_numbers(src, 0, FUZZ_ARRAY_CAP) > 0) {
+        var i = rng_next_u32(rng) % NUM_COUNT;
+        var h = rng_next_u32(rng) % 20;
+        return splice(dst, src, load64(NUM_START + i * 8), load64(NUM_END + i * 8), hostile(h));
+    }
+    var at = rng_next_u32(rng) % n;
+    if (op == 1) {
+        var picks = "\"{}[],:-e.09 ";
+        var pick[2];
+        store8(&pick, load8(picks + rng_next_u32(rng) % 13));
+        store8(&pick + 1, 0);
+        return splice(dst, src, at, at + 1, &pick);
+    }
+    var end = at + 1 + rng_next_u32(rng) % 16;
+    if (end > n) { end = n; }
+    return splice(dst, src, at, end, "");
+}
+
+# Runs FUZZ_RANDOM_CASES seeded documents, each one to three random edits of a fixture.
+fn random_stage() {
+    var rng = rng_new(FUZZ_SEED);
+    var c = 0;
+    while (c < FUZZ_RANDOM_CASES) {
+        var e = rng_next_u32(rng) % ENTRY_COUNT;
+        var src = load64(FUZZ_BASE + e * 8);
+        var edits = 1 + rng_next_u32(rng) % 3;
+        var k = 0;
+        while (k < edits) {
+            var dst = FUZZ_BUF0;
+            if (k % 2 == 1) { dst = FUZZ_BUF1; }
+            src = random_edit(rng, dst, src);
+            k = k + 1;
+        }
+        run_case("random", e, src);
+        c = c + 1;
+    }
+    return 0;
+}
+
+# Renders a fixture so its live state is not all zero, and keeps its document.
+fn build_base(e, sr) {
+    var o = entry_make(e, sr);
+    if (garjan_is_err(o) == 1) {
+        put("fuzz: fixture failed to build: ");
+        put(entry_name(e));
+        put("\n");
+        sys_exit(2);
+    }
+    exercise_object(e, o);
+    var sb = str_builder_new();
+    sink = entry_dump(e, o, sb);
+    store64(FUZZ_BASE + e * 8, str_data(str_builder_build(sb)));
+    return 0;
+}
+
+# Fails the run unless entry `e` exercised and refused something, so a harness that
+# stops reaching garjan cannot pass by default.
+fn check_coverage(e) {
+    if (load64(FUZZ_EXERCISED + e * 8) > 0 && load64(FUZZ_REFUSED + e * 8) > 0) { return 0; }
+    put("fuzz: FAIL vacuous entry: ");
+    put(entry_name(e));
+    put("\n");
+    FUZZ_FAILS = FUZZ_FAILS + 1;
+    return 0;
+}
+
+# Replays one document in this process when given an entry index and a document.
+# Otherwise runs every sweep over all entry points. Returns 0 only if all cases pass.
 fn main() {
     alloc_init();
-    fuzz_main("test", 4);
-    println("fuzz: ok");
+    args_init();
+    sakshi_set_level(SK_FATAL);
+    if (argc() == 3) {
+        var verdict = exercise(atoi(argv(1)), argv(2));
+        if (verdict == CHILD_REFUSED) { put("fuzz: replay refused\n"); }
+        if (verdict == CHILD_EXERCISED) { put("fuzz: replay exercised\n"); }
+        return 0;
+    }
+    FUZZ_BUF0 = alloc(FUZZ_BUF_BYTES);
+    FUZZ_BUF1 = alloc(FUZZ_BUF_BYTES);
+    FUZZ_BASE = alloc(ENTRY_COUNT * 8);
+    FUZZ_EXERCISED = alloc(ENTRY_COUNT * 8);
+    FUZZ_REFUSED = alloc(ENTRY_COUNT * 8);
+    NUM_START = alloc(FUZZ_MAX_NUMBERS * 8);
+    NUM_END = alloc(FUZZ_MAX_NUMBERS * 8);
+    var sr = f64_from(44100);
+    var e = 0;
+    while (e < ENTRY_COUNT) {
+        store64(FUZZ_EXERCISED + e * 8, 0);
+        store64(FUZZ_REFUSED + e * 8, 0);
+        build_base(e, sr);
+        e = e + 1;
+    }
+    e = 0;
+    while (e < ENTRY_COUNT) {
+        var base = load64(FUZZ_BASE + e * 8);
+        if (run_case("baseline", e, base) != CHILD_EXERCISED && FUZZ_FAILS < FUZZ_MAX_FAILS) {
+            put("fuzz: FAIL unmutated document refused: ");
+            put(entry_name(e));
+            put("\n");
+            FUZZ_FAILS = FUZZ_FAILS + 1;
+        }
+        sweep_numbers(e, base);
+        sweep_pairs(e, base);
+        sweep_keys(e, base);
+        sweep_truncation(e, base);
+        sweep_dsp(e, base);
+        sweep_garbage(e, base);
+        e = e + 1;
+    }
+    random_stage();
+    if (FUZZ_FAILS >= FUZZ_MAX_FAILS) {
+        put("fuzz: stopped after ");
+        fmt_int(FUZZ_FAILS);
+        put(" failures\n");
+        return 1;
+    }
+    e = 0;
+    while (e < ENTRY_COUNT) {
+        check_coverage(e);
+        e = e + 1;
+    }
+    if (FUZZ_FAILS > 0) { return 1; }
+    put("fuzz: ok, ");
+    fmt_int(FUZZ_CASES);
+    put(" cases over ");
+    fmt_int(ENTRY_COUNT);
+    put(" entry points\n");
     return 0;
 }
 

@@ -96,6 +96,8 @@ fn surf_config_period(intensity) {
     return f64_from(3);
 }
 
+# Returns the breaking-wave amplitude for a SURF_* id. Any other id reads as SURF_STORM;
+# surf_new rejects those before this runs.
 #must_use
 fn surf_config_break_amp(intensity) {
     if (intensity == SURF_CALM) { return f64_div(f64_from(15), f64_from(100)); }
@@ -104,6 +106,8 @@ fn surf_config_break_amp(intensity) {
     return f64_div(f64_from(75), f64_from(100));
 }
 
+# Returns the wash amplitude for a SURF_* id. Any other id reads as SURF_STORM; surf_new
+# rejects those before this runs.
 #must_use
 fn surf_config_wash_amp(intensity) {
     if (intensity == SURF_CALM) { return f64_div(f64_from(8), f64_from(100)); }
@@ -320,6 +324,7 @@ fn surf_to_json(self, sb) {
 #must_use
 fn surf_from_json_str(json) {
     var p = SurfParams_from_json_str(json);
+    if (p == 0) { return GARJAN_ERR_INVALID_PARAMETER; }   # not a JSON object
     # Deserialize must validate what the constructor validates. Before 2.5.1
     # this path relied on a downstream naad component rejecting a bad
     # sample_rate -- which bubble's build_naad cannot do, since it only
@@ -360,12 +365,12 @@ fn surf_from_json_str(json) {
     # returns 0 and the synth resumes without it, exactly as it used to.
     var dsp = garjan_dsp_node(json);
     if (dsp != 0) {
-        garjan_state_noise_load(Surf_crash_noise(self), bayan_json_v_obj_get(dsp, "cn"));
-        garjan_state_biquad_load(Surf_crash_filter(self), bayan_json_v_obj_get(dsp, "cf"));
-        garjan_state_noise_load(Surf_wash_noise(self), bayan_json_v_obj_get(dsp, "wn"));
-        garjan_state_biquad_load(Surf_wash_filter(self), bayan_json_v_obj_get(dsp, "wf"));
-        garjan_state_noise_load(Surf_rumble_noise(self), bayan_json_v_obj_get(dsp, "rn"));
-        garjan_state_biquad_load(Surf_rumble_filter(self), bayan_json_v_obj_get(dsp, "rf"));
+        garjan_state_noise_load(Surf_crash_noise(self), garjan_json_get(dsp, "cn"));
+        garjan_state_biquad_load(Surf_crash_filter(self), garjan_json_get(dsp, "cf"));
+        garjan_state_noise_load(Surf_wash_noise(self), garjan_json_get(dsp, "wn"));
+        garjan_state_biquad_load(Surf_wash_filter(self), garjan_json_get(dsp, "wf"));
+        garjan_state_noise_load(Surf_rumble_noise(self), garjan_json_get(dsp, "rn"));
+        garjan_state_biquad_load(Surf_rumble_filter(self), garjan_json_get(dsp, "rf"));
     }
     return self;
 }

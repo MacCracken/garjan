@@ -5,6 +5,134 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.5.3] - cyrius 6.6.20, and the buffer a saturating `f64_to` stopped bounding
+
+Toolchain and dependency release, plus the one regression that move exposed. `cyrius`
+6.6.3 -> **6.6.20**, `naad` 2.2.2 -> **2.2.5**, `hisab` 2.11.2 -> **3.3.7**, `goonj`
+2.0.4 -> **2.0.6**, `sakshi` 2.4.11 -> **2.5.7**, with bayan 1.5.12 and ganita 1.2.14
+from the snapshot. This is the matched set for 6.6.20: naad 2.2.5, hisab 3.3.7 and
+goonj 2.0.6 pin it exactly, and the next tag of each needs cyrius 6.7.x.
+
+### Fixed
+
+- **A hostile `prop_decay` killed `impact_from_json_str`.** Cyrius 6.6.8 made `f64_to`
+  saturate: +Inf and anything past 2^63 went from `INT64_MIN` to `INT64_MAX`.
+  `impact_build_naad` sized its excitation buffer behind a `< 0` floor, which had been
+  catching the old sentinel by accident. **All 803 assertions stayed green**; only
+  driving hostile documents through both toolchains found it.
+
+  | `"prop_decay"` | 2.5.2 on 6.6.3 | Unguarded on 6.6.20 | 2.5.3 |
+  |---|---|---|---|
+  | Past 2^63 samples: `9.3e18`, `1e19`, `9223372036854775807`, `1e308`, `1e999` | built, then `synthesize` refused | aborts, `vec: capacity overflow` | refused at load |
+  | Inside i64, past `GARJAN_MAX_SAMPLES`: `1e10` | aborts, `vec: capacity overflow` | aborts, `vec: capacity overflow` | refused at load |
+
+  The second row was never bounded, on any toolchain. The aborts were measured under a
+  6 GB address-space limit.
+
+  It now takes `garjan_validate_sample_count`, as every other vector-sizing path does.
+  2.5.1's *"every function that builds a vector must have the guard"* check covered
+  the synthesize paths and missed this constructor helper. Table materials sit far
+  below the cap: the longest decay reaches 2.3 M samples at 768 kHz, against 44.1 M.
+
+The next three are older than this release and fail on 6.6.3 as well. The new fuzz
+harness found all of them.
+
+- **Any non-object document crashed all 21 synths.** `""`, `null`, `1`, `true`, `"x"`,
+  `[]`, `[` and `not json` were each a SIGSEGV: the derived reader returns 0 for them,
+  and every `*_from_json_str` read a field through that 0. They now return
+  `GARJAN_ERR_INVALID_PARAMETER`. All 22 entry points refuse before their first read,
+  checked by measurement rather than by trusting the rollout.
+- **A bad `steal_policy` crashed `voice_pool_from_json_str`**, which dereferenced the error
+  `voice_pool_new` returned. It now returns that error. A document with no `slots` array
+  is refused as well, where it used to come back as a default pool.
+- **A JSON `null` could hang synthesis forever.** The derived reader stores `null` as NaN,
+  and `rng_poisson` never returned on a NaN rate. Infinity times zero gets there too, as
+  in `"wind_speed":1e999` with `"base_flap_rate":0`, which no per-field check can see.
+  This hung `fire`, `bubble`, `cloth`, `precipitation` and `underwater`, and the same
+  inputs through their constructors and setters. A NaN rate now gives no events, and
+  valid rates stay bit-identical. Rust hangs on this input, so this is a deliberate
+  divergence: [ADR-0009](docs/adr/0009-a-nan-event-rate-means-no-events.md).
+
+### Changed
+
+- **`tests/garjan.fcyr` is a real harness.** It was a scaffold stub that ignored its input,
+  so `cyrius fuzz` exercised no garjan code and "fuzz passes" in earlier entries meant
+  nothing. It now drives 19,603 hostile documents through all 22 deserializers in 13 to
+  31 s: each number against 20 hostile values, every pair of root fields against
+  zero-and-infinity combinations, dropped keys, truncation, corrupted `dsp` nodes,
+  garbage, 100,000-deep nesting, and 3,000 seeded random edits. Every case gets its own
+  forked child with a time and memory limit, and a failure prints the document to replay.
+  CI now runs it, so a release gates on it too.
+- **The build is warning-clean: 92 warnings to 0.** The upgrade checklist requires it.
+  - The 80 `bayan_json_v_obj_get` calls moved to a new `garjan_json_get`, one helper in
+    `src/error.cyr`. It cannot be the obvious `bayan_json_v_obj_get_by_cstr`: that fn
+    first exists at cyrius 6.6.13, and `dist/garjan.cyr` compiles under the consumer's
+    toolchain, so renaming to it broke dhvani on 6.6.10. The helper takes the Str lookup,
+    whose null, non-object and key handling match on 6.6.3, 6.6.10 and 6.6.20, at the
+    cost of one `Str` per lookup on the deserialize path only.
+  - 12 `#inline` markers the compiler was ignoring are gone. The 5 it honours stay.
+- **`dist/garjan.deps` shrinks to `bayan`.** `cyrius distlib` 6.6.18 and later names only
+  what the fold needs beyond its named deps, and the bundle now opens with a generated
+  `include "lib/bayan.cyr"`. A consumer that received another leaf through garjan's
+  sidecar must declare it.
+- **`cyrius.lock` is regenerated**, and `lib/boxed.cyr`, `lib/callback.cyr` and
+  `lib/tagged.cyr` are refreshed by hand from the snapshot. Nothing requires them any
+  more, so `cyrius deps` left them at their 6.6.3 versions.
+- **12 of 21 synths change value, inaudibly** (see *Verified*). x86 `f64_sin` left x87
+  `fsin` for fdlibm at cyrius 6.6.9, which is the expected source; this was not
+  attributed synth by synth.
+- **`cyrius audit` passes again.** It exited 1 on 6.6.3 as well. All 81 undocumented
+  public fns have doc comments: 43 in `src/` and 38 in `tests/`, 35 of those test entry
+  points. The 55 lint warnings in `tests/` are gone: 39 lines re-wrapped, 7 blank runs
+  collapsed, and 9 long JSON documents moved onto a `json_doc` join helper. Every doc
+  comment was written from the fn's body.
+- Stale figures re-measured: the suite entered this release at **803 assertions**, not
+  836, which had counted the 33-suite summary line, and it now has **825**; the
+  integration suite is 364, up from 354, not 288; ganita
+  demand is hisab 20, goonj 6, naad 3; `surf`'s real-time factor was understated by half.
+
+### Verified
+
+- `lib/`: 34 of 37 files byte-identical to the 6.6.20 snapshot, the other three
+  byte-identical to their tags' `dist/`. `cyrius deps --verify` passes all 37.
+- **Value sweep, 6.6.3 against 6.6.20.** 21 synths, 258,048 samples over three blocks:
+  71,426 differ, none by more than 8.85e-13 of peak (-241 dB, `impact`), with no length,
+  non-finite or sign-of-zero change. Nine synths are bit-identical. The fix and the
+  warning cleanup leave every `scripts/audio-hash.cyr` hash unchanged.
+- **Hostile sweep, 6.6.3 against 6.6.20.** 4,628 cases, each in its own process: nine
+  values through every f64 setter and non-sample-rate constructor argument, ten through
+  each numeric field of all 21 JSON documents (the first three of an array). The only
+  change is the first row above, now refused. The new test fails on the unguarded code
+  with `vec: capacity overflow`.
+- No arity change across the 52 library fns garjan calls, and naad's filter and noise
+  enums are unchanged. `f64_le` and `f64_ge` left `lib/` as compiler builtins, and
+  `f64_fmod` left it too; a compiled call to each returns the right answer.
+- The collision audit is zero across 424 symbols and all 37 vendored files.
+- The 2.5.3 bundle builds under cyrius 6.6.10 with naad 2.2.4, hisab 2.11.2, goonj 2.0.5
+  and sakshi 2.5.2, the pins of dhvani, garjan's only consumer: no undefined function,
+  reachable or not, and all 21 synths round-trip through JSON there.
+- Benchmarks are flat: median +0.8% across the 26 ops against 6.6.3, built and run back
+  to back. `cyrius audit`, `cyrius fuzz` and `cyrius distlib --check` are clean.
+- **The harness can fail.** Against an unmutated control, seven mutants were each built
+  and caught: the `impact_build_naad` guard, the non-object guards, the `steal_policy`
+  check and the NaN check removed in turn, the coverage check sabotaged, and two older
+  guards removed, 2.0.2's `max_voices` clamp and the `swarm_count` clamp. Without the
+  impact guard it fails with `vec: alloc failed` under its 2 GiB limit, which is the same
+  doubling that reports `vec: capacity overflow` under 6 GiB.
+- **The audit cleanup changes no code.** With comments and whitespace removed and each
+  `json_doc` call expanded back to its literal, all 68 files in `src/` and `tests/` match
+  their earlier form exactly. Every suite's assertion count and every
+  `scripts/audio-hash.cyr` hash is unchanged.
+
+### Known issues
+
+This is older than this release and is recorded in
+[`state.md`](docs/development/state.md).
+
+- `precipitation_new` and `precipitation_from_json_str` bound `surface` with
+  `MATERIAL_CERAMIC` (9), but it is a terrain id (`TERRAIN_WET` is 7). Hail and snow accept
+  the invalid ids 8 and 9; surface rain rejects them further in.
+
 ## [2.5.2] - Unblocked by cyrius 6.6.3
 
 Toolchain-pin release. `cyrius` 6.6.2 -> **6.6.3**; no source change.

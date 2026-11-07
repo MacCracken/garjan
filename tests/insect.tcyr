@@ -11,6 +11,18 @@ include "src/aero.cyr"
 include "src/creature.cyr"
 include "src/insect.cyr"
 
+# Joins four literal pieces into one NUL-terminated document, so a long JSON string can
+# span source lines and still reach the parser byte for byte.
+fn json_doc(a, b, c, d) {
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, a);
+    str_builder_add_cstr(sb, b);
+    str_builder_add_cstr(sb, c);
+    str_builder_add_cstr(sb, d);
+    return str_data(str_builder_build(sb));
+}
+
+# Runs the parity tests for src/insect.cyr. Returns the failure count, used as the exit code.
 fn main() {
     alloc_init();
 
@@ -85,7 +97,11 @@ fn main() {
     # set it raw, so JSON could drive an unbounded loop with insect_detune
     # saturating every index >= 7 to det7 rather than trapping.
     test_group("from_json clamps swarm_count");
-    var huge = insect_from_json_str("{\"insect_type\":2,\"sample_rate\":44100.0,\"sample_position\":0,\"base_freq\":6000.0,\"mod_rate\":20.0,\"chirp_rate\":0.5,\"amplitude\":0.25,\"intensity\":1.0,\"swarm_count\":999999999,\"det0\":0.0,\"det1\":0.0,\"det2\":0.0,\"det3\":0.0,\"det4\":0.0,\"det5\":0.0,\"det6\":0.0,\"det7\":0.0,\"rng_state\":1,\"rng_inc\":19999,\"dcb_x_prev\":0.0,\"dcb_y_prev\":0.0,\"dcb_r\":0.9985752414269434}");
+    var huge = insect_from_json_str(json_doc(
+        "{\"insect_type\":2,\"sample_rate\":44100.0,\"sample_position\":0,\"base_freq\":6000.0,",
+        "\"mod_rate\":20.0,\"chirp_rate\":0.5,\"amplitude\":0.25,\"intensity\":1.0,\"swarm_count\":999999999,",
+        "\"det0\":0.0,\"det1\":0.0,\"det2\":0.0,\"det3\":0.0,\"det4\":0.0,\"det5\":0.0,\"det6\":0.0,\"det7\":0.0,",
+        "\"rng_state\":1,\"rng_inc\":19999,\"dcb_x_prev\":0.0,\"dcb_y_prev\":0.0,\"dcb_r\":0.9985752414269434}"));
     assert(garjan_is_err(huge) == 0, "hostile insect still constructs");
     assert_eq(Insect_swarm_count(huge), 8, "swarm_count 999999999 clamped to 8");
     # and the clamped synth is actually usable -- the per-sample voice loop

@@ -36,7 +36,7 @@ Two consequences drive every rule below:
    done
    ```
 
-   Expected: `0` for every row. It was 0 at 2.0.1 across garjan's 399 symbols.
+   Expected: `0` for every row. It was 0 at 2.5.3 across garjan's 424 symbols.
 
 ## naad
 
@@ -86,9 +86,11 @@ that stays the consuming application's job.
 
 ## Cyrius toolchain + vendored stdlib
 
-**Status:** pinned to **6.5.36** — the current *released* Cyrius
-([tag `6.5.36`](https://github.com/MacCracken/cyrius/releases/tag/6.5.36),
-published 2026-08-28). The pin tracks published releases only; never pin to
+**Status:** pinned to **6.6.20**
+([tag `6.6.20`](https://github.com/MacCracken/cyrius/releases/tag/6.6.20),
+2026-10-07), the last 6.6.x. naad 2.2.5, hisab 3.3.7 and goonj 2.0.6 pin it
+exactly; their next tags need 6.7.x, so the next move takes all of them together.
+The pin tracks published releases only; never pin to
 `main` or an unreleased tag, because CI installs the pin through the canonical
 upstream installer, which resolves release artifacts
 (`cyrius-<version>-<arch>-<os>.tar.gz` + `.sha256`). An unreleased pin makes CI
@@ -115,6 +117,32 @@ therefore never be named `X_str`. bayan hit this and renamed
 before the rename, every `bayan_json_v_parse(someStr)` in the ecosystem was
 silently rewritten into a 1-arg call to the 2-arg function and returned 0 for
 valid JSON. garjan's `voice_pool_from_json_str` was updated at 2.0.1.
+
+**Upgrade gotcha — `f64_to` saturates from 6.6.8.** +Inf and anything past 2^63
+went from `INT64_MIN` to `INT64_MAX`, and NaN to 0. A floor-only guard (`if (n < 0)`)
+in front of a length used to catch the old sentinel by accident and now walks past
+it. Passing tests prove nothing here: this reopened `impact_build_naad` at 2.5.3 with
+every assertion green. Any new `f64_to` that sizes a buffer or bounds a loop takes
+`garjan_validate_sample_count`.
+
+**Upgrade gotcha — `dist/garjan.cyr` compiles under the consumer's toolchain.** A clean
+build here proves nothing about an older pin. The deprecation warning on
+`bayan_json_v_obj_get` names `bayan_json_v_obj_get_by_cstr`, which first exists at
+6.6.13, so following it broke dhvani on 6.6.10 while every local gate stayed green.
+That is why `garjan_json_get` exists. Before replacing a stdlib call, check that the
+replacement exists in the oldest consumer's `~/.cyrius/versions/<pin>/lib/`.
+
+**Upgrade gotcha — `f64_le` / `f64_ge` left `lib/` at 6.6.13.** They are compiler
+builtins now, and `f64_fmod` is gone from `lib/` too. So a diff of `lib/` alone reports
+them as removed; compile a call before treating that as a break.
+
+**Upgrade gotcha — `cyrius deps` only re-vendors what something still requires.** A
+file that lost its last requirer stays in `lib/` at its old version, and the lock
+keeps its old hash. After a bump, compare `lib/` against the snapshot in
+`~/.cyrius/versions/<pin>/lib/` instead of trusting `git status`.
+
+**Upgrade gotcha — 6.6.20 fails closed on stale lock rows.** Delete `cyrius.lock`
+and re-run `cyrius deps` rather than editing it.
 
 **Watch the warnings, not just the errors.** An undefined *variable* is a hard
 error. An undefined *function* is a warning — and, since 6.5.36, additionally a
@@ -147,3 +175,20 @@ cyrius lint src/*.cyr && cyrius vet src/main.cyr && cyrius distlib --check
 
 Then: run the collision audit above, diff the arity of every library function
 garjan calls (old bundle vs new), and refresh `state.md` + `BENCHMARKS.md`.
+
+Then build the bundle under the oldest consumer pin, with that consumer's dependency
+tags. **Grep the output for `undefined function`.** `OK` is not enough: an entry that
+does not reach a broken symbol still reports it, but only as a warning.
+
+Then compare behaviour across the two toolchains, because the suite asserts neither
+exact samples nor hostile input:
+
+- **Samples.** `scripts/audio-hash.cyr` tells you *that* something moved. Dump the raw
+  samples from both builds to measure *how far*, and look for a length, non-finite or
+  sign-of-zero change.
+- **Hostile input.** `cyrius fuzz` covers JSON documents, and a replay command is in its
+  header. It does not cover constructors and setters, so build the old tree beside the
+  new one and drive both with +Inf, NaN, ±MAX and past-2^63 values through every f64
+  constructor argument and setter. Run each case in its own process under a timeout and
+  a memory cap, and compare the outcomes. A case that was refused and now hangs or
+  aborts is the regression this catches.

@@ -11,6 +11,7 @@ include "src/aero.cyr"
 include "src/creature.cyr"
 include "src/creak.cyr"
 
+# Runs the parity tests for src/creak.cyr. Returns the failure count, used as the exit code.
 fn main() {
     alloc_init();
 

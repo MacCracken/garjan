@@ -11,6 +11,7 @@ include "src/aero.cyr"
 include "src/creature.cyr"
 include "src/texture.cyr"
 
+# Runs the parity tests for src/texture.cyr. Returns the failure count, used as the exit code.
 fn main() {
     alloc_init();
 
@@ -54,7 +55,8 @@ fn main() {
     texture_to_json(g2, sb2);
     assert(memeq(j, str_data(str_builder_build(sb2)), strlen(j)) == 1, "texture params json roundtrip idempotent");
     # restored synth resumes the SAME rng sequence
-    assert_eq(rng_next_u32(AmbientTexture_rng(g)), rng_next_u32(AmbientTexture_rng(g2)), "restored texture resumes rng");
+    assert_eq(rng_next_u32(AmbientTexture_rng(g)), rng_next_u32(AmbientTexture_rng(g2)),
+      "restored texture resumes rng");
     # restored synth is functional: it synthesizes finite, nonzero audio
     var bb = texture_synthesize(g2, f64_div(f64_from(1), f64_from(100)));
     assert(garjan_is_err(bb) == 0, "restored texture synthesizes");

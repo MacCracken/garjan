@@ -124,6 +124,11 @@ fn impact_build_naad(self) {
     var pdecay = MaterialProperties_decay(props);
     var max_samples = f64_to(f64_mul(f64_add(f64_mul(pdecay, F64_TWO), f64_div(f64_from(5), f64_from(100))), sr));
     if (max_samples < 0) { max_samples = 0; }
+    # pdecay arrives from JSON on deserialize. f64_to saturates from cyrius 6.6.8, so a
+    # value past 2^63 samples is INT64_MAX here; the `< 0` floor above used to catch the
+    # old INT64_MIN sentinel by accident. Every table material sits far below this cap.
+    var ga_mcheck = garjan_validate_sample_count(max_samples);
+    if (garjan_is_err(ga_mcheck) == 1) { return ga_mcheck; }
     var ebuf = vec_new();
     var i = 0;
     while (i < max_samples) {
@@ -360,6 +365,7 @@ fn impact_to_json(self, sb) {
 #must_use
 fn impact_from_json_str(json) {
     var p = ImpactParams_from_json_str(json);
+    if (p == 0) { return GARJAN_ERR_INVALID_PARAMETER; }   # not a JSON object
     # Deserialize must validate what the constructor validates. Before 2.5.1
     # this path relied on a downstream naad component rejecting a bad
     # sample_rate -- which bubble's build_naad cannot do, since it only
@@ -400,10 +406,10 @@ fn impact_from_json_str(json) {
     # returns 0 and the synth resumes without it, exactly as it used to.
     var dsp = garjan_dsp_node(json);
     if (dsp != 0) {
-        garjan_state_modal_load(Impact_modal_bank(self), bayan_json_v_obj_get(dsp, "mb"));
-        garjan_state_exciter_load(Impact_exciter(self), bayan_json_v_obj_get(dsp, "ex"));
-        garjan_state_biquad_load(Impact_resonance_filter(self), bayan_json_v_obj_get(dsp, "rf"));
-        garjan_state_noise_load(Impact_transient_noise(self), bayan_json_v_obj_get(dsp, "tn"));
+        garjan_state_modal_load(Impact_modal_bank(self), garjan_json_get(dsp, "mb"));
+        garjan_state_exciter_load(Impact_exciter(self), garjan_json_get(dsp, "ex"));
+        garjan_state_biquad_load(Impact_resonance_filter(self), garjan_json_get(dsp, "rf"));
+        garjan_state_noise_load(Impact_transient_noise(self), garjan_json_get(dsp, "tn"));
     }
     return self;
 }

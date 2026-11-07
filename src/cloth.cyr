@@ -126,7 +126,6 @@ fn cloth_set_wind_speed(self, speed) {
 }
 
 # One shaped noise sample: white noise through the bandpass shape filter.
-#inline
 #must_use
 fn cloth_generate_noise(self) {
     var raw = noise_next_sample(Cloth_noise_gen(self));
@@ -292,6 +291,7 @@ fn cloth_to_json(self, sb) {
 #must_use
 fn cloth_from_json_str(json) {
     var p = ClothParams_from_json_str(json);
+    if (p == 0) { return GARJAN_ERR_INVALID_PARAMETER; }   # not a JSON object
     # Deserialize must validate what the constructor validates. Before 2.5.1
     # this path relied on a downstream naad component rejecting a bad
     # sample_rate -- which bubble's build_naad cannot do, since it only
@@ -337,9 +337,9 @@ fn cloth_from_json_str(json) {
     # returns 0 and the synth resumes without it, exactly as it used to.
     var dsp = garjan_dsp_node(json);
     if (dsp != 0) {
-        garjan_state_modal_load(Cloth_modal_bank(self), bayan_json_v_obj_get(dsp, "mb"));
-        garjan_state_noise_load(Cloth_noise_gen(self), bayan_json_v_obj_get(dsp, "ng"));
-        garjan_state_biquad_load(Cloth_shape_filter(self), bayan_json_v_obj_get(dsp, "sf"));
+        garjan_state_modal_load(Cloth_modal_bank(self), garjan_json_get(dsp, "mb"));
+        garjan_state_noise_load(Cloth_noise_gen(self), garjan_json_get(dsp, "ng"));
+        garjan_state_biquad_load(Cloth_shape_filter(self), garjan_json_get(dsp, "sf"));
     }
     return self;
 }

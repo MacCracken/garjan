@@ -5,6 +5,18 @@ include "src/dsp.cyr"
 include "src/rng.cyr"
 include "src/fire.cyr"
 
+# Joins four literal pieces into one NUL-terminated document, so a long JSON string can
+# span source lines and still reach the parser byte for byte.
+fn json_doc(a, b, c, d) {
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, a);
+    str_builder_add_cstr(sb, b);
+    str_builder_add_cstr(sb, c);
+    str_builder_add_cstr(sb, d);
+    return str_data(str_builder_build(sb));
+}
+
+# Runs the parity tests for src/fire.cyr. Returns the failure count, used as the exit code.
 fn main() {
     alloc_init();
 
@@ -52,7 +64,11 @@ fn main() {
     # fire_from_json_str discarded that error and handed back a non-negative
     # pointer whose naad fields were 0, and the first process_block segfaulted.
     test_group("from_json rejects bad sample_rate");
-    var evil = fire_from_json_str("{\"intensity\":0.5,\"crackle_rate\":20.0,\"sample_rate\":0.0,\"sample_position\":0,\"rng_state\":1,\"rng_inc\":1,\"dcb_x_prev\":0.0,\"dcb_y_prev\":0.0,\"dcb_r\":0.999}");
+    var evil = fire_from_json_str(json_doc(
+        "{\"intensity\":0.5,\"crackle_rate\":20.0,",
+        "\"sample_rate\":0.0,\"sample_position\":0,",
+        "\"rng_state\":1,\"rng_inc\":1,\"dcb_x_prev\":0.0,",
+        "\"dcb_y_prev\":0.0,\"dcb_r\":0.999}"));
     assert(garjan_is_err(evil) == 1, "fire_from_json_str rejects sample_rate=0");
 
     # --- 2.5.0: serde carries the naad components' LIVE state ---
@@ -97,9 +113,12 @@ fn main() {
     assert_eq(csame, 1, "continued output after restore is sample-identical");
 
     # A pre-2.5.0 document has no "dsp" member; it must still load.
-    var oldfmt = fire_from_json_str("{\"intensity\":0.5,\"crackle_rate\":20.0,\"sample_rate\":44100.0,\"sample_position\":0,\"rng_state\":1,\"rng_inc\":19999,\"dcb_x_prev\":0.0,\"dcb_y_prev\":0.0,\"dcb_r\":0.999}");
+    var oldfmt = fire_from_json_str(json_doc(
+        "{\"intensity\":0.5,\"crackle_rate\":20.0,",
+        "\"sample_rate\":44100.0,\"sample_position\":0,",
+        "\"rng_state\":1,\"rng_inc\":19999,\"dcb_x_prev\":0.0,",
+        "\"dcb_y_prev\":0.0,\"dcb_r\":0.999}"));
     assert(garjan_is_err(oldfmt) == 0, "a document without \"dsp\" still loads");
-
 
     return assert_summary();
 }

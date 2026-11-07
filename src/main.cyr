@@ -9,6 +9,8 @@
 
 include "dist/garjan.cyr"
 
+# Smoke-tests fire, rain, a modal bank and a bridge conversion through the dist bundle.
+# Prints the outcome. Returns 0 on success, or 1 on the first failure.
 fn main() {
     alloc_init();
 

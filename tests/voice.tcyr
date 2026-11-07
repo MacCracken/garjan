@@ -2,6 +2,7 @@
 include "src/error.cyr"
 include "src/voice.cyr"
 
+# Runs the parity tests for src/voice.cyr. Returns the failure count, used as the exit code.
 fn main() {
     alloc_init();
 
@@ -79,6 +80,19 @@ fn main() {
     var hostile = voice_pool_from_json_str("{\"steal_policy\":0,\"max_voices\":2000000000,\"slots\":[]}");
     assert(garjan_is_err(hostile) == 0, "hostile pool still constructs");
     assert(voice_pool_max_voices(hostile) <= 1, "max_voices bounded by empty slots array");
+
+    # --- 2.5.3: found by tests/garjan.fcyr ---
+    # voice_pool_new's error return was dereferenced, so a bad policy was a SIGSEGV.
+    test_group("hostile pool documents are refused");
+    assert(garjan_is_err(voice_pool_from_json_str("{\"steal_policy\":99,\"max_voices\":1,\"slots\":[]}")) == 1,
+      "out-of-range steal_policy refused");
+    assert(garjan_is_err(voice_pool_from_json_str("{\"steal_policy\":-1,\"max_voices\":1,\"slots\":[]}")) == 1,
+      "negative steal_policy refused");
+    assert(garjan_is_err(voice_pool_from_json_str("{\"steal_policy\":0,\"max_voices\":1}")) == 1,
+      "a document without slots refused");
+    assert(garjan_is_err(voice_pool_from_json_str("not json")) == 1, "a non-document refused");
+    assert(garjan_is_err(voice_pool_from_json_str("{\"steal_policy\":0,\"max_voices\":1,\"slots\":[]}")) == 0,
+      "an empty slots array still loads");
 
     return assert_summary();
 }

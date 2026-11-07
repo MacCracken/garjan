@@ -4,6 +4,7 @@ include "src/error.cyr"
 include "src/logging.cyr"
 include "src/dsp.cyr"
 
+# Runs the parity tests for src/dsp.cyr. Returns the failure count, used as the exit code.
 fn main() {
     alloc_init();
 

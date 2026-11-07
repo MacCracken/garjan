@@ -25,6 +25,8 @@ struct ModeSpec {
     decay: f64;
 }
 
+# Builds one ModeSpec: frequency in Hz, linear amplitude, decay as T60 in s. Values are
+# stored as given. Returns it, or GARJAN_ERR_ALLOCATION.
 #must_use
 fn modal_modespec_new(frequency, amplitude, decay) {
     var s = garjan_alloc(sizeof(ModeSpec));
@@ -111,6 +113,7 @@ fn modal_bank_new(specs, sample_rate) {
     return self;
 }
 
+# Returns the number of modes in the bank.
 #inline
 #must_use
 fn modal_bank_mode_count(self) {
@@ -118,7 +121,6 @@ fn modal_bank_mode_count(self) {
 }
 
 # Process one excitation sample through all modes (SoA loop).
-#inline
 #must_use
 fn modal_bank_process_sample(self, excitation) {
     var cre = ModalBank_coeff_re(self);
@@ -246,6 +248,8 @@ var EXCITATION_HALF_SINE  = 2;
 #derive(accessors)
 struct Exciter { excitation_type; duration_samples; amplitude; position; active; rng; }
 
+# Builds an idle Exciter of an EXCITATION_* type, with its length in samples; exciter_trigger
+# starts it. Values are stored as given. Returns it, or GARJAN_ERR_ALLOCATION.
 #must_use
 fn exciter_new(excitation_type, duration_samples, amplitude) {
     var self = garjan_alloc(sizeof(Exciter));
@@ -285,7 +289,6 @@ fn exciter_trigger(self) {
 }
 
 # Next excitation sample; 0.0 when spent.
-#inline
 #must_use
 fn exciter_next_sample(self) {
     if (Exciter_active(self) == 0) { return 0; }
@@ -322,6 +325,7 @@ fn exciter_next_sample(self) {
     return sample;
 }
 
+# Returns 1 while an excitation is in progress, otherwise 0.
 #inline
 #must_use
 fn exciter_is_active(self) {

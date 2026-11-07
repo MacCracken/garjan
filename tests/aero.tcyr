@@ -2,11 +2,13 @@
 include "src/error.cyr"
 include "src/aero.cyr"
 
+# Runs the parity tests for src/aero.cyr. Returns the failure count, used as the exit code.
 fn main() {
     alloc_init();
     test_group("whoosh_config");
     var s = aero_whoosh_config(WHOOSH_VEHICLE);
-    assert(f64_lt(f64_abs(f64_sub(WhooshConfig_duration(s), f64_div(f64_from(15), f64_from(10)))), GARJAN_EPSILON) == 1, "vehicle dur 1.5");
+    assert(f64_lt(f64_abs(f64_sub(WhooshConfig_duration(s), f64_div(f64_from(15), f64_from(10)))), GARJAN_EPSILON) == 1,
+      "vehicle dur 1.5");
 
     test_group("whistle_config");
     var w = aero_whistle_config(WHISTLE_BOTTLE);

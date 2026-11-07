@@ -19,7 +19,8 @@ process; it defends against malformed **data**.
 The highest-risk surface is `*_from_json_str`, the only entry point taking
 fully attacker-controlled input. Two audits have focused there:
 [2.0.2](docs/audit/2026-08-30-audit.md) and
-[2.5.1](docs/audit/2026-08-30-audit-2.md).
+[2.5.1](docs/audit/2026-08-30-audit-2.md). `cyrius fuzz` drives hostile documents
+through all 22 of them.
 
 ## Attack surface
 

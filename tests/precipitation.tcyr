@@ -11,6 +11,7 @@ include "src/aero.cyr"
 include "src/creature.cyr"
 include "src/precipitation.cyr"
 
+# Runs the parity tests for src/precipitation.cyr. Returns the failure count, used as the exit code.
 fn main() {
     alloc_init();
 
@@ -18,10 +19,13 @@ fn main() {
     # Hail on metal -> resonant modal bank present.
     var p = precipitation_new(PRECIP_HAIL, STONE_MEDIUM, TERRAIN_METAL, f64_from(44100));
     assert(garjan_is_err(p) == 0, "precipitation_new ok");
-    assert(garjan_is_err(precipitation_new(PRECIP_HAIL, STONE_MEDIUM, TERRAIN_METAL, 0)) == 1, "precipitation_new rejects sr=0");
+    assert(garjan_is_err(precipitation_new(PRECIP_HAIL, STONE_MEDIUM, TERRAIN_METAL, 0)) == 1,
+      "precipitation_new rejects sr=0");
     # Medium stone: rate 15, amplitude 0.4, decay_ms 10 -> decay_samples = 10*44100/1000 = 441.
     assert(f64_lt(f64_abs(f64_sub(Precipitation_rate(p), f64_from(15))), GARJAN_EPSILON) == 1, "rate 15");
-    assert(f64_lt(f64_abs(f64_sub(Precipitation_amplitude(p), f64_div(f64_from(4), f64_from(10)))), GARJAN_EPSILON) == 1, "amplitude 0.4");
+    assert(f64_lt(f64_abs(f64_sub(Precipitation_amplitude(p), f64_div(f64_from(4), f64_from(10)))),
+        GARJAN_EPSILON) == 1,
+      "amplitude 0.4");
     assert_eq(Precipitation_decay_samples(p), 441, "decay_samples 441");
     assert(Precipitation_modal_bank(p) != 0, "hail on metal has modal bank");
 

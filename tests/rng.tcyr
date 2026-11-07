@@ -4,6 +4,7 @@
 include "src/error.cyr"
 include "src/rng.cyr"
 
+# Runs the PCG32 parity and range tests for src/rng.cyr. Returns the failure count, used as the exit code.
 fn main() {
     alloc_init();
 
@@ -72,6 +73,16 @@ fn main() {
         rs_i = rs_i + 1;
     }
     assert_eq(rs_same, 1, "rng_seed(s) reproduces rng_new(s) stream exactly");
+
+    # --- 2.5.3: found by tests/garjan.fcyr ---
+    # NaN survives the clamp, and `p < NaN` is never true, so this used to loop forever.
+    # A JSON null reaches it, as does infinity times zero. See ADR-0009.
+    test_group("poisson_non_finite");
+    var pn = rng_new(7);
+    assert_eq(rng_poisson(pn, f64_div(0, 0)), 0, "NaN rate gives no events");
+    assert_eq(rng_poisson(pn, f64_neg(f64_div(0, 0))), 0, "negated NaN rate gives no events");
+    var pinf = rng_poisson(pn, f64_div(F64_ONE, 0));
+    assert(pinf >= 0, "+Inf rate clamps to the ceiling and returns");
 
     return assert_summary();
 }

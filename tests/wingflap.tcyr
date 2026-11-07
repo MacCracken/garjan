@@ -11,6 +11,7 @@ include "src/aero.cyr"
 include "src/creature.cyr"
 include "src/wingflap.cyr"
 
+# Runs the parity tests for src/wingflap.cyr. Returns the failure count, used as the exit code.
 fn main() {
     alloc_init();
 
@@ -23,7 +24,8 @@ fn main() {
     # Medium: flap_duration_samples = (0.03 * 44100) = 1323
     assert_eq(WingFlap_flap_duration_samples(w), 1323, "medium flap_duration_samples 1323");
     # Medium: amplitude = 0.25
-    assert(f64_lt(f64_abs(f64_sub(WingFlap_amplitude(w), f64_div(f64_from(25), f64_from(100)))), GARJAN_EPSILON) == 1, "medium amplitude 0.25");
+    assert(f64_lt(f64_abs(f64_sub(WingFlap_amplitude(w), f64_div(f64_from(25), f64_from(100)))), GARJAN_EPSILON) == 1,
+      "medium amplitude 0.25");
     # default intensity = 1.0
     assert(f64_lt(f64_abs(f64_sub(WingFlap_intensity(w), F64_ONE)), GARJAN_EPSILON) == 1, "default intensity 1");
 

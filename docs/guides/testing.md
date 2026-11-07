@@ -8,7 +8,7 @@ garjan is a Cyrius project. There is no cargo — `cyrius test` auto-discovers
 ```sh
 cyrius test                      # all 33 suites
 cyrius test tests/fire.tcyr      # one suite
-cyrius fuzz                      # tests/garjan.fcyr
+cyrius fuzz                      # tests/garjan.fcyr, 13 to 31 s
 cyrius bench tests/garjan.bcyr   # 26 benchmarks
 cyrius audit                     # fmt / lint / docs / tests / bench
 ```
@@ -29,7 +29,26 @@ cyrius audit                     # fmt / lint / docs / tests / bench
   rain is louder than light), the uniform silence gates, determinism replay,
   builder-vs-direct equivalence, and the hot-path allocation contract.
 
-Total: **836 assertions**.
+Total: **825 assertions**.
+
+## The fuzz harness
+
+`tests/garjan.fcyr` attacks the JSON boundary, which the suites can only sample. It
+derives 19,603 hostile documents from each synth's own `*_to_json` output and runs
+each one in a forked child under a time and memory limit, so a crash, hang or runaway
+allocation fails that case without ending the run. A document may be refused, or
+accepted and rendered; anything else fails. The run also fails if any entry point stops
+exercising documents, so it cannot pass by reaching nothing.
+
+The run is deterministic. A failure prints the document, and this replays it in one
+process, where a debugger can reach it:
+
+```sh
+cyrius build tests/garjan.fcyr build/fuzz && ./build/fuzz <entry> '<document>'
+```
+
+CI runs the harness on every push and pull request, and releases gate on CI. It covers
+documents only, not constructors or setters.
 
 ## What the suite does NOT check
 

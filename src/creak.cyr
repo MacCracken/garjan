@@ -183,7 +183,6 @@ fn creak_set_speed(self, speed) {
 
 # One shaped-noise sample: pink noise through the lowpass shape filter (naad
 # path). Ports generate_noise; does NOT touch self.rng.
-#inline
 #must_use
 fn creak_generate_noise(self) {
     var raw = noise_next_sample(Creak_noise_gen(self));
@@ -301,6 +300,7 @@ fn creak_to_json(self, sb) {
 #must_use
 fn creak_from_json_str(json) {
     var p = CreakParams_from_json_str(json);
+    if (p == 0) { return GARJAN_ERR_INVALID_PARAMETER; }   # not a JSON object
     # Deserialize must validate what the constructor validates. Before 2.5.1
     # this path relied on a downstream naad component rejecting a bad
     # sample_rate -- which bubble's build_naad cannot do, since it only
@@ -342,9 +342,9 @@ fn creak_from_json_str(json) {
     # returns 0 and the synth resumes without it, exactly as it used to.
     var dsp = garjan_dsp_node(json);
     if (dsp != 0) {
-        garjan_state_modal_load(Creak_modal_bank(self), bayan_json_v_obj_get(dsp, "mb"));
-        garjan_state_noise_load(Creak_noise_gen(self), bayan_json_v_obj_get(dsp, "ng"));
-        garjan_state_biquad_load(Creak_shape_filter(self), bayan_json_v_obj_get(dsp, "sf"));
+        garjan_state_modal_load(Creak_modal_bank(self), garjan_json_get(dsp, "mb"));
+        garjan_state_noise_load(Creak_noise_gen(self), garjan_json_get(dsp, "ng"));
+        garjan_state_biquad_load(Creak_shape_filter(self), garjan_json_get(dsp, "sf"));
     }
     return self;
 }

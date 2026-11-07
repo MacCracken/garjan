@@ -34,7 +34,6 @@ fn garjan_dcblocker_new(sample_rate) {
 }
 
 # Process one sample, removing DC offset.
-#inline
 fn garjan_dcblocker_process(self, x) {
     var y = f64_add(f64_sub(x, DcBlocker_x_prev(self)), f64_mul(DcBlocker_r(self), DcBlocker_y_prev(self)));
     DcBlocker_set_x_prev(self, x);
@@ -65,6 +64,8 @@ var GARJAN_MAX_SAMPLE_RATE_HZ = 768000;     # highest standard hi-res rate
 var GARJAN_MAX_DURATION_S     = 600;        # 10 minutes per synthesize call
 var GARJAN_MAX_SAMPLES        = 44100000;   # 1000 s at 44.1 kHz
 
+# Checks a synthesize duration: positive, finite and at most GARJAN_MAX_DURATION_S.
+# Returns GARJAN_OK, or logs a warning and returns GARJAN_ERR_INVALID_PARAMETER.
 #must_use
 fn garjan_validate_duration(duration) {
     if (f64_le(duration, 0) == 1) {
@@ -82,6 +83,8 @@ fn garjan_validate_duration(duration) {
     return GARJAN_OK;
 }
 
+# Checks a sample rate: finite and from GARJAN_MIN_SAMPLE_RATE_HZ to GARJAN_MAX_SAMPLE_RATE_HZ.
+# Returns GARJAN_OK, or logs a warning and returns GARJAN_ERR_INVALID_PARAMETER.
 #must_use
 fn garjan_validate_sample_rate(sample_rate) {
     if (f64_le(sample_rate, 0) == 1) {
@@ -151,7 +154,7 @@ fn garjan_map_naad_error(code) {
 #
 # 2. bayan's object API is ASYMMETRIC, deliberately (there is a banner in
 #    lib/bayan.cyr): `bayan_json_v_obj_set` takes its key as a **Str**, while
-#    `bayan_json_v_obj_get` takes a **cstring**. Passing a cstring to obj_set
+#    `garjan_json_get` takes a **cstring**. Passing a cstring to obj_set
 #    builds a tree that SEGFAULTS when serialized. Use str_from() on set.
 # ================================================================
 
@@ -164,6 +167,8 @@ fn garjan_state_biquad(f) {
     return a;
 }
 
+# Restores a biquad's delay memory from garjan_state_biquad's array. A missing or short
+# node leaves the filter as built, which is how a pre-2.5.0 document loads. Returns 0.
 fn garjan_state_biquad_load(f, n) {
     if (n == 0) { return 0; }
     if (bayan_json_v_arr_len(n) < 2) { return 0; }
@@ -181,6 +186,8 @@ fn garjan_state_svf(f) {
     return a;
 }
 
+# Restores an SVF's integrator state from garjan_state_svf's array. A missing or short
+# node leaves the filter as built. Returns 0.
 fn garjan_state_svf_load(f, n) {
     if (n == 0) { return 0; }
     if (bayan_json_v_arr_len(n) < 2) { return 0; }
@@ -199,6 +206,8 @@ fn garjan_state_lfo(l) {
     return a;
 }
 
+# Restores an LFO's phase, sample-and-hold value and rng from garjan_state_lfo's array.
+# A missing or short node leaves it as built. Returns 0.
 fn garjan_state_lfo_load(l, n) {
     if (n == 0) { return 0; }
     if (bayan_json_v_arr_len(n) < 3) { return 0; }
@@ -232,6 +241,9 @@ fn garjan_state_noise(ng) {
     return a;
 }
 
+# Restores a noise generator from garjan_state_noise's array: rng, brown and pink state,
+# then the pink octaves. A missing or short node leaves it as built, and octaves past
+# the generator's own are ignored. Returns 0.
 fn garjan_state_noise_load(ng, n) {
     if (n == 0) { return 0; }
     var len = bayan_json_v_arr_len(n);
@@ -271,7 +283,7 @@ fn garjan_emit_with_dsp(sb, params_sb, dsp) {
 fn garjan_dsp_node(json) {
     var root = bayan_json_v_parse_buf(json, strlen(json));
     if (root == 0) { return 0; }
-    return bayan_json_v_obj_get(root, "dsp");
+    return garjan_json_get(root, "dsp");
 }
 
 # ---- ModalBank: the per-resonator state pair, interleaved re/im ----
@@ -294,6 +306,8 @@ fn garjan_state_modal(mb) {
     return a;
 }
 
+# Restores a modal bank's re/im pairs from garjan_state_modal's array. Pairs past the
+# bank's modes are ignored, and a null bank or missing node is a no-op. Returns 0.
 fn garjan_state_modal_load(mb, n) {
     if (mb == 0) { return 0; }
     if (n == 0) { return 0; }
@@ -325,6 +339,8 @@ fn garjan_state_exciter(ex) {
     return a;
 }
 
+# Restores an exciter's position, active flag and rng from garjan_state_exciter's array.
+# A null exciter or a missing or short node is a no-op. Returns 0.
 fn garjan_state_exciter_load(ex, n) {
     if (ex == 0) { return 0; }
     if (n == 0) { return 0; }

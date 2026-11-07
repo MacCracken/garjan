@@ -209,6 +209,7 @@ fn fire_to_json(self, sb) {
 #must_use
 fn fire_from_json_str(json) {
     var p = FireParams_from_json_str(json);
+    if (p == 0) { return GARJAN_ERR_INVALID_PARAMETER; }   # not a JSON object
     # Deserialize must validate what the constructor validates. Before 2.5.1
     # this path relied on a downstream naad component rejecting a bad
     # sample_rate -- which bubble's build_naad cannot do, since it only
@@ -244,10 +245,10 @@ fn fire_from_json_str(json) {
     # returns 0 and the synth simply resumes without it, as it always did.
     var dsp = garjan_dsp_node(json);
     if (dsp != 0) {
-        garjan_state_biquad_load(Fire_roar_filter(self), bayan_json_v_obj_get(dsp, "rf"));
-        garjan_state_biquad_load(Fire_crackle_filter(self), bayan_json_v_obj_get(dsp, "cf"));
-        garjan_state_noise_load(Fire_roar_noise(self), bayan_json_v_obj_get(dsp, "rn"));
-        garjan_state_noise_load(Fire_crackle_noise(self), bayan_json_v_obj_get(dsp, "cn"));
+        garjan_state_biquad_load(Fire_roar_filter(self), garjan_json_get(dsp, "rf"));
+        garjan_state_biquad_load(Fire_crackle_filter(self), garjan_json_get(dsp, "cf"));
+        garjan_state_noise_load(Fire_roar_noise(self), garjan_json_get(dsp, "rn"));
+        garjan_state_noise_load(Fire_crackle_noise(self), garjan_json_get(dsp, "cn"));
     }
     return self;
 }

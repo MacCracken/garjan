@@ -224,6 +224,7 @@ fn rain_to_json(self, sb) {
 #must_use
 fn rain_from_json_str(json) {
     var p = RainParams_from_json_str(json);
+    if (p == 0) { return GARJAN_ERR_INVALID_PARAMETER; }   # not a JSON object
     # Deserialize must validate what the constructor validates. Before 2.5.1
     # this path relied on a downstream naad component rejecting a bad
     # sample_rate -- which bubble's build_naad cannot do, since it only
@@ -261,8 +262,8 @@ fn rain_from_json_str(json) {
     # returns 0 and the synth resumes without it, exactly as it used to.
     var dsp = garjan_dsp_node(json);
     if (dsp != 0) {
-        garjan_state_biquad_load(Rain_rain_filter(self), bayan_json_v_obj_get(dsp, "rf"));
-        garjan_state_noise_load(Rain_drop_noise(self), bayan_json_v_obj_get(dsp, "dn"));
+        garjan_state_biquad_load(Rain_rain_filter(self), garjan_json_get(dsp, "rf"));
+        garjan_state_noise_load(Rain_drop_noise(self), garjan_json_get(dsp, "dn"));
     }
     return self;
 }
@@ -463,6 +464,7 @@ fn thunder_to_json(self, sb) {
 #must_use
 fn thunder_from_json_str(json) {
     var p = ThunderParams_from_json_str(json);
+    if (p == 0) { return GARJAN_ERR_INVALID_PARAMETER; }   # not a JSON object
     # Deserialize must validate what the constructor validates. Before 2.5.1
     # this path relied on a downstream naad component rejecting a bad
     # sample_rate -- which bubble's build_naad cannot do, since it only
@@ -497,9 +499,9 @@ fn thunder_from_json_str(json) {
     # returns 0 and the synth resumes without it, exactly as it used to.
     var dsp = garjan_dsp_node(json);
     if (dsp != 0) {
-        garjan_state_biquad_load(Thunder_rumble_filter(self), bayan_json_v_obj_get(dsp, "rf"));
-        garjan_state_noise_load(Thunder_crack_noise(self), bayan_json_v_obj_get(dsp, "cn"));
-        garjan_state_noise_load(Thunder_rumble_noise(self), bayan_json_v_obj_get(dsp, "rn"));
+        garjan_state_biquad_load(Thunder_rumble_filter(self), garjan_json_get(dsp, "rf"));
+        garjan_state_noise_load(Thunder_crack_noise(self), garjan_json_get(dsp, "cn"));
+        garjan_state_noise_load(Thunder_rumble_noise(self), garjan_json_get(dsp, "rn"));
     }
     return self;
 }
@@ -665,6 +667,7 @@ fn wind_to_json(self, sb) {
 #must_use
 fn wind_from_json_str(json) {
     var p = WindParams_from_json_str(json);
+    if (p == 0) { return GARJAN_ERR_INVALID_PARAMETER; }   # not a JSON object
     # Deserialize must validate what the constructor validates. Before 2.5.1
     # this path relied on a downstream naad component rejecting a bad
     # sample_rate -- which bubble's build_naad cannot do, since it only
@@ -700,9 +703,9 @@ fn wind_from_json_str(json) {
     # returns 0 and the synth resumes without it, exactly as it used to.
     var dsp = garjan_dsp_node(json);
     if (dsp != 0) {
-        garjan_state_svf_load(Wind_shape_filter(self), bayan_json_v_obj_get(dsp, "sf"));
-        garjan_state_lfo_load(Wind_gust_lfo(self), bayan_json_v_obj_get(dsp, "gl"));
-        garjan_state_noise_load(Wind_noise_gen(self), bayan_json_v_obj_get(dsp, "ng"));
+        garjan_state_svf_load(Wind_shape_filter(self), garjan_json_get(dsp, "sf"));
+        garjan_state_lfo_load(Wind_gust_lfo(self), garjan_json_get(dsp, "gl"));
+        garjan_state_noise_load(Wind_noise_gen(self), garjan_json_get(dsp, "ng"));
     }
     return self;
 }
