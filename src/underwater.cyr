@@ -248,12 +248,8 @@ fn underwater_synthesize(self, duration) {
     var num = f64_to(f64_mul(Underwater_sample_rate(self), duration));
     var ga_ncheck = garjan_validate_sample_count(num);
     if (garjan_is_err(ga_ncheck) == 1) { return ga_ncheck; }
-    var output = vec_new();
-    var i = 0;
-    while (i < num) {
-        vec_push(output, 0);
-        i = i + 1;
-    }
+    var output = garjan_vec_zeros(num);
+    if (garjan_is_err(output) == 1) { return output; }
     underwater_process_block(self, output);
     return output;
 }

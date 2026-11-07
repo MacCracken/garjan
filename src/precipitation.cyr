@@ -156,7 +156,7 @@ fn precipitation_build_naad(self) {
 fn precipitation_new(precip_type, stone_size, surface, sample_rate) {
     if (garjan_enum_invalid(precip_type, PRECIP_SURFACE_RAIN) == 1) { return GARJAN_ERR_INVALID_PARAMETER; }
     if (garjan_enum_invalid(stone_size, STONE_LARGE) == 1) { return GARJAN_ERR_INVALID_PARAMETER; }
-    if (garjan_enum_invalid(surface, MATERIAL_CERAMIC) == 1) { return GARJAN_ERR_INVALID_PARAMETER; }
+    if (garjan_enum_invalid(surface, TERRAIN_WET) == 1) { return GARJAN_ERR_INVALID_PARAMETER; }
     var e = garjan_validate_sample_rate(sample_rate);
     if (garjan_is_err(e) == 1) { return e; }
 
@@ -302,12 +302,8 @@ fn precipitation_synthesize(self, duration) {
     var num = f64_to(f64_mul(Precipitation_sample_rate(self), duration));
     var ga_ncheck = garjan_validate_sample_count(num);
     if (garjan_is_err(ga_ncheck) == 1) { return ga_ncheck; }
-    var output = vec_new();
-    var i = 0;
-    while (i < num) {
-        vec_push(output, 0);
-        i = i + 1;
-    }
+    var output = garjan_vec_zeros(num);
+    if (garjan_is_err(output) == 1) { return output; }
     precipitation_process_block(self, output);
     return output;
 }
@@ -365,7 +361,7 @@ fn precipitation_from_json_str(json) {
     if (garjan_enum_invalid(PrecipitationParams_stone_size(p), STONE_LARGE) == 1) {
         return GARJAN_ERR_INVALID_PARAMETER;
     }
-    if (garjan_enum_invalid(PrecipitationParams_surface(p), MATERIAL_CERAMIC) == 1) {
+    if (garjan_enum_invalid(PrecipitationParams_surface(p), TERRAIN_WET) == 1) {
         return GARJAN_ERR_INVALID_PARAMETER;
     }
     var self = garjan_alloc(sizeof(Precipitation));

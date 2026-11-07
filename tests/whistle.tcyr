@@ -69,6 +69,32 @@ fn main() {
     # restored synth resumes the SAME rng sequence
     assert_eq(rng_next_u32(Whistle_rng(g)), rng_next_u32(Whistle_rng(g2)), "restored whistle resumes rng");
 
+    # --- 2.6.2: whistle_svf_band_pass stands in for naad's allocating step ---
+    # It is a copy of naad's filter step, so hold it to naad's own output bit for bit.
+    # If a dependency bump changes the filter, this fails instead of the audio drifting.
+    test_group("whistle_svf_band_pass matches naad bit for bit");
+    var svf_a = filter_svf_new(f64_from(800), f64_from(5), f64_from(44100));
+    var svf_b = filter_svf_new(f64_from(800), f64_from(5), f64_from(44100));
+    var svf_ng = noise_new(NOISE_WHITE, 1234);
+    var svf_i = 0;
+    var svf_bad = 0;
+    while (svf_i < 20000) {
+        if (svf_i % 500 == 0) {
+            var svf_f = f64_from(200 + svf_i / 10);
+            filter_svf_set_params(svf_a, svf_f, f64_from(2 + svf_i / 2000));
+            filter_svf_set_params(svf_b, svf_f, f64_from(2 + svf_i / 2000));
+        }
+        var svf_n = noise_next_sample(svf_ng);
+        if (svf_i >= 18000) { svf_n = 0; }           # decay into the denormal flush
+        var svf_got = whistle_svf_band_pass(svf_a, svf_n);
+        var svf_want = SvfOutput_band_pass(filter_svf_process_sample(svf_b, svf_n));
+        if (svf_got != svf_want) { svf_bad = svf_bad + 1; }
+        if (StateVariableFilter_ic1eq(svf_a) != StateVariableFilter_ic1eq(svf_b)) { svf_bad = svf_bad + 1; }
+        if (StateVariableFilter_ic2eq(svf_a) != StateVariableFilter_ic2eq(svf_b)) { svf_bad = svf_bad + 1; }
+        svf_i = svf_i + 1;
+    }
+    assert_eq(svf_bad, 0, "output and filter state match naad over 20,000 samples");
+
     return assert_summary();
 }
 var ec = main();

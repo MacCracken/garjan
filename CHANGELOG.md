@@ -5,6 +5,67 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.2] - The roadmap's quick repairs
+
+Maintenance release, with no toolchain or dependency change. Two items the roadmap listed
+as blocked upstream turned out to be fixable here, and one known bug and the benchmark it
+was hiding are fixed. **All 258,048 raw samples match 2.6.1.**
+
+### Fixed
+
+- **`whistle` no longer allocates per sample.** naad's `filter_svf_process_sample` returns a
+  heap `SvfOutput`, which cost 5 GB/hour in a continuous stream and emptied the 2 GiB arena
+  in about 25 minutes. Every `process_block` now allocates nothing. naad's allocation-free
+  `_into` form is missing from dhvani's naad 2.2.4, so `whistle_svf_band_pass` copies the
+  seven-line filter step, and a test holds it to naad's own filter bit for bit over 20,000
+  samples, denormal flush included. If naad changes that step, CI goes red.
+- **`*_synthesize` retains only what it returns.** Growing a buffer by pushes kept every
+  outgrown copy in an arena that never frees. All 21 paths and impact's excitation buffer
+  now build it in one allocation, through `garjan_vec_zeros`, which returns
+  `GARJAN_ERR_ALLOCATION` where a push aborted the process.
+
+  | One second at 44.1 kHz | 2.6.1 | 2.6.2 |
+  |---|---:|---:|
+  | `fire_synthesize` retains | 1,048,472 B | **352,952 B** |
+  | `whistle_synthesize` retains | 2,459,672 B | **352,952 B** |
+  | `whistle` streaming retains | 1,411,200 B | **0 B** |
+
+- **`surface` was bounded by the wrong enum.** It is a `Terrain` in `rust-old/`, but
+  `precipitation_new` and `precipitation_from_json_str` checked it against
+  `MATERIAL_CERAMIC`, so hail and snow accepted the two ids past `TERRAIN_WET`.
+  [ADR-0006](docs/adr/0006-out-of-range-enum-ids-are-rejected.md) says these are refused,
+  and now they are.
+- **The hail benchmark measured gravel.** `tests/garjan.bcyr`, `scripts/audio-hash.cyr` and
+  `tests/garjan.tcyr` passed `MATERIAL_*` ids as the surface. `MATERIAL_METAL` is 0, and 0
+  is `TERRAIN_GRAVEL`, which has no resonant modes, so "hail/metal" never ran the modal
+  bank. Fixed in all three. The benchmark row rises from 1.36 to 1.86 ms, and the oracle's
+  `precipitation` hash moves, because both now measure what they say.
+
+### Changed
+
+- **The roadmap is reorganized.** Completed items are gone, the 2.6.3 P(-1) sweep is
+  scheduled next with its method and open items, and later work is grouped into 2.7.x to
+  2.x.x by gate. The port-completeness method moves to
+  [`docs/guides/port-completeness.md`](docs/guides/port-completeness.md).
+- **The last 2.x maturity criterion is met.** The roadmap said garjan had no downstream
+  consumer. dhvani calls it from `src/environment.cyr`, and its `tests/environment.tcyr`
+  passes all 10 on this bundle under dhvani's own pins.
+- [`BENCHMARKS.md`](BENCHMARKS.md) is refreshed. The suite is 847 assertions, up from 825.
+
+### Verified
+
+- **The three repairs move no sample.** 21 synths and 258,048 raw samples match 2.6.1 on
+  the old fixtures. Applying the surface guard and correcting the callers were kept as
+  separate steps: the guard moved no hash, and the correction moved exactly one.
+- **All 21 synthesize paths use the helper**, and all 22 deserializers refuse before their
+  first read, each counted by measurement rather than by trusting the rollout.
+- Each repair's test failed before its fix. `cyrius audit` exits 0, the build has no
+  warnings, `cyrius fuzz` passes all 19,603 documents, and the hostile sweep shows no crash
+  or hang, with one change: an out-of-range `surface` is now refused.
+- `dist/garjan.cyr` builds under dhvani's cyrius 6.6.10 and tags with no undefined function
+  from garjan, and all 21 synths round-trip there. The collision audit is zero across 426
+  symbols.
+
 ## [2.6.1] - Newest cyrius and dependencies
 
 Toolchain and dependency release. `cyrius` 6.7.9 -> **6.7.18**, `naad` 2.3.0 -> **2.3.3**,

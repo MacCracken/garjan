@@ -45,6 +45,27 @@ fn main() {
     var j2 = str_data(str_builder_build(sb2));
     assert(memeq(j, j2, strlen(j)) == 1, "DcBlocker json roundtrip idempotent");
 
+    # --- 2.6.2: writes lib/vec.cyr's header directly, so pin that layout at every bump ---
+    test_group("garjan_vec_zeros");
+    var vz0 = garjan_vec_zeros(0);
+    assert_eq(vec_len(vz0), 0, "zero length");
+    var vz = garjan_vec_zeros(1000);
+    assert_eq(vec_len(vz), 1000, "length");
+    assert_eq(vec_cap(vz), 1000, "capacity is exact, not doubled");
+    var vz_i = 0;
+    var vz_sum = 0;
+    while (vz_i < 1000) { vz_sum = vz_sum + vec_get(vz, vz_i); vz_i = vz_i + 1; }
+    assert_eq(vz_sum, 0, "every slot is zero");
+    vec_set(vz, 999, 7);
+    assert_eq(vec_get(vz, 999), 7, "the last slot is writable");
+    vec_push(vz, 9);
+    assert_eq(vec_len(vz), 1001, "growing past the end still works");
+    assert_eq(vec_get(vz, 999), 7, "growth keeps the contents");
+    assert_eq(vec_get(vz, 1000), 9, "growth appends");
+    var vz_small = garjan_vec_zeros(4);
+    assert_eq(vec_len(vz_small), 4, "below the default capacity");
+    assert_eq(vec_get(vz_small, 3), 0, "below the default capacity is zeroed");
+
     return assert_summary();
 }
 

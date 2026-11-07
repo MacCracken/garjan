@@ -85,11 +85,9 @@ and no non-finite output.
 - **The arena never frees.** Nothing is reclaimed until `alloc_reset()`, which
   invalidates every outstanding pointer. Long-running consumers should treat
   synth construction as an epoch-scoped operation.
-- `process_block` allocates nothing, pinned by test — **except `whistle`**,
-  which allocates 32 B/sample via naad's `SvfOutput` (~5 GB/hour, arena
-  exhausted in ~25 min). Blocked on an upstream naad addition.
-- `*_synthesize` grows its output vector by doubling from capacity 16, ~3x
-  overhead, all of it retained. Blocked on a stdlib `vec_with_capacity`.
+- `process_block` allocates nothing, pinned by test. `whistle` was the last exception,
+  until 2.6.2.
+- `*_synthesize` retains its output buffer and a small header, and nothing more.
 
 ## Failure modes
 

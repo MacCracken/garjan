@@ -9,37 +9,37 @@ Linux; 20 iterations per synth (200 for the 512-sample ops).
 
 | Synthesizer                | Time / 1 s audio | Real-time factor |
 |----------------------------|------------------|------------------|
-| precipitation (hail/metal) | 1.36 ms          | ~735x            |
-| cloth (Flag, 12 m/s)       | 1.44 ms          | ~695x            |
-| rain (Moderate)            | 1.84 ms          | ~543x            |
-| wingflap (Medium)          | 2.23 ms          | ~449x            |
-| bubble (Boiling)           | 2.29 ms          | ~436x            |
-| fire                       | 3.33 ms          | ~301x            |
-| thunder (2 km)             | 3.87 ms          | ~258x            |
-| whoosh (Swing)             | 3.88 ms          | ~258x            |
-| impact (glass shatter)     | 5.69 ms          | ~176x            |
-| water (Waves)              | 5.72 ms          | ~175x            |
-| footstep (gravel walk)     | 5.81 ms          | ~172x            |
-| wind (15 m/s)              | 7.26 ms          | ~138x            |
-| impact (metal strike)      | 7.38 ms          | ~135x            |
-| rolling (wheel on wood)    | 7.57 ms          | ~132x            |
-| water (Stream)             | 7.81 ms          | ~128x            |
-| foliage (rustle)           | 8.05 ms          | ~124x            |
-| underwater (Medium depth)  | 10.13 ms         | ~99x             |
-| friction (scrape metal)    | 10.19 ms         | ~98x             |
-| surf (Moderate, 2 s op)    | 22.49 ms         | ~89x             |
-| whistle (Pipe)             | 11.31 ms         | ~88x             |
-| texture (Forest)           | 11.40 ms         | ~88x             |
-| impact (wood strike)       | 14.90 ms         | ~67x             |
-| creak (Door)               | 15.89 ms         | ~63x             |
-| **insect (swarm of 8)**    | **33.28 ms**     | **~30x**         |
+| cloth (Flag, 12 m/s)       | 1.50 ms          | ~668x            |
+| precipitation (hail/metal) | 1.85 ms          | ~539x            |
+| rain (Moderate)            | 1.96 ms          | ~511x            |
+| wingflap (Medium)          | 2.24 ms          | ~446x            |
+| bubble (Boiling)           | 2.35 ms          | ~426x            |
+| fire                       | 3.43 ms          | ~292x            |
+| whoosh (Swing)             | 4.04 ms          | ~248x            |
+| thunder (2 km)             | 4.09 ms          | ~244x            |
+| impact (glass shatter)     | 5.97 ms          | ~168x            |
+| footstep (gravel walk)     | 6.11 ms          | ~164x            |
+| water (Waves)              | 6.21 ms          | ~161x            |
+| wind (15 m/s)              | 7.71 ms          | ~130x            |
+| impact (metal strike)      | 7.86 ms          | ~127x            |
+| rolling (wheel on wood)    | 7.92 ms          | ~126x            |
+| foliage (rustle)           | 8.23 ms          | ~121x            |
+| water (Stream)             | 8.40 ms          | ~119x            |
+| whistle (Pipe)             | 10.20 ms         | ~98x             |
+| underwater (Medium depth)  | 10.48 ms         | ~95x             |
+| friction (scrape metal)    | 10.66 ms         | ~94x             |
+| surf (Moderate, 2 s op)    | 22.71 ms         | ~88x             |
+| texture (Forest)           | 12.53 ms         | ~80x             |
+| impact (wood strike)       | 15.88 ms         | ~63x             |
+| creak (Door)               | 16.63 ms         | ~60x             |
+| **insect (swarm of 8)**    | **33.98 ms**     | **~29x**         |
 
 Sub-block ops:
 
 | Op                        | Time      |
 |---------------------------|-----------|
-| `process_block` wind, 512 | 84.5 us  |
-| modal bank, 8 modes, 512  | 143.2 us  |
+| `process_block` wind, 512 | 91.4 us  |
+| modal bank, 8 modes, 512  | 161.4 us  |
 
 Last measured on Cyrius 6.7.18 with naad 2.3.3 / hisab 3.4.1 / goonj 2.3.1.
 Run-to-run spread is roughly 3%, so treat single-run differences under that as
@@ -64,6 +64,11 @@ noise.
 > of 40 read thunder +77% and the median op +6%. Alternating the two binaries and taking
 > each op's minimum read thunder +0.5%.
 
+> **Corrected in 2.6.2.** The `precipitation` row measured gravel while labelled metal:
+> `surface` is a `TERRAIN_*` id, the harness passed `MATERIAL_METAL`, which is 0, and 0 is
+> `TERRAIN_GRAVEL`. Gravel has no resonant modes, so the row left out the modal bank. It
+> now measures hail on metal, which accounts for most of its rise in the table.
+>
 > **Corrected in 2.2.0.** The `surf` and `underwater` rows previously measured
 > the wrong configuration. `surf_new` and `underwater_new` take **enum ids**
 > (`SURF_*`, `UNDERWATER_DEPTH_*`), and the harness was passing an f64 —
@@ -75,7 +80,7 @@ noise.
 
 ## Notes
 
-- **`insect` (swarm of 8) remains the hot spot at ~30x real-time**, though
+- **`insect` (swarm of 8) remains the hot spot at ~29x real-time**, though
   2.3.0 took it from 49.9 ms to 42.6 ms (−15%; wing-buzz and cricket gained
   ~25%). Its per-sample loop runs once per swarm voice, so cost scales linearly
   with `swarm_count` (capped at 8): measured 7.5 / 12.7 / 23.5 / 42.7 ms at

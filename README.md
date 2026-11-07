@@ -138,11 +138,8 @@ Cyrius has no cargo-style features; the Rust flags map to always-on wiring:
 ## Design
 
 - **No samples**: every sound is synthesized from math
-- **No hot-path allocations**: `process_block` allocates nothing, pinned by a
-  test. One documented exception — `whistle` allocates 32 B/sample because
-  naad's `filter_svf_process_sample` returns a heap `SvfOutput`. naad 2.3.2 added an
-  allocation-free form, which garjan can adopt once dhvani has it; avoid `whistle`
-  for long-running streams until then.
+- **No hot-path allocations**: every `process_block` allocates nothing, pinned by
+  a test.
 - **Deterministic**: seeded RNG, bit-identical replay guaranteed. Enforced
   across refactors by [`scripts/audio-hash.cyr`](scripts/audio-hash.cyr) — the
   test suite checks finiteness and energy, *not* exact sample values.

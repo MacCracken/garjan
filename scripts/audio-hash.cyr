@@ -101,7 +101,7 @@ fn main() {
     k = 0; h = 0; while (k < 3) { whoosh_process_block(wh, b); h = hbuf(h, b); k = k + 1; }
     report("whoosh", h);
 
-    var pr = precipitation_new(PRECIP_HAIL, STONE_MEDIUM, MATERIAL_STONE, sr);
+    var pr = precipitation_new(PRECIP_HAIL, STONE_MEDIUM, TERRAIN_METAL, sr);
     k = 0; h = 0; while (k < 3) { precipitation_process_block(pr, b); h = hbuf(h, b); k = k + 1; }
     report("precipitation", h);
 

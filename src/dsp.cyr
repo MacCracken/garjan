@@ -122,6 +122,30 @@ fn garjan_validate_sample_count(num) {
     return GARJAN_OK;
 }
 
+# Builds a vec of `n` zeros in one allocation. Returns it, or GARJAN_ERR_ALLOCATION.
+# lib/vec.cyr has no capacity constructor, and growing by pushes keeps every outgrown
+# buffer in an arena that never frees: about three times the audio itself. This writes
+# vec's [data][len][cap] header directly, as naad_vec_zeros does; tests/dsp.tcyr pins it.
+#must_use
+fn garjan_vec_zeros(n) {
+    var v = vec_new();
+    if (v == 0) { return GARJAN_ERR_ALLOCATION; }
+    if (n > vec_cap(v)) {
+        var grown = garjan_alloc(n * 8);
+        if (garjan_is_err(grown) == 1) { return grown; }
+        store64(v, grown);
+        store64(v + 16, n);
+    }
+    var data = load64(v);
+    var i = 0;
+    while (i < n) {
+        store64(data + i * 8, 0);
+        i = i + 1;
+    }
+    store64(v + 8, n);
+    return v;
+}
+
 # ================================================================
 # map_naad_error -- log a naad backend init failure and map it to a garjan
 # error code. Ports dsp::map_naad_error. Call after a naad constructor:

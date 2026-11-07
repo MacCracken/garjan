@@ -75,6 +75,24 @@ fn whistle_build_naad(self) {
     return GARJAN_OK;
 }
 
+# One step of state-variable filter `f`, returning only the band-pass output. Copies
+# naad's step, because filter_svf_process_sample allocates an SvfOutput per sample, which
+# was 5 GB/hour here, and its allocation-free _into form is missing from dhvani's naad
+# 2.2.4. tests/whistle.tcyr holds this to naad bit for bit. Move to _into once dhvani has it.
+fn whistle_svf_band_pass(f, input) {
+    var a1 = StateVariableFilter_a1(f);
+    var a2 = StateVariableFilter_a2(f);
+    var a3 = StateVariableFilter_a3(f);
+    var ic1eq = StateVariableFilter_ic1eq(f);
+    var ic2eq = StateVariableFilter_ic2eq(f);
+    var v3 = f64_sub(input, ic2eq);
+    var v1 = f64_add(f64_mul(a1, ic1eq), f64_mul(a2, v3));
+    var v2 = f64_add(f64_add(ic2eq, f64_mul(a2, ic1eq)), f64_mul(a3, v3));
+    StateVariableFilter_set_ic1eq(f, flush_denormal(f64_sub(f64_mul(F64_TWO, v1), ic1eq)));
+    StateVariableFilter_set_ic2eq(f, flush_denormal(f64_sub(f64_mul(F64_TWO, v2), ic2eq)));
+    return v1;
+}
+
 # Creates a new wind whistle synthesizer. Returns a pointer or a negative code.
 #must_use
 fn whistle_new(source, sample_rate) {
@@ -147,8 +165,7 @@ fn whistle_process_block(self, output) {
             filter_svf_set_params(resonance_filter, clamped_freq, q);
 
             var noise = noise_next_sample(noise_gen);
-            var svf_out = filter_svf_process_sample(resonance_filter, noise);
-            var resonant = SvfOutput_band_pass(svf_out);
+            var resonant = whistle_svf_band_pass(resonance_filter, noise);
 
             var broad_noise = f64_mul(f64_mul(f64_mul(noise, noise_mix), wind_speed), broad_scale);
             var sample = f64_add(f64_mul(f64_mul(resonant, wind_speed), res_scale), broad_noise);
@@ -170,12 +187,8 @@ fn whistle_synthesize(self, duration) {
     var num = f64_to(f64_mul(Whistle_sample_rate(self), duration));
     var ga_ncheck = garjan_validate_sample_count(num);
     if (garjan_is_err(ga_ncheck) == 1) { return ga_ncheck; }
-    var output = vec_new();
-    var i = 0;
-    while (i < num) {
-        vec_push(output, 0);
-        i = i + 1;
-    }
+    var output = garjan_vec_zeros(num);
+    if (garjan_is_err(output) == 1) { return output; }
     whistle_process_block(self, output);
     return output;
 }

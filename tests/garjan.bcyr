@@ -199,7 +199,7 @@ fn main() {
     bench_batch_stop(b23, 20); bench_report(b23);
 
     # ---- precipitation / underwater / surf ----
-    var pr = precipitation_new(PRECIP_HAIL, STONE_MEDIUM, MATERIAL_METAL, sr);
+    var pr = precipitation_new(PRECIP_HAIL, STONE_MEDIUM, TERRAIN_METAL, sr);
     precipitation_set_intensity(pr, F64_HALF);
     var b24 = bench_new("precipitation_hail_1s");
     bench_batch_start(b24);

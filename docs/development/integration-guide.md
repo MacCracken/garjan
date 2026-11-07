@@ -56,12 +56,6 @@ fn audio_callback(wind, rain, scratch, output) {
 Allocate `scratch` **once**, outside the callback. The arena never frees, so an
 allocation on the audio thread accumulates for the life of the process.
 
-> **One exception to the no-allocation rule.** `whistle_process_block`
-> allocates 32 bytes per sample — naad's `filter_svf_process_sample` returns a
-> heap `SvfOutput` and exposes no non-allocating band-pass variant (it has one
-> for low-pass). That is ~5 GB/hour, exhausting the 2 GiB arena in about 25
-> minutes. Blocked upstream; avoid `whistle` in long-running streams for now.
-
 ## Error handling
 
 Every constructor and `synthesize` returns a pointer/`GARJAN_OK`, or a negative

@@ -184,12 +184,8 @@ fn rain_synthesize(self, duration) {
     var num = f64_to(f64_mul(Rain_sample_rate(self), duration));
     var ga_ncheck = garjan_validate_sample_count(num);
     if (garjan_is_err(ga_ncheck) == 1) { return ga_ncheck; }
-    var output = vec_new();
-    var i = 0;
-    while (i < num) {
-        vec_push(output, 0);
-        i = i + 1;
-    }
+    var output = garjan_vec_zeros(num);
+    if (garjan_is_err(output) == 1) { return output; }
     rain_process_block(self, output);
     return output;
 }
@@ -423,12 +419,8 @@ fn thunder_synthesize(self, duration) {
     var num = f64_to(f64_mul(Thunder_sample_rate(self), duration));
     var ga_ncheck = garjan_validate_sample_count(num);
     if (garjan_is_err(ga_ncheck) == 1) { return ga_ncheck; }
-    var output = vec_new();
-    var i = 0;
-    while (i < num) {
-        vec_push(output, 0);
-        i = i + 1;
-    }
+    var output = garjan_vec_zeros(num);
+    if (garjan_is_err(output) == 1) { return output; }
     thunder_process_block(self, output);
     return output;
 }
@@ -625,12 +617,8 @@ fn wind_synthesize(self, duration) {
     var num = f64_to(f64_mul(Wind_sample_rate(self), duration));
     var ga_ncheck = garjan_validate_sample_count(num);
     if (garjan_is_err(ga_ncheck) == 1) { return ga_ncheck; }
-    var output = vec_new();
-    var i = 0;
-    while (i < num) {
-        vec_push(output, 0);
-        i = i + 1;
-    }
+    var output = garjan_vec_zeros(num);
+    if (garjan_is_err(output) == 1) { return output; }
     wind_process_block(self, output);
     return output;
 }

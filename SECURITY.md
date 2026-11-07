@@ -41,11 +41,6 @@ through all 22 of them.
 
 ## Known issues
 
-- **`whistle_process_block` allocates 32 B/sample** (~5 GB/hour, exhausting the
-  2 GiB arena in ~25 minutes of continuous streaming). naad's
-  `filter_svf_process_sample` returns a heap `SvfOutput`. naad 2.3.2 added an
-  allocation-free form, which garjan can adopt once dhvani has it; avoid `whistle`
-  in long-running streams until then.
 - **The arena never frees.** `alloc_reset()` invalidates *every* outstanding
   pointer, so it is only usable at a clean epoch boundary. A caller that
   constructs and discards synths in a loop grows memory regardless.

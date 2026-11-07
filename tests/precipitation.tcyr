@@ -77,6 +77,28 @@ fn main() {
     # restored synth resumes the SAME rng sequence
     assert_eq(rng_next_u32(Precipitation_rng(g)), rng_next_u32(Precipitation_rng(g2)), "restored precip resumes rng");
 
+    # --- 2.6.2: `surface` is a Terrain in rust-old, and was bounded by MATERIAL_CERAMIC ---
+    # (9), so hail and snow took the two ids past TERRAIN_WET (7). ADR-0006.
+    test_group("surface is bounded by the terrain enum");
+    var sb_sr = f64_from(44100);
+    assert(garjan_is_err(precipitation_new(PRECIP_HAIL, STONE_MEDIUM, TERRAIN_WET, sb_sr)) == 0,
+      "TERRAIN_WET accepted");
+    assert(garjan_is_err(precipitation_new(PRECIP_HAIL, STONE_MEDIUM, 8, sb_sr)) == 1, "hail refuses surface 8");
+    assert(garjan_is_err(precipitation_new(PRECIP_HAIL, STONE_MEDIUM, 9, sb_sr)) == 1, "hail refuses surface 9");
+    assert(garjan_is_err(precipitation_new(PRECIP_SNOW, STONE_MEDIUM, 8, sb_sr)) == 1, "snow refuses surface 8");
+    assert(garjan_is_err(precipitation_new(PRECIP_SNOW, STONE_MEDIUM, 9, sb_sr)) == 1, "snow refuses surface 9");
+    assert(garjan_is_err(precipitation_new(PRECIP_SURFACE_RAIN, STONE_MEDIUM, 8, sb_sr)) == 1,
+      "rain refuses surface 8");
+    var sb_ok = precipitation_new(PRECIP_HAIL, STONE_MEDIUM, TERRAIN_WET, sb_sr);
+    var sb_sb = str_builder_new();
+    precipitation_to_json(sb_ok, sb_sb);
+    var sb_doc = str_data(str_builder_build(sb_sb));
+    assert(garjan_is_err(precipitation_from_json_str(sb_doc)) == 0, "a document with surface 7 loads");
+    var sb_at = 0;
+    while (memeq(sb_doc + sb_at, "\"surface\":7", 11) == 0) { sb_at = sb_at + 1; }
+    store8(sb_doc + sb_at + 10, 56);                 # 7 -> 8, in place
+    assert(garjan_is_err(precipitation_from_json_str(sb_doc)) == 1, "a document with surface 8 is refused");
+
     return assert_summary();
 }
 var ec = main();

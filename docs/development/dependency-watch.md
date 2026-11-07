@@ -36,7 +36,7 @@ Two consequences drive every rule below:
    done
    ```
 
-   Expected: `0` for every row. It was 0 at 2.6.1 across garjan's 424 symbols.
+   Expected: `0` for every row. It was 0 at 2.6.2 across garjan's 426 symbols.
 
 ## naad
 
@@ -141,6 +141,11 @@ replacement exists in the oldest consumer's `~/.cyrius/versions/<pin>/lib/`.
 The same goes for syntax. `src/` must stay off 6.7.x features until dhvani moves:
 `const` and `do` stop its 6.6.10 build, but a `!` is worse, because before 6.7.3 it
 compiled as a silent no-op.
+
+**Two deliberate couplings, each pinned by a test.** `whistle_svf_band_pass` copies naad's
+filter step, and `tests/whistle.tcyr` holds it to naad bit for bit. `garjan_vec_zeros` writes
+`lib/vec.cyr`'s header, and `tests/dsp.tcyr` holds that layout. A red test on either after a
+bump means upstream moved: follow it, and do not loosen the test.
 
 **Upgrade gotcha — a consumer's floor can move with no garjan change.** Since 2.6.0
 garjan's dep set needs cyrius 6.7.2 or later: the bundles use `const`, including as

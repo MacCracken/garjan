@@ -129,12 +129,8 @@ fn impact_build_naad(self) {
     # old INT64_MIN sentinel by accident. Every table material sits far below this cap.
     var ga_mcheck = garjan_validate_sample_count(max_samples);
     if (garjan_is_err(ga_mcheck) == 1) { return ga_mcheck; }
-    var ebuf = vec_new();
-    var i = 0;
-    while (i < max_samples) {
-        vec_push(ebuf, 0);
-        i = i + 1;
-    }
+    var ebuf = garjan_vec_zeros(max_samples);
+    if (garjan_is_err(ebuf) == 1) { return ebuf; }
     Impact_set_excitation_buf(self, ebuf);
 
     # One reusable exciter. Its type/duration/amplitude vary per impact, so it
@@ -307,12 +303,8 @@ fn impact_synthesize_velocity(self, impact_type, velocity) {
     var ga_ncheck = garjan_validate_sample_count(num_samples);
     if (garjan_is_err(ga_ncheck) == 1) { return ga_ncheck; }
 
-    var output = vec_new();
-    var i = 0;
-    while (i < num_samples) {
-        vec_push(output, 0);
-        i = i + 1;
-    }
+    var output = garjan_vec_zeros(num_samples);
+    if (garjan_is_err(output) == 1) { return output; }
     Impact_set_sample_position(self, 0);
     modal_bank_reset(Impact_modal_bank(self));
     impact_generate(self, impact_type, vel, output);

@@ -29,7 +29,7 @@ cyrius audit                     # fmt / lint / docs / tests / bench
   rain is louder than light), the uniform silence gates, determinism replay,
   builder-vs-direct equivalence, and the hot-path allocation contract.
 
-Total: **825 assertions**.
+Total: **847 assertions**.
 
 ## The fuzz harness
 
