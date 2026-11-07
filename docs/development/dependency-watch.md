@@ -36,7 +36,7 @@ Two consequences drive every rule below:
    done
    ```
 
-   Expected: `0` for every row. It was 0 at 2.6.0 across garjan's 424 symbols.
+   Expected: `0` for every row. It was 0 at 2.6.1 across garjan's 424 symbols.
 
 ## naad
 
@@ -84,16 +84,18 @@ gate at runtime with `sakshi_set_level`.
 **Note:** as in the Rust era, garjan emits events but installs no subscriber —
 that stays the consuming application's job.
 
-**Take the tag hisab declares, not the newest.** At 6.7.9 that is 2.5.8, which is
-also the copy the toolchain folds. 2.5.9 and 2.5.10 pin 6.7.9 too, but hisab found
-2.5.10 warns on every compile that `lib/` shadows the toolchain's copy.
+**Take the tag hisab declares, not the newest.** At 6.7.18 that is 2.5.10, which is
+also the copy the toolchain folds. The two can differ: at 6.7.9 hisab declared 2.5.8,
+the fold, and hisab found 2.5.10 warned on every compile that `lib/` shadowed the
+toolchain's copy.
 
 ## Cyrius toolchain + vendored stdlib
 
-**Status:** pinned to **6.7.9**
-([tag `6.7.9`](https://github.com/MacCracken/cyrius/releases/tag/6.7.9),
-2026-10-11). naad 2.3.0, hisab 3.4.0 and goonj 2.1.0 pin it exactly; their next
-tags need 6.7.18, so the next move takes all of them together.
+**Status:** pinned to **6.7.18**
+([tag `6.7.18`](https://github.com/MacCracken/cyrius/releases/tag/6.7.18),
+2026-10-23). naad 2.3.3, hisab 3.4.1 and goonj 2.3.1 pin it exactly, and at 2.6.1
+each was its project's newest tag. Check newest over HTTPS, `git ls-remote --tags
+https://github.com/MacCracken/<repo>.git`: the `origin` of a local clone is SSH.
 The pin tracks published releases only; never pin to
 `main` or an unreleased tag, because CI installs the pin through the canonical
 upstream installer, which resolves release artifacts
@@ -140,11 +142,21 @@ The same goes for syntax. `src/` must stay off 6.7.x features until dhvani moves
 `const` and `do` stop its 6.6.10 build, but a `!` is worse, because before 6.7.3 it
 compiled as a silent no-op.
 
-**Upgrade gotcha — a consumer's floor can move with no garjan change.** naad 2.3.0,
-goonj 2.1.0 and sakshi 2.5.8 need cyrius 6.7.2 or later, because sakshi declares its
-syscall numbers `const`. The bundle `dist/garjan.cyr` does not carry them, so a
-consumer on older tags is unaffected, and one that adopts this dep set gets a loud
-compile error below 6.7.2. Measure the floor at each bump.
+**Upgrade gotcha — a consumer's floor can move with no garjan change.** Since 2.6.0
+garjan's dep set needs cyrius 6.7.2 or later: the bundles use `const`, including as
+array sizes. The bundle `dist/garjan.cyr` does not carry them, so a consumer on older
+tags is unaffected, and one that adopts this dep set gets a loud compile error below
+6.7.2. Measure the floor at each bump, because upstream's figure is for its own bundle.
+
+**Upgrade gotcha — the writer has to stay inside what the parser accepts.** bayan 1.11
+refuses duplicate keys, leading zeros, integers outside i64 and malformed numbers.
+`garjan_dsp_node` treats a failed parse as a pre-2.5.0 document with no `"dsp"`, so a
+document the tree parser refuses still loads, with its live state silently gone. Compare
+the writer's bytes across the bump and round-trip real state, as the checklist below says.
+
+**Upgrade gotcha — a whole-bundle dependency can bring new leaves.** bayan 1.11.1 pulled
+`slice`, `hashseed` and `lib/unicode/` into `lib/`, and goonj 2.3.1 `simd`. `cyrius deps`
+vendors them, so nothing needs declaring, but check `git status lib`.
 
 **Upgrade gotcha — `f64_le` / `f64_ge` left `lib/` at 6.6.13.** They are compiler
 builtins now, and `f64_fmod` is gone from `lib/` too. So a diff of `lib/` alone reports
@@ -152,8 +164,9 @@ them as removed; compile a call before treating that as a break.
 
 **Upgrade gotcha — `cyrius deps` only re-vendors what something still requires.** A
 file that lost its last requirer stays in `lib/` at its old version, and the lock
-keeps its old hash. `cyrius deps --verify` and `--locked` both pass over it. After a
-bump, compare `lib/` against the snapshot in `~/.cyrius/versions/<pin>/lib/`.
+keeps its old hash. `cyrius deps --verify` and `--locked` both pass over it, and from
+6.7.18 `cyrius deps` names such files but still does not refresh them. After a bump,
+compare `lib/` against the snapshot in `~/.cyrius/versions/<pin>/lib/`.
 
 **Upgrade gotcha — 6.6.20 fails closed on stale lock rows.** Delete `cyrius.lock`
 and re-run `cyrius deps` rather than editing it.
@@ -200,6 +213,9 @@ exact samples nor hostile input:
 - **Samples.** `scripts/audio-hash.cyr` tells you *that* something moved. Dump the raw
   samples from both builds to measure *how far*, and look for a length, non-finite or
   sign-of-zero change.
+- **Round trips.** Compare each synth's `*_to_json` bytes across the two trees. Then dump
+  real state at several sample rates and points in a synth's life and check that the
+  tree parser accepts it, `garjan_dsp_node` finds it, and `*_from_json_str` restores it.
 - **Hostile input.** `cyrius fuzz` covers JSON documents, and a replay command is in its
   header. It does not cover constructors and setters, so build the old tree beside the
   new one and drive both with +Inf, NaN, ±MAX and past-2^63 values through every f64

@@ -21,10 +21,10 @@ and `CLAUDE.md` forbids modifying `lib/`.
   second of audio against an ideal 352,824** — ~3x overhead, never reclaimed.
   `lib/vec.cyr` exposes only `vec_new()`, which hardcodes 16; hand-building the
   vector header would couple garjan to its private `[data][len][cap]` layout.
-- **`filter_svf_process_sample_bandpass` in naad.** `whistle_process_block`
+- **Move `whistle` to naad's `filter_svf_process_sample_into`.** `whistle_process_block`
   allocates **32 B/sample** because naad's `filter_svf_process_sample` returns a
-  heap `SvfOutput`; naad has a non-allocating `_lowpass` variant but no
-  band-pass one. That is 1.41 MB/s, **5.08 GB/hour** — the 2 GiB arena is gone
+  heap `SvfOutput`. naad 2.3.2 added the allocation-free `_into` form, but dhvani's
+  naad 2.2.4 does not have it, so the call waits for dhvani to move. That is 1.41 MB/s, **5.08 GB/hour** — the 2 GiB arena is gone
   in ~25 minutes of continuous whistle. Pinned by a test so it cannot worsen,
   and flagged in the README and integration guide.
 

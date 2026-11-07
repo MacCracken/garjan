@@ -25,9 +25,9 @@ Of ganita's **188** functions, garjan calls exactly **one**.
 Removing it breaks the build, but through the dependency bundles rather than
 garjan's own code:
 
-- **hisab** needs 18 ganita symbols — `ganita_f64_acos`, `_atan2`, `_cosh`,
+- **hisab** needs 15 ganita symbols — `ganita_f64_acos`, `_atan2`, `_cosh`,
   `_hypot`, `_pow`, `_sinh`, and the `ganita_mat_*` linear-algebra family
-  (`mat_lu`, `mat_qr`, `mat_svd`, `mat_eigen_sym`, …)
+  (`mat_lu`, `mat_lu_solve`, `mat_svd`, …)
 - **goonj** needs 6, **naad** needs 3
 
 So the entry in `[deps].stdlib` is load-bearing. It is just not load-bearing
@@ -48,7 +48,7 @@ evaluate (`exp(-k·t)`, k ∈ {2,3,5,10}, t ∈ [0,1]):
 | `f64_pow` | ≤ 4 ULP | relative ~6e-16 |
 
 x86 `f64_sin` left x87 `fsin` for fdlibm at cyrius 6.6.9; these figures are
-6.7.9's, sampled on 401 evenly spaced trig points against the host libm.
+6.7.18's, sampled on 401 evenly spaced trig points against the host libm.
 
 For scale: one f64 epsilon is 2.2e-16, and a 24-bit audio LSB is 1.2e-7. The
 worst trig deviation is roughly **a billion times smaller than the smallest
