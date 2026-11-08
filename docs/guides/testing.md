@@ -6,7 +6,7 @@ garjan is a Cyrius project. There is no cargo — `cyrius test` auto-discovers
 ## Running Tests
 
 ```sh
-cyrius test                      # all 33 suites
+cyrius test                      # all 34 suites
 cyrius test tests/fire.tcyr      # one suite
 cyrius fuzz                      # tests/garjan.fcyr, under a minute
 cyrius bench tests/garjan.bcyr   # 26 benchmarks
@@ -19,9 +19,12 @@ cyrius audit                     # fmt / lint / docs / tests / bench
 
 ## How the suites are split
 
-- **33 per-module suites** (`tests/<module>.tcyr`) — each includes the `src/`
+- **32 per-module suites** (`tests/<module>.tcyr`) — each includes the `src/`
   modules it needs and tests one module against itself: construction,
   validation, per-variant behaviour, serde round-trips.
+- **`tests/naad_failure.tcyr`** replaces naad's `noise_new` with one that fails, for its
+  whole binary, and checks that every constructor reports the failure. It is a suite of
+  its own because no synth can build there.
 - **`tests/garjan.tcyr` — the cross-module integration suite**, ported from
   `rust-old/tests/integration.rs`. It owns what no per-module suite *can*
   assert: the uniform validation contract across all 21 constructors,
@@ -29,26 +32,35 @@ cyrius audit                     # fmt / lint / docs / tests / bench
   rain is louder than light), the uniform silence gates, determinism replay,
   builder-vs-direct equivalence, and the hot-path allocation contract.
 
-Total: **847 assertions**.
+Total: **936 assertions** in 34 suites.
 
 ## The fuzz harness
 
-`tests/garjan.fcyr` attacks the JSON boundary, which the suites can only sample. It
-derives 19,603 hostile documents from each synth's own `*_to_json` output and runs
-each one in a forked child under a time and memory limit, so a crash, hang or runaway
-allocation fails that case without ending the run. A document may be refused, or
-accepted and rendered; anything else fails. The run also fails if any entry point stops
-exercising documents, so it cannot pass by reaching nothing.
+`tests/garjan.fcyr` attacks the boundaries the suites can only sample. It runs 25,672
+cases, each in a forked child under a time and memory limit, so a crash, hang or runaway
+allocation fails that case without ending the run.
 
-The run is deterministic. A failure prints the document, and this replays it in one
-process, where a debugger can reach it:
+- **Documents.** Hostile documents derived from each synth's own `*_to_json` output go
+  through all 22 deserializers. A document may be refused, or accepted and rendered.
+  Anything else fails.
+- **Malformed numbers and duplicate keys.** These must be refused. The stage also fails
+  if its duplicate-key builder stops producing a real `"key":value` pair.
+- **The API.** 9 hostile f64 values (±Inf, NaN, ±MAX, 1e20, the smallest denormal, -1 and -3) go through every f64
+  argument of every constructor, setter and synthesize duration, and 5 hostile ids through
+  every enum argument. A call may refuse or succeed. A crash or hang fails.
+
+The run also fails if any entry point stops exercising documents, so it cannot pass by
+reaching nothing.
+
+The run is deterministic. A failure prints what it needs to replay in one process,
+where a debugger can reach it:
 
 ```sh
 cyrius build tests/garjan.fcyr build/fuzz && ./build/fuzz <entry> '<document>'
+./build/fuzz api <stage> <slot> <value>     # a failed API case
 ```
 
-CI runs the harness on every push and pull request, and releases gate on CI. It covers
-documents only, not constructors or setters.
+CI runs the harness on every push and pull request, and releases gate on CI.
 
 ## What the suite does NOT check
 
@@ -117,7 +129,9 @@ Three things that have caused real defects here:
 - Validation: sample rate (0, negative, NaN, inf, out of 1 Hz–768 kHz),
   duration (0, negative, NaN, inf, over 600 s), sample count over 44.1 M,
   out-of-range enum ids
+- Deserialization: every kind of state ADR-0010 refuses, each through a real document
+  edited one value at a time
 - Infrastructure: DC blocker, modal bank (impulse response, Nyquist guard,
   reset), voice pool (allocation, stealing, priority, aging), LOD scaling,
-  bridge conversions, `garjan_alloc` failure detection
+  bridge conversions, `garjan_alloc` failure detection, a failing `noise_new`
 - Streaming: empty buffers, multi-block continuity, zero per-block allocation

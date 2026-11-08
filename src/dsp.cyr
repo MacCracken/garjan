@@ -122,12 +122,15 @@ fn garjan_validate_sample_count(num) {
     return GARJAN_OK;
 }
 
-# Builds a vec of `n` zeros in one allocation. Returns it, or GARJAN_ERR_ALLOCATION.
+# Builds a vec of `n` zeros in one allocation. Returns it, GARJAN_ERR_INVALID_PARAMETER for
+# n below 0 or above GARJAN_MAX_SAMPLES, or GARJAN_ERR_ALLOCATION.
 # lib/vec.cyr has no capacity constructor, and growing by pushes keeps every outgrown
 # buffer in an arena that never frees: about three times the audio itself. This writes
 # vec's [data][len][cap] header directly, as naad_vec_zeros does; tests/dsp.tcyr pins it.
 #must_use
 fn garjan_vec_zeros(n) {
+    # Every caller asks for at most GARJAN_MAX_SAMPLES; past 2^61 the byte size would wrap.
+    if (n < 0 || n > GARJAN_MAX_SAMPLES) { return GARJAN_ERR_INVALID_PARAMETER; }
     var v = vec_new();
     if (v == 0) { return GARJAN_ERR_ALLOCATION; }
     if (n > vec_cap(v)) {
@@ -144,6 +147,30 @@ fn garjan_vec_zeros(n) {
     }
     store64(v + 8, n);
     return v;
+}
+
+# Checks a synthesize call and builds its zeroed output buffer: `duration` must pass
+# garjan_validate_duration, and duration x sample_rate garjan_validate_sample_count.
+# Returns the buffer, or the first failing check's code. Every *_synthesize starts here,
+# so a new guard lands in one place, not in a 21-site rollout.
+#must_use
+fn garjan_synth_buffer(sample_rate, duration) {
+    var e = garjan_validate_duration(duration);
+    if (garjan_is_err(e) == 1) { return e; }
+    var num = f64_to(f64_mul(sample_rate, duration));
+    var c = garjan_validate_sample_count(num);
+    if (garjan_is_err(c) == 1) { return c; }
+    return garjan_vec_zeros(num);
+}
+
+# naad's noise_new, checked. naad 2.3.3's cannot fail: it faults on a refused allocation
+# (dependency-watch.md). Once naad returns that failure, garjan reports it here instead of
+# storing it as a component pointer (ADR-0005). Returns the generator or GARJAN_ERR_ALLOCATION.
+#must_use
+fn garjan_noise_new(noise_type, seed) {
+    var ng = noise_new(noise_type, seed);
+    if (ng == 0 || garjan_is_err(ng) == 1) { return GARJAN_ERR_ALLOCATION; }
+    return ng;
 }
 
 # ================================================================
@@ -186,18 +213,25 @@ fn garjan_map_naad_error(code) {
 #must_use
 fn garjan_state_biquad(f) {
     var a = bayan_json_v_arr_new();
-    bayan_json_v_arr_push(a, bayan_json_v_int_new(BiquadFilter_z1(f)));
-    bayan_json_v_arr_push(a, bayan_json_v_int_new(BiquadFilter_z2(f)));
+    if (a == 0) { return 0; }
+    var bad = 0;
+    bad = bad + garjan_arr_push_int(a, BiquadFilter_z1(f));
+    bad = bad + garjan_arr_push_int(a, BiquadFilter_z2(f));
+    if (bad > 0) { return 0; }    # a refused node: hand bayan no null
     return a;
 }
 
 # Restores a biquad's delay memory from garjan_state_biquad's array. A missing or short
-# node leaves the filter as built, which is how a pre-2.5.0 document loads. Returns 0.
+# node leaves the filter as built, which is how a pre-2.5.0 document loads. Returns 0,
+# or GARJAN_ERR_INVALID_PARAMETER for a non-finite value.
 fn garjan_state_biquad_load(f, n) {
     if (n == 0) { return 0; }
     if (bayan_json_v_arr_len(n) < 2) { return 0; }
-    BiquadFilter_set_z1(f, bayan_json_v_int(bayan_json_v_arr_get(n, 0)));
-    BiquadFilter_set_z2(f, bayan_json_v_int(bayan_json_v_arr_get(n, 1)));
+    var z1 = bayan_json_v_int(bayan_json_v_arr_get(n, 0));
+    var z2 = bayan_json_v_int(bayan_json_v_arr_get(n, 1));
+    if (garjan_is_finite(z1) == 0 || garjan_is_finite(z2) == 0) { return GARJAN_ERR_INVALID_PARAMETER; }
+    BiquadFilter_set_z1(f, z1);
+    BiquadFilter_set_z2(f, z2);
     return 0;
 }
 
@@ -205,18 +239,25 @@ fn garjan_state_biquad_load(f, n) {
 #must_use
 fn garjan_state_svf(f) {
     var a = bayan_json_v_arr_new();
-    bayan_json_v_arr_push(a, bayan_json_v_int_new(StateVariableFilter_ic1eq(f)));
-    bayan_json_v_arr_push(a, bayan_json_v_int_new(StateVariableFilter_ic2eq(f)));
+    if (a == 0) { return 0; }
+    var bad = 0;
+    bad = bad + garjan_arr_push_int(a, StateVariableFilter_ic1eq(f));
+    bad = bad + garjan_arr_push_int(a, StateVariableFilter_ic2eq(f));
+    if (bad > 0) { return 0; }    # a refused node: hand bayan no null
     return a;
 }
 
 # Restores an SVF's integrator state from garjan_state_svf's array. A missing or short
-# node leaves the filter as built. Returns 0.
+# node leaves the filter as built. Returns 0, or GARJAN_ERR_INVALID_PARAMETER for a
+# non-finite value.
 fn garjan_state_svf_load(f, n) {
     if (n == 0) { return 0; }
     if (bayan_json_v_arr_len(n) < 2) { return 0; }
-    StateVariableFilter_set_ic1eq(f, bayan_json_v_int(bayan_json_v_arr_get(n, 0)));
-    StateVariableFilter_set_ic2eq(f, bayan_json_v_int(bayan_json_v_arr_get(n, 1)));
+    var c1 = bayan_json_v_int(bayan_json_v_arr_get(n, 0));
+    var c2 = bayan_json_v_int(bayan_json_v_arr_get(n, 1));
+    if (garjan_is_finite(c1) == 0 || garjan_is_finite(c2) == 0) { return GARJAN_ERR_INVALID_PARAMETER; }
+    StateVariableFilter_set_ic1eq(f, c1);
+    StateVariableFilter_set_ic2eq(f, c2);
     return 0;
 }
 
@@ -224,20 +265,29 @@ fn garjan_state_svf_load(f, n) {
 #must_use
 fn garjan_state_lfo(l) {
     var a = bayan_json_v_arr_new();
-    bayan_json_v_arr_push(a, bayan_json_v_int_new(Lfo_phase(l)));
-    bayan_json_v_arr_push(a, bayan_json_v_int_new(Lfo_sh_value(l)));
-    bayan_json_v_arr_push(a, bayan_json_v_int_new(load64(Lfo_rng(l))));
+    if (a == 0) { return 0; }
+    var bad = 0;
+    bad = bad + garjan_arr_push_int(a, Lfo_phase(l));
+    bad = bad + garjan_arr_push_int(a, Lfo_sh_value(l));
+    bad = bad + garjan_arr_push_int(a, load64(Lfo_rng(l)));
+    if (bad > 0) { return 0; }    # a refused node: hand bayan no null
     return a;
 }
 
 # Restores an LFO's phase, sample-and-hold value and rng from garjan_state_lfo's array.
-# A missing or short node leaves it as built. Returns 0.
+# A missing or short node leaves it as built. Returns 0, or GARJAN_ERR_INVALID_PARAMETER
+# for a non-finite value or a zero generator state.
 fn garjan_state_lfo_load(l, n) {
     if (n == 0) { return 0; }
     if (bayan_json_v_arr_len(n) < 3) { return 0; }
-    Lfo_set_phase(l, bayan_json_v_int(bayan_json_v_arr_get(n, 0)));
-    Lfo_set_sh_value(l, bayan_json_v_int(bayan_json_v_arr_get(n, 1)));
-    store64(Lfo_rng(l), bayan_json_v_int(bayan_json_v_arr_get(n, 2)));
+    var phase = bayan_json_v_int(bayan_json_v_arr_get(n, 0));
+    var held = bayan_json_v_int(bayan_json_v_arr_get(n, 1));
+    var state = bayan_json_v_int(bayan_json_v_arr_get(n, 2));
+    if (garjan_is_finite(phase) == 0 || garjan_is_finite(held) == 0) { return GARJAN_ERR_INVALID_PARAMETER; }
+    if (state == 0) { return GARJAN_ERR_INVALID_PARAMETER; }    # xorshift's fixed point
+    Lfo_set_phase(l, phase);
+    Lfo_set_sh_value(l, held);
+    store64(Lfo_rng(l), state);
     return 0;
 }
 
@@ -250,34 +300,46 @@ fn garjan_state_lfo_load(l, n) {
 #must_use
 fn garjan_state_noise(ng) {
     var a = bayan_json_v_arr_new();
-    bayan_json_v_arr_push(a, bayan_json_v_int_new(load64(NoiseGenerator_rng(ng))));
-    bayan_json_v_arr_push(a, bayan_json_v_int_new(NoiseGenerator_brown_prev(ng)));
-    bayan_json_v_arr_push(a, bayan_json_v_int_new(NoiseGenerator_pink_counter(ng)));
-    bayan_json_v_arr_push(a, bayan_json_v_int_new(NoiseGenerator_pink_running_sum(ng)));
+    if (a == 0) { return 0; }
+    var bad = 0;
+    bad = bad + garjan_arr_push_int(a, load64(NoiseGenerator_rng(ng)));
+    bad = bad + garjan_arr_push_int(a, NoiseGenerator_brown_prev(ng));
+    bad = bad + garjan_arr_push_int(a, NoiseGenerator_pink_counter(ng));
+    bad = bad + garjan_arr_push_int(a, NoiseGenerator_pink_running_sum(ng));
     if (NoiseGenerator_noise_type(ng) == NOISE_PINK) {
         var oc = NoiseGenerator_pink_octaves(ng);
         var i = 0;
         while (i < vec_len(oc)) {
-            bayan_json_v_arr_push(a, bayan_json_v_int_new(vec_get(oc, i)));
+            bad = bad + garjan_arr_push_int(a, vec_get(oc, i));
             i = i + 1;
         }
     }
+    if (bad > 0) { return 0; }    # a refused node: hand bayan no null
     return a;
 }
 
 # Restores a noise generator from garjan_state_noise's array: rng, brown and pink state,
 # then the pink octaves. A missing or short node leaves it as built, and octaves past
-# the generator's own are ignored. Returns 0.
+# the generator's own are ignored. Returns 0, or GARJAN_ERR_INVALID_PARAMETER for a
+# non-finite value or a zero generator state.
 fn garjan_state_noise_load(ng, n) {
     if (n == 0) { return 0; }
     var len = bayan_json_v_arr_len(n);
     if (len < 4) { return 0; }
+    var i = 0;
+    while (i < len) {
+        if (i != 0 && i != 2 && garjan_is_finite(bayan_json_v_int(bayan_json_v_arr_get(n, i))) == 0) {
+            return GARJAN_ERR_INVALID_PARAMETER;
+        }
+        i = i + 1;
+    }
+    if (bayan_json_v_int(bayan_json_v_arr_get(n, 0)) == 0) { return GARJAN_ERR_INVALID_PARAMETER; }
     store64(NoiseGenerator_rng(ng), bayan_json_v_int(bayan_json_v_arr_get(n, 0)));
     NoiseGenerator_set_brown_prev(ng, bayan_json_v_int(bayan_json_v_arr_get(n, 1)));
     NoiseGenerator_set_pink_counter(ng, bayan_json_v_int(bayan_json_v_arr_get(n, 2)));
     NoiseGenerator_set_pink_running_sum(ng, bayan_json_v_int(bayan_json_v_arr_get(n, 3)));
     var oc = NoiseGenerator_pink_octaves(ng);
-    var i = 0;
+    i = 0;
     while (i + 4 < len) {
         if (i < vec_len(oc)) {
             vec_set(oc, i, bayan_json_v_int(bayan_json_v_arr_get(n, i + 4)));
@@ -287,6 +349,26 @@ fn garjan_state_noise_load(ng, n) {
     return 0;
 }
 
+# Appends integer `x` to JSON array `a` as a new node. Returns 0, or 1 when the node could
+# not be allocated, so callers can count failures instead of handing bayan a null.
+fn garjan_arr_push_int(a, x) {
+    var node = bayan_json_v_int_new(x);
+    if (node == 0) { return 1; }
+    bayan_json_v_arr_push(a, node);
+    return 0;
+}
+
+# Sets member `key` (a literal) of the "dsp" object to `node`. Returns GARJAN_OK, or
+# GARJAN_ERR_ALLOCATION when the object, the node or the key could not be allocated:
+# bayan's builder faults on a null, so none is ever stored (ADR-0005).
+fn garjan_dsp_put(dsp, key, node) {
+    if (dsp == 0 || node == 0) { return GARJAN_ERR_ALLOCATION; }
+    var k = str_from(key);
+    if (k == 0) { return GARJAN_ERR_ALLOCATION; }
+    bayan_json_v_obj_set(dsp, k, node);
+    return GARJAN_OK;
+}
+
 # ---- splice ----
 # Emit a #derive(Serialize) params object with a "dsp" member added before its
 # closing brace. The derive-generated parser IGNORES keys it does not know
@@ -294,20 +376,17 @@ fn garjan_state_noise_load(ng, n) {
 # combined document and the value-tree parser reads "dsp" from the same string.
 fn garjan_emit_with_dsp(sb, params_sb, dsp) {
     var s = str_builder_build(params_sb);
-    str_builder_add(sb, str_from_buf(str_data(s), str_len(s) - 1));   # drop the '}'
+    if (s == 0) { return GARJAN_ERR_ALLOCATION; }
+    if (str_len(s) < 2) { return GARJAN_ERR_INVALID_PARAMETER; }    # not an object to extend
+    var head = str_from_buf(str_data(s), str_len(s) - 1);           # drop the '}'
+    if (head == 0) { return GARJAN_ERR_ALLOCATION; }
+    var body = bayan_json_v_build(dsp);
+    if (body == 0) { return GARJAN_ERR_ALLOCATION; }
+    str_builder_add(sb, head);
     str_builder_add_cstr(sb, ",\"dsp\":");
-    str_builder_add(sb, bayan_json_v_build(dsp));
+    str_builder_add(sb, body);
     str_builder_add_cstr(sb, "}");
     return 0;
-}
-
-# Fetch the "dsp" object from a serialized synth, or 0 if absent (a document
-# written before 2.5.0 simply restores without live state, as it used to).
-#must_use
-fn garjan_dsp_node(json) {
-    var root = bayan_json_v_parse_buf(json, strlen(json));
-    if (root == 0) { return 0; }
-    return garjan_json_get(root, "dsp");
 }
 
 # ---- ModalBank: the per-resonator state pair, interleaved re/im ----
@@ -318,20 +397,24 @@ fn garjan_dsp_node(json) {
 #must_use
 fn garjan_state_modal(mb) {
     var a = bayan_json_v_arr_new();
+    if (a == 0) { return 0; }
+    var bad = 0;
     if (mb == 0) { return a; }
     var re = ModalBank_state_re(mb);
     var im = ModalBank_state_im(mb);
     var i = 0;
     while (i < vec_len(re)) {
-        bayan_json_v_arr_push(a, bayan_json_v_int_new(vec_get(re, i)));
-        bayan_json_v_arr_push(a, bayan_json_v_int_new(vec_get(im, i)));
+        bad = bad + garjan_arr_push_int(a, vec_get(re, i));
+        bad = bad + garjan_arr_push_int(a, vec_get(im, i));
         i = i + 1;
     }
+    if (bad > 0) { return 0; }    # a refused node: hand bayan no null
     return a;
 }
 
 # Restores a modal bank's re/im pairs from garjan_state_modal's array. Pairs past the
-# bank's modes are ignored, and a null bank or missing node is a no-op. Returns 0.
+# bank's modes are ignored, and a null bank or missing node is a no-op. Returns 0, or
+# GARJAN_ERR_INVALID_PARAMETER for a non-finite value.
 fn garjan_state_modal_load(mb, n) {
     if (mb == 0) { return 0; }
     if (n == 0) { return 0; }
@@ -339,6 +422,13 @@ fn garjan_state_modal_load(mb, n) {
     var im = ModalBank_state_im(mb);
     var cnt = bayan_json_v_arr_len(n) / 2;
     var i = 0;
+    while (i < cnt * 2) {
+        if (garjan_is_finite(bayan_json_v_int(bayan_json_v_arr_get(n, i))) == 0) {
+            return GARJAN_ERR_INVALID_PARAMETER;
+        }
+        i = i + 1;
+    }
+    i = 0;
     while (i < cnt) {
         if (i < vec_len(re)) {
             vec_set(re, i, bayan_json_v_int(bayan_json_v_arr_get(n, i * 2)));
@@ -354,25 +444,33 @@ fn garjan_state_modal_load(mb, n) {
 #must_use
 fn garjan_state_exciter(ex) {
     var a = bayan_json_v_arr_new();
+    if (a == 0) { return 0; }
+    var bad = 0;
     if (ex == 0) { return a; }
-    bayan_json_v_arr_push(a, bayan_json_v_int_new(Exciter_position(ex)));
-    bayan_json_v_arr_push(a, bayan_json_v_int_new(Exciter_active(ex)));
+    bad = bad + garjan_arr_push_int(a, Exciter_position(ex));
+    bad = bad + garjan_arr_push_int(a, Exciter_active(ex));
     var r = Exciter_rng(ex);
-    bayan_json_v_arr_push(a, bayan_json_v_int_new(Rng_state(r)));
-    bayan_json_v_arr_push(a, bayan_json_v_int_new(Rng_inc(r)));
+    bad = bad + garjan_arr_push_int(a, Rng_state(r));
+    bad = bad + garjan_arr_push_int(a, Rng_inc(r));
+    if (bad > 0) { return 0; }    # a refused node: hand bayan no null
     return a;
 }
 
 # Restores an exciter's position, active flag and rng from garjan_state_exciter's array.
-# A null exciter or a missing or short node is a no-op. Returns 0.
+# A null exciter or a missing or short node is a no-op. Returns 0, or
+# GARJAN_ERR_INVALID_PARAMETER for a negative position, a non-0/1 flag or an even rng increment.
 fn garjan_state_exciter_load(ex, n) {
     if (ex == 0) { return 0; }
     if (n == 0) { return 0; }
     if (bayan_json_v_arr_len(n) < 4) { return 0; }
-    Exciter_set_position(ex, bayan_json_v_int(bayan_json_v_arr_get(n, 0)));
-    Exciter_set_active(ex, bayan_json_v_int(bayan_json_v_arr_get(n, 1)));
-    var r = Exciter_rng(ex);
-    Rng_set_state(r, bayan_json_v_int(bayan_json_v_arr_get(n, 2)));
-    Rng_set_inc(r, bayan_json_v_int(bayan_json_v_arr_get(n, 3)));
+    var pos = bayan_json_v_int(bayan_json_v_arr_get(n, 0));
+    var active = bayan_json_v_int(bayan_json_v_arr_get(n, 1));
+    if (pos < 0) { return GARJAN_ERR_INVALID_PARAMETER; }                       # a usize in Rust
+    if (active != 0 && active != 1) { return GARJAN_ERR_INVALID_PARAMETER; }    # a bool in Rust
+    var rr = rng_restore(Exciter_rng(ex), bayan_json_v_int(bayan_json_v_arr_get(n, 2)),
+      bayan_json_v_int(bayan_json_v_arr_get(n, 3)));
+    if (garjan_is_err(rr) == 1) { return rr; }
+    Exciter_set_position(ex, pos);
+    Exciter_set_active(ex, active);
     return 0;
 }

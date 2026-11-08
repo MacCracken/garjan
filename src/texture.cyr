@@ -94,9 +94,15 @@ fn texture_build_naad(self) {
     AmbientTexture_set_mid_filter(self, mf);
     AmbientTexture_set_high_filter(self, hf);
     AmbientTexture_set_mod_lfo(self, lfo);
-    AmbientTexture_set_low_noise(self, noise_new(NOISE_BROWN, 9001));
-    AmbientTexture_set_mid_noise(self, noise_new(NOISE_PINK, 9002));
-    AmbientTexture_set_high_noise(self, noise_new(NOISE_WHITE, 9003));
+    var ga_ng1 = garjan_noise_new(NOISE_BROWN, 9001);
+    if (garjan_is_err(ga_ng1) == 1) { return ga_ng1; }
+    AmbientTexture_set_low_noise(self, ga_ng1);
+    var ga_ng2 = garjan_noise_new(NOISE_PINK, 9002);
+    if (garjan_is_err(ga_ng2) == 1) { return ga_ng2; }
+    AmbientTexture_set_mid_noise(self, ga_ng2);
+    var ga_ng3 = garjan_noise_new(NOISE_WHITE, 9003);
+    if (garjan_is_err(ga_ng3) == 1) { return ga_ng3; }
+    AmbientTexture_set_high_noise(self, ga_ng3);
     return GARJAN_OK;
 }
 
@@ -175,6 +181,7 @@ fn texture_band_mix_into(out, texture_type) {
 # for callers that want an owned buffer; the hot path uses the _into form.
 #must_use
 fn texture_band_mix(texture_type) {
+    if (garjan_enum_invalid(texture_type, TEXTURE_TYPE_NIGHT) == 1) { return GARJAN_ERR_INVALID_PARAMETER; }
     var m = garjan_alloc(24);
     if (garjan_is_err(m) == 1) { return m; }
     texture_band_mix_into(m, texture_type);
@@ -230,12 +237,7 @@ fn texture_process_block(self, output) {
 # Returns the vec pointer, or a negative code on invalid duration.
 #must_use
 fn texture_synthesize(self, duration) {
-    var e = garjan_validate_duration(duration);
-    if (garjan_is_err(e) == 1) { return e; }
-    var num = f64_to(f64_mul(AmbientTexture_sample_rate(self), duration));
-    var ga_ncheck = garjan_validate_sample_count(num);
-    if (garjan_is_err(ga_ncheck) == 1) { return ga_ncheck; }
-    var output = garjan_vec_zeros(num);
+    var output = garjan_synth_buffer(AmbientTexture_sample_rate(self), duration);
     if (garjan_is_err(output) == 1) { return output; }
     texture_process_block(self, output);
     return output;
@@ -260,16 +262,19 @@ fn texture_to_json(self, sb) {
     # Scalars via the derive, then the naad components' LIVE state spliced
     # in as "dsp" -- without it a restore resumes with zeroed filter memory.
     var psb = str_builder_new();
+    if (psb == 0) { return GARJAN_ERR_ALLOCATION; }
     var pe = AmbientTextureParams_to_json(p, psb);
     if (garjan_is_err(pe) == 1) { return pe; }
     var dsp = bayan_json_v_obj_new();
-    bayan_json_v_obj_set(dsp, str_from("lf"), garjan_state_biquad(AmbientTexture_low_filter(self)));
-    bayan_json_v_obj_set(dsp, str_from("mf"), garjan_state_biquad(AmbientTexture_mid_filter(self)));
-    bayan_json_v_obj_set(dsp, str_from("hf"), garjan_state_biquad(AmbientTexture_high_filter(self)));
-    bayan_json_v_obj_set(dsp, str_from("ml"), garjan_state_lfo(AmbientTexture_mod_lfo(self)));
-    bayan_json_v_obj_set(dsp, str_from("ln"), garjan_state_noise(AmbientTexture_low_noise(self)));
-    bayan_json_v_obj_set(dsp, str_from("mn"), garjan_state_noise(AmbientTexture_mid_noise(self)));
-    bayan_json_v_obj_set(dsp, str_from("hn"), garjan_state_noise(AmbientTexture_high_noise(self)));
+    var dput = 0;
+    dput = dput + garjan_is_err(garjan_dsp_put(dsp, "lf", garjan_state_biquad(AmbientTexture_low_filter(self))));
+    dput = dput + garjan_is_err(garjan_dsp_put(dsp, "mf", garjan_state_biquad(AmbientTexture_mid_filter(self))));
+    dput = dput + garjan_is_err(garjan_dsp_put(dsp, "hf", garjan_state_biquad(AmbientTexture_high_filter(self))));
+    dput = dput + garjan_is_err(garjan_dsp_put(dsp, "ml", garjan_state_lfo(AmbientTexture_mod_lfo(self))));
+    dput = dput + garjan_is_err(garjan_dsp_put(dsp, "ln", garjan_state_noise(AmbientTexture_low_noise(self))));
+    dput = dput + garjan_is_err(garjan_dsp_put(dsp, "mn", garjan_state_noise(AmbientTexture_mid_noise(self))));
+    dput = dput + garjan_is_err(garjan_dsp_put(dsp, "hn", garjan_state_noise(AmbientTexture_high_noise(self))));
+    if (dput > 0) { return GARJAN_ERR_ALLOCATION; }
     return garjan_emit_with_dsp(sb, psb, dsp);
 }
 
@@ -277,6 +282,8 @@ fn texture_to_json(self, sb) {
 # state, then reconstruct the naad components fresh.
 #must_use
 fn texture_from_json_str(json) {
+    var dsp = garjan_json_open(json);
+    if (garjan_is_err(dsp) == 1) { return dsp; }
     var p = AmbientTextureParams_from_json_str(json);
     if (p == 0) { return GARJAN_ERR_INVALID_PARAMETER; }   # not a JSON object
     # Deserialize must validate what the constructor validates. Before 2.5.1
@@ -292,14 +299,14 @@ fn texture_from_json_str(json) {
     var self = garjan_alloc(sizeof(AmbientTexture));
     if (garjan_is_err(self) == 1) { return self; }
     AmbientTexture_set_texture_type(self, AmbientTextureParams_texture_type(p));
-    AmbientTexture_set_level(self, AmbientTextureParams_level(p));
+    AmbientTexture_set_level(self, f64_clamp(AmbientTextureParams_level(p), 0, F64_ONE));
     AmbientTexture_set_sample_rate(self, AmbientTextureParams_sample_rate(p));
     AmbientTexture_set_sample_position(self, AmbientTextureParams_sample_position(p));
 
     var rng = rng_new(0);
     if (garjan_is_err(rng) == 1) { return rng; }
-    Rng_set_state(rng, AmbientTextureParams_rng_state(p));
-    Rng_set_inc(rng, AmbientTextureParams_rng_inc(p));
+    var ga_rr1 = rng_restore(rng, AmbientTextureParams_rng_state(p), AmbientTextureParams_rng_inc(p));
+    if (garjan_is_err(ga_rr1) == 1) { return ga_rr1; }
     AmbientTexture_set_rng(self, rng);
 
     var dc = garjan_dcblocker_new(AmbientTextureParams_sample_rate(p));
@@ -313,17 +320,24 @@ fn texture_from_json_str(json) {
     if (garjan_is_err(b) == 1) { return b; }
 
     # Restore the components' live state onto the freshly built ones. A
-    # document written before 2.5.0 has no "dsp" member; garjan_dsp_node
+    # document written before 2.5.0 has no "dsp" member; garjan_json_open
     # returns 0 and the synth resumes without it, exactly as it used to.
-    var dsp = garjan_dsp_node(json);
+    var dbad = 0;
     if (dsp != 0) {
-        garjan_state_biquad_load(AmbientTexture_low_filter(self), garjan_json_get(dsp, "lf"));
-        garjan_state_biquad_load(AmbientTexture_mid_filter(self), garjan_json_get(dsp, "mf"));
-        garjan_state_biquad_load(AmbientTexture_high_filter(self), garjan_json_get(dsp, "hf"));
-        garjan_state_lfo_load(AmbientTexture_mod_lfo(self), garjan_json_get(dsp, "ml"));
-        garjan_state_noise_load(AmbientTexture_low_noise(self), garjan_json_get(dsp, "ln"));
-        garjan_state_noise_load(AmbientTexture_mid_noise(self), garjan_json_get(dsp, "mn"));
-        garjan_state_noise_load(AmbientTexture_high_noise(self), garjan_json_get(dsp, "hn"));
+        dbad = dbad + garjan_is_err(garjan_state_biquad_load(AmbientTexture_low_filter(self),
+            garjan_json_get(dsp, "lf")));
+        dbad = dbad + garjan_is_err(garjan_state_biquad_load(AmbientTexture_mid_filter(self),
+            garjan_json_get(dsp, "mf")));
+        dbad = dbad + garjan_is_err(garjan_state_biquad_load(AmbientTexture_high_filter(self),
+            garjan_json_get(dsp, "hf")));
+        dbad = dbad + garjan_is_err(garjan_state_lfo_load(AmbientTexture_mod_lfo(self), garjan_json_get(dsp, "ml")));
+        dbad = dbad + garjan_is_err(garjan_state_noise_load(AmbientTexture_low_noise(self),
+            garjan_json_get(dsp, "ln")));
+        dbad = dbad + garjan_is_err(garjan_state_noise_load(AmbientTexture_mid_noise(self),
+            garjan_json_get(dsp, "mn")));
+        dbad = dbad + garjan_is_err(garjan_state_noise_load(AmbientTexture_high_noise(self),
+            garjan_json_get(dsp, "hn")));
     }
+    if (dbad > 0) { return GARJAN_ERR_INVALID_PARAMETER; }
     return self;
 }

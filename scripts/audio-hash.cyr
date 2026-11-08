@@ -86,7 +86,7 @@ fn main() {
     k = 0; h = 0; while (k < 3) { texture_process_block(tex, b); h = hbuf(h, b); k = k + 1; }
     report("texture", h);
 
-    var roll = rolling_new(MATERIAL_WOOD, MATERIAL_STONE, sr);
+    var roll = rolling_new(ROLLING_WHEEL, MATERIAL_STONE, sr);
     rolling_set_velocity(roll, f64_from(3));
     k = 0; h = 0; while (k < 3) { rolling_process_block(roll, b); h = hbuf(h, b); k = k + 1; }
     report("rolling", h);
@@ -137,7 +137,7 @@ fn main() {
     k = 0; h = 0; while (k < 3) { underwater_process_block(uw, b); h = hbuf(h, b); k = k + 1; }
     report("underwater", h);
 
-    var cr = creak_new(MATERIAL_WOOD, sr);
+    var cr = creak_new(CREAK_HINGE, sr);
     creak_set_tension(cr, F64_HALF);
     creak_set_speed(cr, F64_HALF);
     k = 0; h = 0; while (k < 3) { creak_process_block(cr, b); h = hbuf(h, b); k = k + 1; }

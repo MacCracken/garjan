@@ -52,6 +52,42 @@ var NAN_BITS = 0x7FF8000000000000;
 
 # ---- helpers -------------------------------------------------------------
 
+# Returns `doc` with the first number after `key` replaced by the literal `text`.
+fn swap_value(doc, key, text) {
+    var n = strlen(doc);
+    var kl = strlen(key);
+    var at = 0;
+    while (at + kl <= n && memeq(doc + at, key, kl) == 0) { at = at + 1; }
+    var start = at + kl;
+    var end = start;
+    while (end < n && load8(doc + end) != 44 && load8(doc + end) != 93 && load8(doc + end) != 125) { end = end + 1; }
+    var sb = str_builder_new();
+    var head = str_from_buf(doc, start);
+    str_builder_add(sb, head);
+    str_builder_add_cstr(sb, text);
+    str_builder_add(sb, str_from_buf(doc + end, n - end));
+    return str_data(str_builder_build(sb));
+}
+
+# Returns `doc` with everything after the first `key` replaced by `text`. "dsp" is the last
+# member of every document, so this swaps a whole nested value where swap_value cannot.
+fn swap_tail(doc, key, text) {
+    var n = strlen(doc);
+    var kl = strlen(key);
+    var at = 0;
+    while (at + kl <= n && memeq(doc + at, key, kl) == 0) { at = at + 1; }
+    var sb = str_builder_new();
+    str_builder_add(sb, str_from_buf(doc, at + kl));
+    str_builder_add_cstr(sb, text);
+    return str_data(str_builder_build(sb));
+}
+
+# Returns 1 if `doc` parses as JSON, so a refusal test cannot pass on a malformed edit.
+fn parses(doc) {
+    if (bayan_json_v_parse_buf(doc, strlen(doc)) == 0) { return 0; }
+    return 1;
+}
+
 # Feeds `doc` to all 22 deserializers. Returns how many refused it.
 fn refused_by(doc) {
     var n = garjan_is_err(fire_from_json_str(doc));
@@ -1036,9 +1072,8 @@ fn main() {
         "\"sample_rate\":44100.0,\"sample_position\":0,",
         "\"rng_state\":1,\"rng_inc\":19999,\"dcb_x_prev\":0.0,",
         "\"dcb_y_prev\":0.0,\"dcb_r\":0.999,\"dsp\":\"pwn\"}"));
-    assert(garjan_is_err(v51_h1) == 0, "dsp as a string still loads");
-    fire_process_block(v51_h1, v51_hb);
-    assert_eq(all_finite(v51_hb), 1, "...and renders finite");
+    # 2.6.3 (ADR-0010): a "dsp" that is not an object is refused, where 2.5.1 loaded it bare.
+    assert(garjan_is_err(v51_h1) == 1, "dsp as a string is refused");
     var v51_h2 = fire_from_json_str(json_doc(
         "{\"intensity\":0.5,\"crackle_rate\":20.0,\"sample_rate\":44100.0,",
         "\"sample_position\":0,\"rng_state\":1,\"rng_inc\":19999,\"dcb_x_prev\":0.0,",
@@ -1094,9 +1129,128 @@ fn main() {
         "\"sample_rate\":44100.0,\"sample_position\":0,",
         "\"rng_state\":1,\"rng_inc\":19999,\"dcb_x_prev\":0.0,",
         "\"dcb_y_prev\":0.0,\"dcb_r\":0.999}"));
-    assert(garjan_is_err(nan_doc) == 0, "a null crackle_rate loads");
-    fire_process_block(nan_doc, nan_buf);
+    # 2.6.3 (ADR-0010): a null is refused at load, so JSON can no longer reach the hang;
+    # the setters above still can, and rng.tcyr pins the guard itself.
+    assert(garjan_is_err(nan_doc) == 1, "a null crackle_rate is refused");
     assert(1 == 1, "every NaN-rate synth returned");
+
+    # --- 2.6.3: the "dsp" loaders and rng restores refuse states no constructor makes ---
+    test_group("a hostile dsp node or rng is refused");
+    var hd_f = fire_new(F64_HALF, SR);
+    var hd_sb = str_builder_new();
+    assert(garjan_is_err(fire_to_json(hd_f, hd_sb)) == 0, "the document is written");
+    var hd_doc = str_data(str_builder_build(hd_sb));
+    assert(garjan_is_err(fire_from_json_str(hd_doc)) == 0, "the real document loads");
+    assert(garjan_is_err(fire_from_json_str(swap_value(hd_doc, "\"rf\":[", "9221120237041090560"))) == 1,
+      "a NaN filter state is refused");
+    assert(garjan_is_err(fire_from_json_str(swap_value(hd_doc, "\"rf\":[", "9218868437227405312"))) == 1,
+      "an infinite filter state is refused");
+    assert(garjan_is_err(fire_from_json_str(swap_value(hd_doc, "\"rn\":[", "0"))) == 1,
+      "a zero noise generator state is refused");
+    assert(garjan_is_err(fire_from_json_str(swap_value(hd_doc, "\"rng_inc\":", "2"))) == 1,
+      "an even rng increment is refused");
+    var hd_c = cloth_new(CLOTH_FLAG, SR);
+    var hd_csb = str_builder_new();
+    assert(garjan_is_err(cloth_to_json(hd_c, hd_csb)) == 0, "the document is written");
+    var hd_cdoc = str_data(str_builder_build(hd_csb));
+    assert(garjan_is_err(cloth_from_json_str(swap_value(swap_value(hd_cdoc, "\"rng_state\":", "576458553280167936"),
+            "\"rng_inc\":", "-3819518676940357632"))) == 1, "the audit's cloth fixed point is refused");
+    var hd_l = foliage_new(FOLIAGE_BRANCH_SNAP, SR);
+    var hd_lsb = str_builder_new();
+    assert(garjan_is_err(foliage_to_json(hd_l, hd_lsb)) == 0, "the document is written");
+    var hd_ldoc = str_data(str_builder_build(hd_lsb));
+    assert(garjan_is_err(foliage_from_json_str(swap_value(hd_ldoc, "\"exc_rng_inc\":", "4"))) == 1,
+      "foliage's second rng is checked too");
+    # The exciter's live state is [position, active, rng state, rng inc]. Each edit puts four
+    # well-formed members in front, so only the one under test is out of range.
+    var hd_i = impact_new(MATERIAL_WOOD, SR);
+    var hd_isb = str_builder_new();
+    assert(garjan_is_err(impact_to_json(hd_i, hd_isb)) == 0, "the document is written");
+    var hd_idoc = str_data(str_builder_build(hd_isb));
+    assert(garjan_is_err(impact_from_json_str(swap_value(hd_idoc, "\"ex\":[", "0,0,1,1"))) == 0,
+      "a well-formed exciter state loads");
+    assert(garjan_is_err(impact_from_json_str(swap_value(hd_idoc, "\"ex\":[", "-1,0,1,1"))) == 1,
+      "a negative exciter position in dsp is refused");
+    assert(garjan_is_err(impact_from_json_str(swap_value(hd_idoc, "\"ex\":[", "0,2,1,1"))) == 1,
+      "an exciter active of 2 is refused");
+    assert(garjan_is_err(impact_from_json_str(swap_value(hd_idoc, "\"ex\":[", "0,0,1,2"))) == 1,
+      "an even exciter rng increment is refused");
+
+    # --- 2.6.3: a document restores only what the API could have produced (ADR-0010) ---
+    test_group("documents the strict parser or Rust's serde would refuse are refused");
+    var dj_f = fire_new(F64_HALF, SR);
+    var dj_sb = str_builder_new();
+    assert(garjan_is_err(fire_to_json(dj_f, dj_sb)) == 0, "the document is written");
+    var dj = str_data(str_builder_build(dj_sb));
+    assert(garjan_is_err(fire_from_json_str(dj)) == 0, "the real document loads");
+    assert(garjan_is_err(fire_from_json_str(swap_value(dj, "\"sample_position\":", "01"))) == 1, "a leading zero");
+    assert(garjan_is_err(fire_from_json_str(swap_value(dj, "\"intensity\":", "null"))) == 1, "a null number");
+    assert(garjan_is_err(fire_from_json_str(swap_value(dj, "\"intensity\":", "1e999"))) == 1, "an overflowing number");
+    assert(garjan_is_err(fire_from_json_str(swap_value(dj, "\"intensity\":", "-1e999"))) == 1,
+      "an overflowing negative number");
+    assert(garjan_is_err(fire_from_json_str(swap_value(dj, "\"intensity\":", "\"x\""))) == 1, "a string for a number");
+    assert(garjan_is_err(fire_from_json_str(swap_value(dj, "\"intensity\":", "[1]"))) == 1, "an array for a number");
+    assert(garjan_is_err(fire_from_json_str(swap_value(dj, "\"intensity\":", "0.5,\"intensity\":0.5"))) == 1,
+      "a duplicate key");
+    assert(garjan_is_err(fire_from_json_str(swap_value(dj, "\"sample_position\":", "-1"))) == 1,
+      "a negative position");
+    var dj_d = swap_tail(dj, "\"dsp\":", "1}");
+    assert(parses(dj_d) == 1, "the dsp edit is well-formed JSON");
+    assert(garjan_is_err(fire_from_json_str(dj_d)) == 1, "a dsp that is not an object");
+    var dj_w = whoosh_new(WHOOSH_SWING, SR);
+    var dj_wsb = str_builder_new();
+    assert(garjan_is_err(whoosh_to_json(dj_w, dj_wsb)) == 0, "the document is written");
+    var djw = str_data(str_builder_build(dj_wsb));
+    assert(garjan_is_err(whoosh_from_json_str(swap_value(djw, "\"active\":", "2"))) == 1, "a bool of 2");
+    assert(garjan_is_err(whoosh_from_json_str(swap_value(djw, "\"trigger_position\":", "-5"))) == 1,
+      "a negative trigger position");
+    var dj_s = footstep_new(TERRAIN_GRAVEL, MOVEMENT_WALK, SR);
+    var dj_ssb = str_builder_new();
+    assert(garjan_is_err(footstep_to_json(dj_s, dj_ssb)) == 0, "the document is written");
+    var djs = str_data(str_builder_build(dj_ssb));
+    assert(garjan_is_err(footstep_from_json_str(swap_value(djs, "\"samples_since_last_step\":", "-1000000000"))) == 1,
+      "the contact audit's footstep document");
+    var dj_l = foliage_new(FOLIAGE_BRANCH_SNAP, SR);
+    var dj_lsb = str_builder_new();
+    assert(garjan_is_err(foliage_to_json(dj_l, dj_lsb)) == 0, "the document is written");
+    var djl = str_data(str_builder_build(dj_lsb));
+    assert(garjan_is_err(foliage_from_json_str(swap_value(djl, "\"exc_position\":", "-9000000000000000000"))) == 1,
+      "a negative exciter position");
+
+    test_group("a restore applies the constructor's clamps and re-derives its tables");
+    var dc_f = fire_from_json_str(swap_value(dj, "\"intensity\":", "50.0"));
+    assert(f64_eq(Fire_intensity(dc_f), F64_ONE) == 1, "fire intensity clamped to 1");
+    var dc_t = thunder_new(f64_from(1000), SR);
+    var dc_tsb = str_builder_new();
+    assert(garjan_is_err(thunder_to_json(dc_t, dc_tsb)) == 0, "the document is written");
+    var dct = thunder_from_json_str(swap_value(str_data(str_builder_build(dc_tsb)), "\"distance_m\":", "-1.0"));
+    assert(f64_eq(Thunder_distance_m(dct), f64_from(10)) == 1, "thunder distance floored at 10 m");
+    var dc_wi = wind_new(f64_from(15), F64_HALF, SR);
+    var dc_wisb = str_builder_new();
+    assert(garjan_is_err(wind_to_json(dc_wi, dc_wisb)) == 0, "the document is written");
+    var dcwi = str_data(str_builder_build(dc_wisb));
+    assert(f64_eq(Wind_gustiness(wind_from_json_str(swap_value(dcwi, "\"gustiness\":", "5.0"))), F64_ONE) == 1,
+      "wind gustiness clamped to 1");
+    assert(f64_eq(Wind_speed(wind_from_json_str(swap_value(dcwi, "\"speed\":", "-3.0"))), 0) == 1,
+      "wind speed floored at 0");
+    var dc_c = cloth_new(CLOTH_FLAG, SR);
+    var dc_csb = str_builder_new();
+    assert(garjan_is_err(cloth_to_json(dc_c, dc_csb)) == 0, "the document is written");
+    var dcc = cloth_from_json_str(swap_value(str_data(str_builder_build(dc_csb)), "\"wind_speed\":", "9.0"));
+    assert(f64_eq(Cloth_wind_speed(dcc), F64_ONE) == 1, "a setter's clamp applies on load too");
+    var dc_b = bubble_new(BUBBLE_BOILING, SR);
+    var dc_bsb = str_builder_new();
+    assert(garjan_is_err(bubble_to_json(dc_b, dc_bsb)) == 0, "the document is written");
+    var dcb = bubble_from_json_str(swap_value(str_data(str_builder_build(dc_bsb)), "\"decay_time\":", "1e300"));
+    assert(f64_eq(Bubble_decay_time(dcb), Bubble_decay_time(dc_b)) == 1, "bubble decay_time re-derived");
+    var dc_p = precipitation_new(PRECIP_HAIL, STONE_MEDIUM, TERRAIN_METAL, SR);
+    var dc_psb = str_builder_new();
+    assert(garjan_is_err(precipitation_to_json(dc_p, dc_psb)) == 0, "the document is written");
+    var dcp = precipitation_from_json_str(swap_value(str_data(str_builder_build(dc_psb)), "\"decay_samples\":",
+        "1000000000000"));
+    assert_eq(Precipitation_decay_samples(dcp), Precipitation_decay_samples(dc_p), "precipitation decay re-derived");
+    var dcl = foliage_from_json_str(swap_value(djl, "\"event_duration_samples\":", "1000000000000"));
+    assert_eq(Foliage_event_duration_samples(dcl), Foliage_event_duration_samples(dj_l), "foliage duration re-derived");
 
     return assert_summary();
 }

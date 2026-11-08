@@ -1,0 +1,99 @@
+# naad_failure.tcyr -- a failed naad noise generator reaches the caller as an error.
+#
+# naad 2.3.3's noise_new cannot fail: on a refused allocation it writes through the null
+# pointer and faults (docs/development/dependency-watch.md). Once naad checks that
+# allocation it will return a failure, and garjan must not store that failure as a
+# component pointer, which is what all 28 call sites did before 2.6.3. ADR-0005 promises
+# an error code instead.
+#
+# This suite replaces noise_new for the whole binary, so no synth can build here. It is
+# a suite of its own for that reason: the other suites need the real generator.
+
+include "src/error.cyr"
+include "src/logging.cyr"
+include "src/dsp.cyr"
+include "src/rng.cyr"
+include "src/lod.cyr"
+include "src/material.cyr"
+include "src/modal.cyr"
+include "src/contact.cyr"
+include "src/aero.cyr"
+include "src/creature.cyr"
+include "src/fire.cyr"
+include "src/weather.cyr"
+include "src/water.cyr"
+include "src/precipitation.cyr"
+include "src/bubble.cyr"
+include "src/impact.cyr"
+include "src/footstep.cyr"
+include "src/friction.cyr"
+include "src/creak.cyr"
+include "src/rolling.cyr"
+include "src/foliage.cyr"
+include "src/whoosh.cyr"
+include "src/whistle.cyr"
+include "src/cloth.cyr"
+include "src/insect.cyr"
+include "src/wingflap.cyr"
+include "src/underwater.cyr"
+include "src/surf.cyr"
+include "src/texture.cyr"
+
+# What the stand-in noise_new returns: 0 for a null pointer, otherwise a naad error code.
+var NF_RESULT = 0;
+
+# Replaces naad's noise_new for this binary: every call fails with NF_RESULT.
+fn noise_new(noise_type, seed) {
+    return NF_RESULT;
+}
+
+# Asserts that all 21 synth constructors refuse to build without a noise generator.
+fn check_all(label) {
+    var sr = f64_from(44100);
+    var h = F64_HALF;
+    var n = 0;
+    n = n + garjan_is_err(bubble_new(0, sr));
+    n = n + garjan_is_err(cloth_new(0, sr));
+    n = n + garjan_is_err(creak_new(0, sr));
+    n = n + garjan_is_err(fire_new(h, sr));
+    n = n + garjan_is_err(foliage_new(0, sr));
+    n = n + garjan_is_err(footstep_new(0, 0, sr));
+    n = n + garjan_is_err(friction_new(0, 0, sr));
+    n = n + garjan_is_err(impact_new(0, sr));
+    n = n + garjan_is_err(insect_new(0, sr));
+    n = n + garjan_is_err(precipitation_new(0, 0, 0, sr));
+    n = n + garjan_is_err(rolling_new(0, 0, sr));
+    n = n + garjan_is_err(surf_new(h, sr));
+    n = n + garjan_is_err(texture_new(0, h, sr));
+    n = n + garjan_is_err(underwater_new(0, sr));
+    n = n + garjan_is_err(water_new(0, h, sr));
+    n = n + garjan_is_err(rain_new(h, sr));
+    n = n + garjan_is_err(thunder_new(f64_from(100), sr));
+    n = n + garjan_is_err(wind_new(f64_from(10), h, sr));
+    n = n + garjan_is_err(whistle_new(0, sr));
+    n = n + garjan_is_err(whoosh_new(0, sr));
+    n = n + garjan_is_err(wingflap_new(0, sr));
+    assert_eq(n, 21, label);
+    return 0;
+}
+
+# Runs the suite. Returns the failure count, used as the exit code.
+fn main() {
+    alloc_init();
+    sakshi_set_level(SK_ERROR);
+
+    test_group("a null noise generator is an error, not a pointer");
+    NF_RESULT = 0;
+    check_all("all 21 constructors refuse a null generator");
+    assert_eq(garjan_noise_new(NOISE_WHITE, 1), GARJAN_ERR_ALLOCATION, "a null is a refused allocation");
+
+    test_group("a naad error from noise_new is an error, not a pointer");
+    NF_RESULT = NAAD_ERR_INVALID_PARAMETER;
+    check_all("all 21 constructors refuse a naad error");
+    assert_eq(garjan_noise_new(NOISE_WHITE, 1), GARJAN_ERR_ALLOCATION, "a naad error is reported the same way");
+
+    return assert_summary();
+}
+
+var exit_code = main();
+syscall(60, exit_code);

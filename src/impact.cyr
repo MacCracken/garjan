@@ -118,7 +118,9 @@ fn impact_build_naad(self) {
     Impact_set_resonance_filter(self, rf);
 
     # Transient noise: white, seed 5381 (matches Rust NoiseGenerator::new(White, 5381)).
-    Impact_set_transient_noise(self, noise_new(NOISE_WHITE, 5381));
+    var ga_ng1 = garjan_noise_new(NOISE_WHITE, 5381);
+    if (garjan_is_err(ga_ng1) == 1) { return ga_ng1; }
+    Impact_set_transient_noise(self, ga_ng1);
 
     # Pre-allocate excitation buffer for max impact duration: ((decay*2 + 0.05) * sr).
     var pdecay = MaterialProperties_decay(props);
@@ -292,18 +294,15 @@ fn impact_process_block(self, impact_type, output) {
 # Returns the vec pointer.
 #must_use
 fn impact_synthesize_velocity(self, impact_type, velocity) {
+    if (garjan_enum_invalid(impact_type, IMPACT_SHATTER) == 1) { return GARJAN_ERR_INVALID_PARAMETER; }
     var vel = f64_clamp(velocity, 0, F64_ONE);
     var props = Impact_props(self);
     var pdecay = MaterialProperties_decay(props);
     # duration = decay*2 + 0.05
     var duration = f64_add(f64_mul(pdecay, F64_TWO), f64_div(f64_from(5), f64_from(100)));
-    var num_samples = f64_to(f64_mul(duration, Impact_sample_rate(self)));
-    # The 2.4.0 rollout matched `f64_mul(<Type>_sample_rate(self), duration)` and
-    # missed this one, whose operands are the other way round.
-    var ga_ncheck = garjan_validate_sample_count(num_samples);
-    if (garjan_is_err(ga_ncheck) == 1) { return ga_ncheck; }
-
-    var output = garjan_vec_zeros(num_samples);
+    # The 2.4.0 rollout missed this guard here, because the operands were the other way
+    # round. Every synthesize now goes through one helper.
+    var output = garjan_synth_buffer(Impact_sample_rate(self), duration);
     if (garjan_is_err(output) == 1) { return output; }
     Impact_set_sample_position(self, 0);
     modal_bank_reset(Impact_modal_bank(self));
@@ -315,6 +314,7 @@ fn impact_synthesize_velocity(self, impact_type, velocity) {
 # vec pointer.
 #must_use
 fn impact_synthesize(self, impact_type) {
+    if (garjan_enum_invalid(impact_type, IMPACT_SHATTER) == 1) { return GARJAN_ERR_INVALID_PARAMETER; }
     return impact_synthesize_velocity(self, impact_type, impact_type_force(impact_type));
 }
 
@@ -342,13 +342,16 @@ fn impact_to_json(self, sb) {
     # Scalars via the derive, then the naad components' LIVE state spliced
     # in as "dsp" -- without it a restore resumes with zeroed filter memory.
     var psb = str_builder_new();
+    if (psb == 0) { return GARJAN_ERR_ALLOCATION; }
     var pe = ImpactParams_to_json(p, psb);
     if (garjan_is_err(pe) == 1) { return pe; }
     var dsp = bayan_json_v_obj_new();
-    bayan_json_v_obj_set(dsp, str_from("rf"), garjan_state_biquad(Impact_resonance_filter(self)));
-    bayan_json_v_obj_set(dsp, str_from("tn"), garjan_state_noise(Impact_transient_noise(self)));
-    bayan_json_v_obj_set(dsp, str_from("mb"), garjan_state_modal(Impact_modal_bank(self)));
-    bayan_json_v_obj_set(dsp, str_from("ex"), garjan_state_exciter(Impact_exciter(self)));
+    var dput = 0;
+    dput = dput + garjan_is_err(garjan_dsp_put(dsp, "rf", garjan_state_biquad(Impact_resonance_filter(self))));
+    dput = dput + garjan_is_err(garjan_dsp_put(dsp, "tn", garjan_state_noise(Impact_transient_noise(self))));
+    dput = dput + garjan_is_err(garjan_dsp_put(dsp, "mb", garjan_state_modal(Impact_modal_bank(self))));
+    dput = dput + garjan_is_err(garjan_dsp_put(dsp, "ex", garjan_state_exciter(Impact_exciter(self))));
+    if (dput > 0) { return GARJAN_ERR_ALLOCATION; }
     return garjan_emit_with_dsp(sb, psb, dsp);
 }
 
@@ -356,6 +359,8 @@ fn impact_to_json(self, sb) {
 # state, then reconstruct the modal bank / naad components fresh.
 #must_use
 fn impact_from_json_str(json) {
+    var dsp = garjan_json_open(json);
+    if (garjan_is_err(dsp) == 1) { return dsp; }
     var p = ImpactParams_from_json_str(json);
     if (p == 0) { return GARJAN_ERR_INVALID_PARAMETER; }   # not a JSON object
     # Deserialize must validate what the constructor validates. Before 2.5.1
@@ -373,14 +378,15 @@ fn impact_from_json_str(json) {
     var props = material_properties_new(ImpactParams_prop_resonance(p), ImpactParams_prop_bandwidth(p),
       ImpactParams_prop_decay(p), ImpactParams_prop_brightness(p),
       ImpactParams_prop_transient(p));
+    if (garjan_is_err(props) == 1) { return props; }
     Impact_set_props(self, props);
     Impact_set_sample_rate(self, ImpactParams_sample_rate(p));
     Impact_set_sample_position(self, ImpactParams_sample_position(p));
 
     var rng = rng_new(0);
     if (garjan_is_err(rng) == 1) { return rng; }
-    Rng_set_state(rng, ImpactParams_rng_state(p));
-    Rng_set_inc(rng, ImpactParams_rng_inc(p));
+    var ga_rr1 = rng_restore(rng, ImpactParams_rng_state(p), ImpactParams_rng_inc(p));
+    if (garjan_is_err(ga_rr1) == 1) { return ga_rr1; }
     Impact_set_rng(self, rng);
 
     var dc = garjan_dcblocker_new(ImpactParams_sample_rate(p));
@@ -394,14 +400,16 @@ fn impact_from_json_str(json) {
     if (garjan_is_err(b) == 1) { return b; }
 
     # Restore the components' live state onto the freshly built ones. A
-    # document written before 2.5.0 has no "dsp" member; garjan_dsp_node
+    # document written before 2.5.0 has no "dsp" member; garjan_json_open
     # returns 0 and the synth resumes without it, exactly as it used to.
-    var dsp = garjan_dsp_node(json);
+    var dbad = 0;
     if (dsp != 0) {
-        garjan_state_modal_load(Impact_modal_bank(self), garjan_json_get(dsp, "mb"));
-        garjan_state_exciter_load(Impact_exciter(self), garjan_json_get(dsp, "ex"));
-        garjan_state_biquad_load(Impact_resonance_filter(self), garjan_json_get(dsp, "rf"));
-        garjan_state_noise_load(Impact_transient_noise(self), garjan_json_get(dsp, "tn"));
+        dbad = dbad + garjan_is_err(garjan_state_modal_load(Impact_modal_bank(self), garjan_json_get(dsp, "mb")));
+        dbad = dbad + garjan_is_err(garjan_state_exciter_load(Impact_exciter(self), garjan_json_get(dsp, "ex")));
+        dbad = dbad + garjan_is_err(garjan_state_biquad_load(Impact_resonance_filter(self),
+            garjan_json_get(dsp, "rf")));
+        dbad = dbad + garjan_is_err(garjan_state_noise_load(Impact_transient_noise(self), garjan_json_get(dsp, "tn")));
     }
+    if (dbad > 0) { return GARJAN_ERR_INVALID_PARAMETER; }
     return self;
 }

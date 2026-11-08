@@ -78,6 +78,9 @@ fn modal_bank_new(specs, sample_rate) {
     var coeff_re = vec_new();
     var coeff_im = vec_new();
     var amplitude = vec_new();
+    if (state_re == 0 || state_im == 0 || coeff_re == 0 || coeff_im == 0 || amplitude == 0) {
+        return GARJAN_ERR_ALLOCATION;
+    }
 
     var n = vec_len(specs);
     var i = 0;
@@ -177,12 +180,13 @@ fn modal_bank_reset(self) {
 # Generates a vec of ModeSpec pointers for a material's properties + pattern.
 #must_use
 fn generate_modes(props, pattern, count, damping_factor) {
+    if (garjan_enum_invalid(pattern, MODE_PATTERN_DAMPED) == 1) { return GARJAN_ERR_INVALID_PARAMETER; }
     var f0 = MaterialProperties_resonance(props);
     var brightness = MaterialProperties_brightness(props);
     var pdecay = MaterialProperties_decay(props);
     # rolloff_exp = 2.0 - 1.5 * brightness
     var rolloff_exp = f64_sub(f64_from(2), f64_mul(f64_div(f64_from(15), f64_from(10)), brightness));
-    var rng = rng_new(f64_to(f64_mul(f0, f64_from(1000))));
+    var rng = rng_new(garjan_f64_to_u64(f64_mul(f0, f64_from(1000))));
     if (garjan_is_err(rng) == 1) { return rng; }
 
     var half = F64_HALF;
@@ -194,6 +198,7 @@ fn generate_modes(props, pattern, count, damping_factor) {
     var freq_cap = f64_from(20000);
 
     var out = vec_new();
+    if (out == 0) { return GARJAN_ERR_ALLOCATION; }
     var k = 1;
     while (k <= count) {
         var kf = f64_from(k);
@@ -252,6 +257,7 @@ struct Exciter { excitation_type; duration_samples; amplitude; position; active;
 # starts it. Values are stored as given. Returns it, or GARJAN_ERR_ALLOCATION.
 #must_use
 fn exciter_new(excitation_type, duration_samples, amplitude) {
+    if (garjan_enum_invalid(excitation_type, EXCITATION_HALF_SINE) == 1) { return GARJAN_ERR_INVALID_PARAMETER; }
     var self = garjan_alloc(sizeof(Exciter));
     if (garjan_is_err(self) == 1) { return self; }
     Exciter_set_excitation_type(self, excitation_type);
@@ -272,6 +278,7 @@ fn exciter_new(excitation_type, duration_samples, amplitude) {
 # callers in a per-block path use this instead of building a new one, because
 # the arena never frees.
 fn exciter_reset(self, excitation_type, duration_samples, amplitude) {
+    if (garjan_enum_invalid(excitation_type, EXCITATION_HALF_SINE) == 1) { return GARJAN_ERR_INVALID_PARAMETER; }
     Exciter_set_excitation_type(self, excitation_type);
     Exciter_set_duration_samples(self, duration_samples);
     Exciter_set_amplitude(self, amplitude);

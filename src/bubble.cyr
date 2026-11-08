@@ -55,7 +55,9 @@ struct Bubble {
 # fail, so this always returns
 # GARJAN_OK; kept for structural parity with the other synths.
 fn bubble_build_naad(self) {
-    Bubble_set_noise_gen(self, noise_new(NOISE_WHITE, 4040));
+    var ga_ng1 = garjan_noise_new(NOISE_WHITE, 4040);
+    if (garjan_is_err(ga_ng1) == 1) { return ga_ng1; }
+    Bubble_set_noise_gen(self, ga_ng1);
     return GARJAN_OK;
 }
 
@@ -200,12 +202,7 @@ fn bubble_process_block(self, output) {
 # vec pointer, or a negative code on invalid duration.
 #must_use
 fn bubble_synthesize(self, duration) {
-    var e = garjan_validate_duration(duration);
-    if (garjan_is_err(e) == 1) { return e; }
-    var num = f64_to(f64_mul(Bubble_sample_rate(self), duration));
-    var ga_ncheck = garjan_validate_sample_count(num);
-    if (garjan_is_err(ga_ncheck) == 1) { return ga_ncheck; }
-    var output = garjan_vec_zeros(num);
+    var output = garjan_synth_buffer(Bubble_sample_rate(self), duration);
     if (garjan_is_err(output) == 1) { return output; }
     bubble_process_block(self, output);
     return output;
@@ -234,10 +231,13 @@ fn bubble_to_json(self, sb) {
     # Scalars via the derive, then the naad components' LIVE state spliced
     # in as "dsp" -- without it a restore resumes with zeroed filter memory.
     var psb = str_builder_new();
+    if (psb == 0) { return GARJAN_ERR_ALLOCATION; }
     var pe = BubbleParams_to_json(p, psb);
     if (garjan_is_err(pe) == 1) { return pe; }
     var dsp = bayan_json_v_obj_new();
-    bayan_json_v_obj_set(dsp, str_from("ng"), garjan_state_noise(Bubble_noise_gen(self)));
+    var dput = 0;
+    dput = dput + garjan_is_err(garjan_dsp_put(dsp, "ng", garjan_state_noise(Bubble_noise_gen(self))));
+    if (dput > 0) { return GARJAN_ERR_ALLOCATION; }
     return garjan_emit_with_dsp(sb, psb, dsp);
 }
 
@@ -245,6 +245,8 @@ fn bubble_to_json(self, sb) {
 # reconstruct the naad noise generator fresh (rebuilt, not restored -- architecture note 001).
 #must_use
 fn bubble_from_json_str(json) {
+    var dsp = garjan_json_open(json);
+    if (garjan_is_err(dsp) == 1) { return dsp; }
     var p = BubbleParams_from_json_str(json);
     if (p == 0) { return GARJAN_ERR_INVALID_PARAMETER; }   # not a JSON object
     # Deserialize must validate what the constructor validates. Before 2.5.1
@@ -260,16 +262,20 @@ fn bubble_from_json_str(json) {
     Bubble_set_bubble_type(self, BubbleParams_bubble_type(p));
     Bubble_set_sample_rate(self, BubbleParams_sample_rate(p));
     Bubble_set_sample_position(self, BubbleParams_sample_position(p));
-    Bubble_set_base_freq(self, BubbleParams_base_freq(p));
-    Bubble_set_event_rate(self, BubbleParams_event_rate(p));
-    Bubble_set_freq_spread(self, BubbleParams_freq_spread(p));
-    Bubble_set_decay_time(self, BubbleParams_decay_time(p));
-    Bubble_set_intensity(self, BubbleParams_intensity(p));
+    # Re-derived from bubble_type as bubble_new does: no public call changes them, and the
+    # document's copies bounded the work per block (ADR-0010).
+    var cfg = creature_bubble_config(BubbleParams_bubble_type(p));
+    if (garjan_is_err(cfg) == 1) { return cfg; }
+    Bubble_set_base_freq(self, BubbleConfig_base_freq(cfg));
+    Bubble_set_event_rate(self, BubbleConfig_event_rate(cfg));
+    Bubble_set_freq_spread(self, BubbleConfig_freq_spread(cfg));
+    Bubble_set_decay_time(self, BubbleConfig_decay(cfg));
+    Bubble_set_intensity(self, f64_clamp(BubbleParams_intensity(p), 0, F64_ONE));
 
     var rng = rng_new(0);
     if (garjan_is_err(rng) == 1) { return rng; }
-    Rng_set_state(rng, BubbleParams_rng_state(p));
-    Rng_set_inc(rng, BubbleParams_rng_inc(p));
+    var ga_rr1 = rng_restore(rng, BubbleParams_rng_state(p), BubbleParams_rng_inc(p));
+    if (garjan_is_err(ga_rr1) == 1) { return ga_rr1; }
     Bubble_set_rng(self, rng);
 
     var dc = garjan_dcblocker_new(BubbleParams_sample_rate(p));
@@ -283,11 +289,12 @@ fn bubble_from_json_str(json) {
     if (garjan_is_err(b) == 1) { return b; }
 
     # Restore the components' live state onto the freshly built ones. A
-    # document written before 2.5.0 has no "dsp" member; garjan_dsp_node
+    # document written before 2.5.0 has no "dsp" member; garjan_json_open
     # returns 0 and the synth resumes without it, exactly as it used to.
-    var dsp = garjan_dsp_node(json);
+    var dbad = 0;
     if (dsp != 0) {
-        garjan_state_noise_load(Bubble_noise_gen(self), garjan_json_get(dsp, "ng"));
+        dbad = dbad + garjan_is_err(garjan_state_noise_load(Bubble_noise_gen(self), garjan_json_get(dsp, "ng")));
     }
+    if (dbad > 0) { return GARJAN_ERR_INVALID_PARAMETER; }
     return self;
 }

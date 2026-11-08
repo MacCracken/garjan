@@ -73,7 +73,9 @@ fn whoosh_build_naad(self) {
 
     Whoosh_set_hi_filter(self, hf);
     Whoosh_set_lo_filter(self, lf);
-    Whoosh_set_noise_gen(self, noise_new(NOISE_PINK, 1111));
+    var ga_ng1 = garjan_noise_new(NOISE_PINK, 1111);
+    if (garjan_is_err(ga_ng1) == 1) { return ga_ng1; }
+    Whoosh_set_noise_gen(self, ga_ng1);
     return GARJAN_OK;
 }
 
@@ -187,12 +189,7 @@ fn whoosh_process_block(self, output) {
 # the vec pointer, or a negative code on invalid duration.
 #must_use
 fn whoosh_synthesize(self, duration) {
-    var e = garjan_validate_duration(duration);
-    if (garjan_is_err(e) == 1) { return e; }
-    var num = f64_to(f64_mul(Whoosh_sample_rate(self), duration));
-    var ga_ncheck = garjan_validate_sample_count(num);
-    if (garjan_is_err(ga_ncheck) == 1) { return ga_ncheck; }
-    var output = garjan_vec_zeros(num);
+    var output = garjan_synth_buffer(Whoosh_sample_rate(self), duration);
     if (garjan_is_err(output) == 1) { return output; }
     whoosh_trigger(self);
     whoosh_process_block(self, output);
@@ -223,12 +220,15 @@ fn whoosh_to_json(self, sb) {
     # Scalars via the derive, then the naad components' LIVE state spliced
     # in as "dsp" -- without it a restore resumes with zeroed filter memory.
     var psb = str_builder_new();
+    if (psb == 0) { return GARJAN_ERR_ALLOCATION; }
     var pe = WhooshParams_to_json(p, psb);
     if (garjan_is_err(pe) == 1) { return pe; }
     var dsp = bayan_json_v_obj_new();
-    bayan_json_v_obj_set(dsp, str_from("hf"), garjan_state_biquad(Whoosh_hi_filter(self)));
-    bayan_json_v_obj_set(dsp, str_from("lf"), garjan_state_biquad(Whoosh_lo_filter(self)));
-    bayan_json_v_obj_set(dsp, str_from("ng"), garjan_state_noise(Whoosh_noise_gen(self)));
+    var dput = 0;
+    dput = dput + garjan_is_err(garjan_dsp_put(dsp, "hf", garjan_state_biquad(Whoosh_hi_filter(self))));
+    dput = dput + garjan_is_err(garjan_dsp_put(dsp, "lf", garjan_state_biquad(Whoosh_lo_filter(self))));
+    dput = dput + garjan_is_err(garjan_dsp_put(dsp, "ng", garjan_state_noise(Whoosh_noise_gen(self))));
+    if (dput > 0) { return GARJAN_ERR_ALLOCATION; }
     return garjan_emit_with_dsp(sb, psb, dsp);
 }
 
@@ -236,6 +236,8 @@ fn whoosh_to_json(self, sb) {
 # reconstruct the naad components fresh (matches Rust's cfg+reconstruct).
 #must_use
 fn whoosh_from_json_str(json) {
+    var dsp = garjan_json_open(json);
+    if (garjan_is_err(dsp) == 1) { return dsp; }
     var p = WhooshParams_from_json_str(json);
     if (p == 0) { return GARJAN_ERR_INVALID_PARAMETER; }   # not a JSON object
     # Deserialize must validate what the constructor validates. Before 2.5.1
@@ -256,12 +258,12 @@ fn whoosh_from_json_str(json) {
     Whoosh_set_low_content(self, WhooshParams_low_content(p));
     Whoosh_set_active(self, WhooshParams_active(p));
     Whoosh_set_trigger_position(self, WhooshParams_trigger_position(p));
-    Whoosh_set_speed(self, WhooshParams_speed(p));
+    Whoosh_set_speed(self, f64_clamp(WhooshParams_speed(p), 0, F64_ONE));
 
     var rng = rng_new(0);
     if (garjan_is_err(rng) == 1) { return rng; }
-    Rng_set_state(rng, WhooshParams_rng_state(p));
-    Rng_set_inc(rng, WhooshParams_rng_inc(p));
+    var ga_rr1 = rng_restore(rng, WhooshParams_rng_state(p), WhooshParams_rng_inc(p));
+    if (garjan_is_err(ga_rr1) == 1) { return ga_rr1; }
     Whoosh_set_rng(self, rng);
 
     var dc = garjan_dcblocker_new(WhooshParams_sample_rate(p));
@@ -275,13 +277,14 @@ fn whoosh_from_json_str(json) {
     if (garjan_is_err(b) == 1) { return b; }
 
     # Restore the components' live state onto the freshly built ones. A
-    # document written before 2.5.0 has no "dsp" member; garjan_dsp_node
+    # document written before 2.5.0 has no "dsp" member; garjan_json_open
     # returns 0 and the synth resumes without it, exactly as it used to.
-    var dsp = garjan_dsp_node(json);
+    var dbad = 0;
     if (dsp != 0) {
-        garjan_state_biquad_load(Whoosh_hi_filter(self), garjan_json_get(dsp, "hf"));
-        garjan_state_biquad_load(Whoosh_lo_filter(self), garjan_json_get(dsp, "lf"));
-        garjan_state_noise_load(Whoosh_noise_gen(self), garjan_json_get(dsp, "ng"));
+        dbad = dbad + garjan_is_err(garjan_state_biquad_load(Whoosh_hi_filter(self), garjan_json_get(dsp, "hf")));
+        dbad = dbad + garjan_is_err(garjan_state_biquad_load(Whoosh_lo_filter(self), garjan_json_get(dsp, "lf")));
+        dbad = dbad + garjan_is_err(garjan_state_noise_load(Whoosh_noise_gen(self), garjan_json_get(dsp, "ng")));
     }
+    if (dbad > 0) { return GARJAN_ERR_INVALID_PARAMETER; }
     return self;
 }

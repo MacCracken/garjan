@@ -84,6 +84,18 @@ fn main() {
     var pinf = rng_poisson(pn, f64_div(F64_ONE, 0));
     assert(pinf >= 0, "+Inf rate clamps to the ceiling and returns");
 
+    # --- 2.6.3: a restore must keep PCG's increment odd ---
+    # An even increment has a fixed point: from it every draw is 0xFFFFFFFF, and
+    # rng_poisson never returns (found by the 2.6.3 audit; Rust hangs the same way).
+    test_group("rng_restore keeps the increment odd");
+    var rr = rng_new(1);
+    assert(garjan_is_err(rng_restore(rr, 576458553280167936, 0 - 3819518676940357632)) == 1,
+      "the fixed-point state is refused");
+    assert(garjan_is_err(rng_restore(rr, 5, 2)) == 1, "an even increment is refused");
+    assert(garjan_is_err(rng_restore(rr, 5, 7)) == 0, "an odd increment is accepted");
+    assert_eq(Rng_state(rr), 5, "state restored");
+    assert_eq(Rng_inc(rr), 7, "increment restored");
+
     return assert_summary();
 }
 

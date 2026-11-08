@@ -194,6 +194,32 @@ consumer that actually calls it gets the failure. That is exactly how
 a passing build. **So after any bump the build must be warning-CLEAN, not merely
 `OK`,** and never reach for `--allow-undef`.
 
+## Upstream defects to file
+
+The 2.6.3 fault sweep refused each allocation in turn, on every construct, load,
+synthesize and serialize path. These remaining crashes and exits are in dependencies, not
+in garjan. Re-run the sweep when any of them is fixed. The method is in the
+[2.6.3 audit](../audit/2026-11-07-audit-3.md).
+
+| Item | Where | Defect |
+|---|---|---|
+| U1 | naad | `noise_new`, `filter_biquad_with_gain`, `filter_svf_new` and `modulation_lfo_new` write through a refused allocation |
+| U1b | naad | `naad_vec_zeros` does not check `vec_new` |
+| U2 | cyrius | the `#derive(Serialize)` reader memsets a refused allocation |
+| U3 | stdlib, bayan | `str_builder` and bayan's builder exit the process on a refused allocation, and some growth paths fault first |
+| U4 | bayan | `bayan_json_v_obj_set` stores a null pair when its pair allocation is refused, and the builder then faults on it |
+
+**garjan's side of the contract is already in place.** Every naad constructor result is
+checked. `noise_new` cannot fail today, but `garjan_noise_new` treats a 0 or a negative
+return as `GARJAN_ERR_ALLOCATION`, and `tests/naad_failure.tcyr` proves it at all 21
+constructors. When naad fixes U1, nothing in garjan needs to change.
+
+**bayan's strictness depends on the consumer's toolchain.** bayan 1.11, garjan's pin,
+refuses duplicate keys, leading zeros and deep nesting. A consumer on an older bayan,
+such as dhvani on cyrius 6.6.10, gets a parser that accepts them. `garjan_json_open`
+checks every member it sees, so both copies of a duplicate key go through the same
+checks, but a test that expects a refusal on those grounds passes only under the pin.
+
 ## Upgrade checklist
 
 ```sh
@@ -219,11 +245,11 @@ exact samples nor hostile input:
   samples from both builds to measure *how far*, and look for a length, non-finite or
   sign-of-zero change.
 - **Round trips.** Compare each synth's `*_to_json` bytes across the two trees. Then dump
-  real state at several sample rates and points in a synth's life and check that the
-  tree parser accepts it, `garjan_dsp_node` finds it, and `*_from_json_str` restores it.
-- **Hostile input.** `cyrius fuzz` covers JSON documents, and a replay command is in its
-  header. It does not cover constructors and setters, so build the old tree beside the
-  new one and drive both with +Inf, NaN, ±MAX and past-2^63 values through every f64
-  constructor argument and setter. Run each case in its own process under a timeout and
-  a memory cap, and compare the outcomes. A case that was refused and now hangs or
-  aborts is the regression this catches.
+  real state at several sample rates and points in a synth's life and check that
+  `garjan_json_open` accepts it and `*_from_json_str` restores it.
+- **Hostile input.** `cyrius fuzz` covers JSON documents and, since 2.6.3, every
+  constructor, setter and synthesize duration with hostile f64 values and ids. Replay
+  commands for both are in its header. It checks that nothing crashes or hangs. It does
+  not check that an outcome is the same as before, so also build the old tree beside the
+  new one, drive both with the same values, and compare outcomes case by case. A case
+  that was refused and is now accepted, or the reverse, is a behaviour change to explain.

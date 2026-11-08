@@ -94,7 +94,9 @@ fn insect_build_naad(self) {
     var sf = filter_biquad_new(NAAD_FILTER_BANDPASS, sr, base, q);
     if (garjan_is_err(sf) == 1) { return garjan_map_naad_error(sf); }
     Insect_set_shape_filter(self, sf);
-    Insect_set_noise_gen(self, noise_new(NOISE_WHITE, 9999));
+    var ga_ng1 = garjan_noise_new(NOISE_WHITE, 9999);
+    if (garjan_is_err(ga_ng1) == 1) { return ga_ng1; }
+    Insect_set_noise_gen(self, ga_ng1);
     return GARJAN_OK;
 }
 
@@ -362,12 +364,7 @@ fn insect_process_block(self, output) {
 # vec pointer, or a negative code on invalid duration.
 #must_use
 fn insect_synthesize(self, duration) {
-    var e = garjan_validate_duration(duration);
-    if (garjan_is_err(e) == 1) { return e; }
-    var num = f64_to(f64_mul(Insect_sample_rate(self), duration));
-    var ga_ncheck = garjan_validate_sample_count(num);
-    if (garjan_is_err(ga_ncheck) == 1) { return ga_ncheck; }
-    var output = garjan_vec_zeros(num);
+    var output = garjan_synth_buffer(Insect_sample_rate(self), duration);
     if (garjan_is_err(output) == 1) { return output; }
     insect_process_block(self, output);
     return output;
@@ -405,11 +402,14 @@ fn insect_to_json(self, sb) {
     # Scalars via the derive, then the naad components' LIVE state spliced
     # in as "dsp" -- without it a restore resumes with zeroed filter memory.
     var psb = str_builder_new();
+    if (psb == 0) { return GARJAN_ERR_ALLOCATION; }
     var pe = InsectParams_to_json(p, psb);
     if (garjan_is_err(pe) == 1) { return pe; }
     var dsp = bayan_json_v_obj_new();
-    bayan_json_v_obj_set(dsp, str_from("sf"), garjan_state_biquad(Insect_shape_filter(self)));
-    bayan_json_v_obj_set(dsp, str_from("ng"), garjan_state_noise(Insect_noise_gen(self)));
+    var dput = 0;
+    dput = dput + garjan_is_err(garjan_dsp_put(dsp, "sf", garjan_state_biquad(Insect_shape_filter(self))));
+    dput = dput + garjan_is_err(garjan_dsp_put(dsp, "ng", garjan_state_noise(Insect_noise_gen(self))));
+    if (dput > 0) { return GARJAN_ERR_ALLOCATION; }
     return garjan_emit_with_dsp(sb, psb, dsp);
 }
 
@@ -417,6 +417,8 @@ fn insect_to_json(self, sb) {
 # dc_blocker state, then reconstruct the naad components fresh.
 #must_use
 fn insect_from_json_str(json) {
+    var dsp = garjan_json_open(json);
+    if (garjan_is_err(dsp) == 1) { return dsp; }
     var p = InsectParams_from_json_str(json);
     if (p == 0) { return GARJAN_ERR_INVALID_PARAMETER; }   # not a JSON object
     # Deserialize must validate what the constructor validates. Before 2.5.1
@@ -438,7 +440,7 @@ fn insect_from_json_str(json) {
     Insect_set_mod_rate(self, InsectParams_mod_rate(p));
     Insect_set_chirp_rate(self, InsectParams_chirp_rate(p));
     Insect_set_amplitude(self, InsectParams_amplitude(p));
-    Insect_set_intensity(self, InsectParams_intensity(p));
+    Insect_set_intensity(self, f64_clamp(InsectParams_intensity(p), 0, F64_ONE));
     # swarm_count carries a 1..8 invariant that insect_new_swarm enforces and
     # that insect_detune's eight det0..det7 fields physically encode; restore it
     # here too. Deserialize was the one path that set the field raw, and it is
@@ -461,8 +463,8 @@ fn insect_from_json_str(json) {
 
     var rng = rng_new(0);
     if (garjan_is_err(rng) == 1) { return rng; }
-    Rng_set_state(rng, InsectParams_rng_state(p));
-    Rng_set_inc(rng, InsectParams_rng_inc(p));
+    var ga_rr1 = rng_restore(rng, InsectParams_rng_state(p), InsectParams_rng_inc(p));
+    if (garjan_is_err(ga_rr1) == 1) { return ga_rr1; }
     Insect_set_rng(self, rng);
 
     var dc = garjan_dcblocker_new(InsectParams_sample_rate(p));
@@ -476,12 +478,13 @@ fn insect_from_json_str(json) {
     if (garjan_is_err(b) == 1) { return b; }
 
     # Restore the components' live state onto the freshly built ones. A
-    # document written before 2.5.0 has no "dsp" member; garjan_dsp_node
+    # document written before 2.5.0 has no "dsp" member; garjan_json_open
     # returns 0 and the synth resumes without it, exactly as it used to.
-    var dsp = garjan_dsp_node(json);
+    var dbad = 0;
     if (dsp != 0) {
-        garjan_state_biquad_load(Insect_shape_filter(self), garjan_json_get(dsp, "sf"));
-        garjan_state_noise_load(Insect_noise_gen(self), garjan_json_get(dsp, "ng"));
+        dbad = dbad + garjan_is_err(garjan_state_biquad_load(Insect_shape_filter(self), garjan_json_get(dsp, "sf")));
+        dbad = dbad + garjan_is_err(garjan_state_noise_load(Insect_noise_gen(self), garjan_json_get(dsp, "ng")));
     }
+    if (dbad > 0) { return GARJAN_ERR_INVALID_PARAMETER; }
     return self;
 }

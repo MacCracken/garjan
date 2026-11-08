@@ -80,7 +80,7 @@ fn foliage_build_naad(self) {
           MaterialModeConfig_damping_factor(mode_cfg));
         if (garjan_is_err(specs) == 1) { return specs; }
         var mb = modal_bank_new(specs, sr);
-        if (garjan_is_err(mb) == 1) { return garjan_map_naad_error(mb); }
+        if (garjan_is_err(mb) == 1) { return mb; }
         bank = mb;
     }
     Foliage_set_snap_modal(self, bank);
@@ -95,7 +95,9 @@ fn foliage_build_naad(self) {
     var rf = filter_biquad_new(NAAD_FILTER_BANDPASS, sr, freq, f64_div(f64_from(15), f64_from(10)));
     if (garjan_is_err(rf) == 1) { return garjan_map_naad_error(rf); }
     Foliage_set_rustle_filter(self, rf);
-    Foliage_set_rustle_noise(self, noise_new(NOISE_PINK, 4444));
+    var ga_ng1 = garjan_noise_new(NOISE_PINK, 4444);
+    if (garjan_is_err(ga_ng1) == 1) { return ga_ng1; }
+    Foliage_set_rustle_noise(self, ga_ng1);
 
     # Wind LFO: slow sine, rate depends on type.
     var rate = f64_div(f64_from(1), f64_from(10));
@@ -110,6 +112,23 @@ fn foliage_build_naad(self) {
     return GARJAN_OK;
 }
 
+# Returns the background event rate (events per second) for a FOLIAGE_* id: 20 for leaf
+# rustle, 12 for grass swish, 0 for the snap-driven types.
+fn foliage_event_rate(foliage_type) {
+    if (foliage_type == FOLIAGE_LEAF_RUSTLE) { return f64_from(20); }
+    if (foliage_type == FOLIAGE_GRASS_SWISH) { return f64_from(12); }
+    return 0;
+}
+
+# Returns one background event's length in samples for a FOLIAGE_* id at `sample_rate`:
+# (event_dur_ms * sample_rate / 1000.0) as usize, with 2 ms, 10 ms or 0 ms by type.
+fn foliage_event_duration_samples(foliage_type, sample_rate) {
+    var event_dur_ms = 0;
+    if (foliage_type == FOLIAGE_LEAF_RUSTLE) { event_dur_ms = F64_TWO; }
+    if (foliage_type == FOLIAGE_GRASS_SWISH) { event_dur_ms = f64_from(10); }
+    return f64_to(f64_div(f64_mul(event_dur_ms, sample_rate), f64_from(1000)));
+}
+
 # Creates a new foliage synthesizer. Returns a pointer or a negative code.
 #must_use
 fn foliage_new(foliage_type, sample_rate) {
@@ -117,18 +136,8 @@ fn foliage_new(foliage_type, sample_rate) {
     var e = garjan_validate_sample_rate(sample_rate);
     if (garjan_is_err(e) == 1) { return e; }
 
-    # (event_rate, event_dur_ms) by type.
-    var event_rate = 0;
-    var event_dur_ms = 0;
-    if (foliage_type == FOLIAGE_LEAF_RUSTLE) {
-        event_rate = f64_from(20);
-        event_dur_ms = F64_TWO;
-    } elif (foliage_type == FOLIAGE_GRASS_SWISH) {
-        event_rate = f64_from(12);
-        event_dur_ms = f64_from(10);
-    }
-    # event_duration_samples = (event_dur_ms * sample_rate / 1000.0) as usize
-    var event_duration_samples = f64_to(f64_div(f64_mul(event_dur_ms, sample_rate), f64_from(1000)));
+    var event_rate = foliage_event_rate(foliage_type);
+    var event_duration_samples = foliage_event_duration_samples(foliage_type, sample_rate);
 
     var self = garjan_alloc(sizeof(Foliage));
     if (garjan_is_err(self) == 1) { return self; }
@@ -300,12 +309,7 @@ fn foliage_process_block(self, output) {
 # vec pointer, or a negative code on invalid duration.
 #must_use
 fn foliage_synthesize(self, duration) {
-    var e = garjan_validate_duration(duration);
-    if (garjan_is_err(e) == 1) { return e; }
-    var num = f64_to(f64_mul(Foliage_sample_rate(self), duration));
-    var ga_ncheck = garjan_validate_sample_count(num);
-    if (garjan_is_err(ga_ncheck) == 1) { return ga_ncheck; }
-    var output = garjan_vec_zeros(num);
+    var output = garjan_synth_buffer(Foliage_sample_rate(self), duration);
     if (garjan_is_err(output) == 1) { return output; }
     foliage_process_block(self, output);
     return output;
@@ -344,14 +348,17 @@ fn foliage_to_json(self, sb) {
     # Scalars via the derive, then the naad components' LIVE state spliced
     # in as "dsp" -- without it a restore resumes with zeroed filter memory.
     var psb = str_builder_new();
+    if (psb == 0) { return GARJAN_ERR_ALLOCATION; }
     var pe = FoliageParams_to_json(p, psb);
     if (garjan_is_err(pe) == 1) { return pe; }
     var dsp = bayan_json_v_obj_new();
-    bayan_json_v_obj_set(dsp, str_from("rf"), garjan_state_biquad(Foliage_rustle_filter(self)));
-    bayan_json_v_obj_set(dsp, str_from("rn"), garjan_state_noise(Foliage_rustle_noise(self)));
-    bayan_json_v_obj_set(dsp, str_from("wl"), garjan_state_lfo(Foliage_wind_lfo(self)));
-    bayan_json_v_obj_set(dsp, str_from("se"), garjan_state_exciter(Foliage_snap_exciter(self)));
-    bayan_json_v_obj_set(dsp, str_from("sm"), garjan_state_modal(Foliage_snap_modal(self)));
+    var dput = 0;
+    dput = dput + garjan_is_err(garjan_dsp_put(dsp, "rf", garjan_state_biquad(Foliage_rustle_filter(self))));
+    dput = dput + garjan_is_err(garjan_dsp_put(dsp, "rn", garjan_state_noise(Foliage_rustle_noise(self))));
+    dput = dput + garjan_is_err(garjan_dsp_put(dsp, "wl", garjan_state_lfo(Foliage_wind_lfo(self))));
+    dput = dput + garjan_is_err(garjan_dsp_put(dsp, "se", garjan_state_exciter(Foliage_snap_exciter(self))));
+    dput = dput + garjan_is_err(garjan_dsp_put(dsp, "sm", garjan_state_modal(Foliage_snap_modal(self))));
+    if (dput > 0) { return GARJAN_ERR_ALLOCATION; }
     return garjan_emit_with_dsp(sb, psb, dsp);
 }
 
@@ -360,6 +367,8 @@ fn foliage_to_json(self, sb) {
 # rebuilt, not restored -- architecture note 001). Returns the synth pointer.
 #must_use
 fn foliage_from_json_str(json) {
+    var dsp = garjan_json_open(json);
+    if (garjan_is_err(dsp) == 1) { return dsp; }
     var p = FoliageParams_from_json_str(json);
     if (p == 0) { return GARJAN_ERR_INVALID_PARAMETER; }   # not a JSON object
     # Deserialize must validate what the constructor validates. Before 2.5.1
@@ -377,16 +386,19 @@ fn foliage_from_json_str(json) {
     Foliage_set_foliage_type(self, FoliageParams_foliage_type(p));
     Foliage_set_sample_rate(self, FoliageParams_sample_rate(p));
     Foliage_set_sample_position(self, FoliageParams_sample_position(p));
-    Foliage_set_wind_speed(self, FoliageParams_wind_speed(p));
-    Foliage_set_contact_intensity(self, FoliageParams_contact_intensity(p));
+    Foliage_set_wind_speed(self, f64_clamp(FoliageParams_wind_speed(p), 0, F64_ONE));
+    Foliage_set_contact_intensity(self, f64_clamp(FoliageParams_contact_intensity(p), 0, F64_ONE));
     Foliage_set_snap_pending(self, FoliageParams_snap_pending(p));
-    Foliage_set_event_rate(self, FoliageParams_event_rate(p));
-    Foliage_set_event_duration_samples(self, FoliageParams_event_duration_samples(p));
+    # Re-derived from foliage_type and sample_rate as foliage_new does: no public call changes
+    # them, and the document's copies bounded the work per block (ADR-0010).
+    Foliage_set_event_rate(self, foliage_event_rate(FoliageParams_foliage_type(p)));
+    Foliage_set_event_duration_samples(self, foliage_event_duration_samples(FoliageParams_foliage_type(p),
+        FoliageParams_sample_rate(p)));
 
     var rng = rng_new(0);
     if (garjan_is_err(rng) == 1) { return rng; }
-    Rng_set_state(rng, FoliageParams_rng_state(p));
-    Rng_set_inc(rng, FoliageParams_rng_inc(p));
+    var ga_rr1 = rng_restore(rng, FoliageParams_rng_state(p), FoliageParams_rng_inc(p));
+    if (garjan_is_err(ga_rr1) == 1) { return ga_rr1; }
     Foliage_set_rng(self, rng);
 
     var dc = garjan_dcblocker_new(FoliageParams_sample_rate(p));
@@ -403,23 +415,24 @@ fn foliage_from_json_str(json) {
     Exciter_set_position(exc, FoliageParams_exc_position(p));
     Exciter_set_active(exc, FoliageParams_exc_active(p));
     var exc_rng = Exciter_rng(exc);
-    Rng_set_state(exc_rng, FoliageParams_exc_rng_state(p));
-    Rng_set_inc(exc_rng, FoliageParams_exc_rng_inc(p));
+    var ga_rr2 = rng_restore(exc_rng, FoliageParams_exc_rng_state(p), FoliageParams_exc_rng_inc(p));
+    if (garjan_is_err(ga_rr2) == 1) { return ga_rr2; }
     Foliage_set_snap_exciter(self, exc);
 
     var b = foliage_build_naad(self);
     if (garjan_is_err(b) == 1) { return b; }
 
     # Restore the components' live state onto the freshly built ones. A
-    # document written before 2.5.0 has no "dsp" member; garjan_dsp_node
+    # document written before 2.5.0 has no "dsp" member; garjan_json_open
     # returns 0 and the synth resumes without it, exactly as it used to.
-    var dsp = garjan_dsp_node(json);
+    var dbad = 0;
     if (dsp != 0) {
-        garjan_state_exciter_load(Foliage_snap_exciter(self), garjan_json_get(dsp, "se"));
-        garjan_state_modal_load(Foliage_snap_modal(self), garjan_json_get(dsp, "sm"));
-        garjan_state_biquad_load(Foliage_rustle_filter(self), garjan_json_get(dsp, "rf"));
-        garjan_state_noise_load(Foliage_rustle_noise(self), garjan_json_get(dsp, "rn"));
-        garjan_state_lfo_load(Foliage_wind_lfo(self), garjan_json_get(dsp, "wl"));
+        dbad = dbad + garjan_is_err(garjan_state_exciter_load(Foliage_snap_exciter(self), garjan_json_get(dsp, "se")));
+        dbad = dbad + garjan_is_err(garjan_state_modal_load(Foliage_snap_modal(self), garjan_json_get(dsp, "sm")));
+        dbad = dbad + garjan_is_err(garjan_state_biquad_load(Foliage_rustle_filter(self), garjan_json_get(dsp, "rf")));
+        dbad = dbad + garjan_is_err(garjan_state_noise_load(Foliage_rustle_noise(self), garjan_json_get(dsp, "rn")));
+        dbad = dbad + garjan_is_err(garjan_state_lfo_load(Foliage_wind_lfo(self), garjan_json_get(dsp, "wl")));
     }
+    if (dbad > 0) { return GARJAN_ERR_INVALID_PARAMETER; }
     return self;
 }

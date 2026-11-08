@@ -124,6 +124,19 @@ fn main() {
     assert(garjan_is_err(impact_from_json_str(impact_doc_with_decay("1.5"))) == 0,
       "a real material's prop_decay still loads");
 
+    # --- 2.6.3: a bad impact type is refused before any state moves ---
+    test_group("impact_synthesize refuses an unknown type");
+    var it = impact_new(MATERIAL_WOOD, f64_from(44100));
+    var it_buf = vec_new();
+    var it_i = 0;
+    while (it_i < 100) { vec_push(it_buf, 0); it_i = it_i + 1; }
+    impact_process_block(it, IMPACT_STRIKE, it_buf);
+    var it_pos = Impact_sample_position(it);
+    assert(garjan_is_err(impact_synthesize(it, 99)) == 1, "impact_synthesize refuses 99");
+    assert(garjan_is_err(impact_synthesize_velocity(it, 0 - 1, F64_HALF)) == 1,
+      "impact_synthesize_velocity refuses -1");
+    assert_eq(Impact_sample_position(it), it_pos, "a refused call leaves the stream where it was");
+
     return assert_summary();
 }
 var ec = main();

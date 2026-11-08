@@ -5,6 +5,102 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.3] - The P(-1) sweep
+
+Audit, hardening and refactor release, with no toolchain or dependency change. It is the
+third full audit, written up in
+[`docs/audit/2026-11-07-audit-3.md`](docs/audit/2026-11-07-audit-3.md): 32 defects fixed,
+each with a test shown to fail without its fix. **All 21 audio hashes match 2.6.2.** The
+one deliberate exception is water's Stream LFO for intensity outside 0..1, which now
+matches `rust-old` ([ADR-0011](docs/adr/0011-water-stream-lfo-follows-the-raw-intensity.md)).
+
+### Fixed
+
+- **A document can no longer restore a state that no public call reaches**
+  ([ADR-0010](docs/adr/0010-a-document-restores-only-states-the-api-can-produce.md)).
+  Before, `*_from_json_str` accepted:
+  - an even rng increment, which can freeze PCG and hang `rng_poisson`. The audit's `cloth`
+    document hangs, and `rust-old` hangs on it too;
+  - a NaN or infinite value in `"dsp"` filter memory, which made output non-finite from
+    then on, and a zero noise or LFO generator state, which is stuck;
+  - a negative value in a field that was unsigned in Rust, such as `sample_position`,
+    `decay_samples` or the exciter's position, and a `bool` field of 2;
+  - voice slots outside their Rust types: `active` 2, priority 256, a negative age, or a
+    tag above 2^32;
+  - intensities, speeds and distances outside the range their setters clamp to, and
+    derived fields that disagreed with their source. bubble's decay time, precipitation's
+    `decay_samples` and foliage's event length could make one call run for hours;
+  - `null`, `1e999`, a string or a bool where a number belongs;
+  - a `"dsp"` that is not an object, and a document the tree parser refuses but the field
+    reader accepts. Both loaded without their live state, and the caller was not told.
+- **Out-of-range ids fell through to the last variant** in `exciter_new`,
+  `exciter_reset`, `generate_modes`, `texture_band_mix` and `underwater_apply_config`.
+  `impact_synthesize` reset the synth before refusing a bad impact type, then returned a
+  silent buffer. All of these now refuse first
+  ([ADR-0006](docs/adr/0006-out-of-range-enum-ids-are-rejected.md)).
+- **`voice_pool_tick`'s age wrapped** where Rust saturates, so the pool stole the wrong
+  voice. `voice_pool_allocate` now refuses a priority outside 0..255 and a tag outside
+  32 bits.
+- **A refused allocation is reported, not written through**
+  ([ADR-0005](docs/adr/0005-allocation-failure-is-an-error-code-not-an-abort.md)). Before,
+  unchecked `vec_new` and `str_builder_new` results reached a write, 72 `"dsp"` puts
+  could hand bayan a null node, `modal_bank_new`'s failure surfaced as
+  `SYNTHESIS_FAILED`, and `garjan_vec_zeros(n)` could wrap. All 28 `noise_new` results are
+  now checked too, ready for the day naad's constructor can fail.
+- **`generate_modes` seeds as Rust's `as u64` does** for a negative resonance. The
+  difference was not audible.
+- **The audio oracle and the fuzz harness passed `MATERIAL_WOOD` to `rolling_new` and
+  `creak_new`.** They now pass `ROLLING_WHEEL` and `CREAK_HINGE`, which have the same
+  value, so no hash moves.
+
+### Changed
+
+- **Water's Stream LFO follows the raw intensity, as in `rust-old`.** Intensity 1.5 now
+  gives Rust's 3.5 Hz where 2.6.2 gave 2.5 Hz. An intensity below -0.25, or one that is not
+  finite, now returns `GARJAN_ERR_SYNTHESIS_FAILED` and logs an error, as Rust returns
+  `Err`. Water documents gain an `lfo_rate` member, and older documents load as they did.
+- **Documents that 2.6.2 loaded can now be refused**, for the reasons under Fixed.
+  garjan's own documents still load, with one exception: a NaN stored through the API is
+  written as `null`, which no longer loads.
+- **The three copied families share their openings.**
+  - Every deserializer starts with `garjan_json_open`.
+  - Every synth buffer comes from `garjan_synth_buffer`.
+  - Every `"dsp"` member goes through `garjan_dsp_put`.
+  - Every generator restore goes through `rng_restore`.
+
+  `garjan_dsp_node` is removed. The bundle still compiles under dhvani's cyrius 6.6.10 and
+  tags.
+- **`lib/boxed.cyr`, `lib/callback.cyr` and `lib/tagged.cyr` are removed.** Nothing
+  included them, and `cyrius deps` does not re-create them. The lock has 45 entries.
+- The roadmap drops the finished 2.6.3 section. Its leftovers are filed under 2.8.x and
+  2.x.x.
+
+### Added
+
+- **`cyrius fuzz` drives the API as well as documents.** A malformed stage feeds malformed
+  numbers and duplicate keys, which 2.6.1 checked by hand. An API stage feeds 9 hostile
+  f64 values through 31 constructor, setter and duration slots, and 5 hostile ids through
+  32 enum slots. The run grows from 19,603 cases to 25,672.
+- `tests/naad_failure.tcyr`, which makes `noise_new` fail and checks that all 21
+  constructors report it.
+- [ADR-0010](docs/adr/0010-a-document-restores-only-states-the-api-can-produce.md) and
+  [ADR-0011](docs/adr/0011-water-stream-lfo-follows-the-raw-intensity.md).
+
+### Verified
+
+- **Revert proof:** 30 guards were reverted one at a time, and every one now fails a test
+  or the harness. Four were not caught on the first run, and their tests were added or
+  tightened.
+- **Fault injection:** 9,238 refused allocations across every construct, load, synthesize
+  and serialize path. 8,584 end cleanly. Every remaining crash or exit traces to naad, the
+  derive reader, the stdlib builder or bayan, and the audit lists each for filing
+  upstream.
+- **An independent review** found seven defects, all fixed or recorded. It also checked
+  1,078 synth states for bit-identical continuation and dhvani's `tests/environment.tcyr`
+  under dhvani's pins.
+- `cyrius audit` exits 0, the build has no warnings, and the suite is 34 suites and
+  936 assertions, up from 847.
+
 ## [2.6.2] - The roadmap's quick repairs
 
 Maintenance release, with no toolchain or dependency change. Two items the roadmap listed

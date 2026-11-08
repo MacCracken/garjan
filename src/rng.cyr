@@ -41,6 +41,19 @@ fn rng_new(seed) {
     return self;
 }
 
+# Restores an Rng from a saved state and increment. Returns GARJAN_OK, or
+# GARJAN_ERR_INVALID_PARAMETER for an even increment: rng_new always makes it odd, and an
+# even one breaks PCG's full period. With an increment divisible by 4, some states are fixed
+# points that repeat one draw forever; where that draw is 0xFFFFFFFF, rng_poisson never
+# returns (the 2.6.3 cloth repro). Rust's serde does not check this; ADR-0010 says why we do.
+#must_use
+fn rng_restore(self, state, inc) {
+    if ((inc & 1) == 0) { return GARJAN_ERR_INVALID_PARAMETER; }
+    Rng_set_state(self, state);
+    Rng_set_inc(self, inc);
+    return GARJAN_OK;
+}
+
 # Re-seed an EXISTING Rng in place, reproducing exactly the state rng_new(seed)
 # would have produced. Factored out of rng_new so a caller can restart a
 # sequence without allocating -- the arena never frees, so a hot path that

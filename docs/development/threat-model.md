@@ -26,7 +26,9 @@ garjan does NOT trust:
   deserialize path validates *everything the constructor validates*: sample
   rate, enum ids, and the size of any buffer it implies (one buffer was missed
   until 2.5.3, below). It no longer relies on
-  a downstream naad component happening to reject bad input
+  a downstream naad component happening to reject bad input. Since 2.6.3 it also
+  refuses any state the public API cannot produce
+  ([ADR-0010](../adr/0010-a-document-restores-only-states-the-api-can-produce.md))
 
 ## Attack surface: deserialization
 
@@ -78,7 +80,28 @@ The 2.5.1 sweep found two more of the same shape, both now fixed:
 
 The 2.5.0 `"dsp"` state loaders were tested against twelve hostile documents
 (type confusion, over-length arrays, truncation, malformed JSON) with no crash
-and no non-finite output.
+and no non-finite output. That test was too narrow, as the 2.6.3 sweep found.
+
+The 2.6.3 sweep ([the audit](../audit/2026-11-07-audit-3.md)) asked a different
+question: can a document set a state that no public call reaches? Eleven kinds could,
+and some of them break a synth:
+
+- **an even rng increment** can freeze the generator on one repeated draw. Where that
+  draw is the maximum, `rng_poisson` hangs, and `rust-old` hangs on the same document;
+- **a NaN or infinite value in filter memory**, spelled as raw bits inside `"dsp"`,
+  makes output non-finite from then on;
+- **a negative position** in a field that was unsigned in Rust does the same;
+- **an unclamped intensity or a stale derived field** makes one call run for hours at the
+  600 s cap.
+
+All eleven are refused or re-clamped now. The rule is ADR-0010: a document restores
+only states the public API can produce. Two gaps remain, and the ADR names them.
+Configuration copies are trusted beyond finiteness, and a missing field loads as 0.
+
+Strictness about duplicate keys and leading zeros comes from bayan 1.11, garjan's pin.
+A consumer on an older toolchain, such as dhvani on cyrius 6.6.10, loads those
+documents. Both copies of a duplicate key are still checked, so nothing bypasses the
+rule.
 
 ## Attack surface: resource exhaustion
 
@@ -97,9 +120,18 @@ and no non-finite output.
   `garjan_alloc`, which maps it to `GARJAN_ERR_ALLOCATION`
   ([ADR-0005](../adr/0005-allocation-failure-is-an-error-code-not-an-abort.md)).
   **Invariant: `src/*.cyr` contains no raw `alloc(` outside `garjan_alloc`.**
-- **No panics or aborts.** Failures are returned as codes; garjan never
-  terminates the host process. Rust's allocator aborted on OOM; the port
-  deliberately does not.
+- **garjan's own code neither panics nor aborts.** Failures are returned as codes.
+  Rust's allocator aborted on OOM, and the port deliberately does not. **Its
+  dependencies can still end the process when memory runs out.** The 2.6.3 fault sweep
+  refused each allocation in turn on every path:
+  - the stdlib's `str_builder` and bayan's builder **exit** when an allocation is
+    refused, so a `*_to_json` that runs out of memory terminates the host;
+  - naad's constructors and the `#derive` reader write through a refused allocation and
+    **fault**.
+
+  Each is listed for filing upstream in [`dependency-watch.md`](dependency-watch.md).
+  garjan checks every result those dependencies return, including `noise_new`, which
+  cannot fail yet.
 - garjan emits log events through sakshi but installs no sink; verbosity is a
   runtime setting (`sakshi_set_level`), not a build feature.
 

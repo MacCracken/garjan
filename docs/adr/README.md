@@ -28,6 +28,8 @@ Decisions about garjan — what we chose, the context, and the consequences we a
 - [0007 — Duration and sample rate are bounded](0007-bounded-duration-and-sample-rate.md) — Accepted, 2026-08-30
 - [0008 — serde carries live DSP state](0008-serde-carries-live-dsp-state.md) — Accepted, 2026-08-30. Closes architecture note 001.
 - [0009 — A NaN event rate means no events](0009-a-nan-event-rate-means-no-events.md) — Accepted, 2026-11-07. A deliberate divergence: `rust-old` hangs on this input.
+- [0010 — A document restores only states the public API can produce](0010-a-document-restores-only-states-the-api-can-produce.md) — Accepted, 2026-11-07. Deserialize refuses or re-clamps what no public call reaches, and diverges from `rust-old` where serde accepted it.
+- [0011 — Water's Stream LFO follows the raw intensity](0011-water-stream-lfo-follows-the-raw-intensity.md) — Accepted, 2026-11-07. A parity fix that moves output on valid input outside 0..1.
 
 > **Format note.** 0001-0004 were written before these conventions and before
 > the port; they use `## Status` / `Accepted (vN)` headings rather than the

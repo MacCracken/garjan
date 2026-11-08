@@ -35,6 +35,12 @@ fn main() {
     assert_eq(garjan_is_err(garjan_alloc(ALLOC_MAX + 1)), 1, "oversized request rejected");
     assert(garjan_alloc(64) > 0, "a valid request still returns a real pointer");
 
+    test_group("garjan_key_is");
+    assert_eq(garjan_key_is(str_from("dsp"), "dsp"), 1, "a matching key");
+    assert_eq(garjan_key_is(str_from("dsp2"), "dsp"), 0, "a longer key");
+    assert_eq(garjan_key_is(0, "dsp"), 0, "a null key is no match");
+    assert_eq(garjan_key_is(str_from("dsp"), 0), 0, "a null literal is no match");
+
     return assert_summary();
 }
 

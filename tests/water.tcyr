@@ -91,6 +91,20 @@ fn main() {
     # water_type survives the roundtrip
     assert_eq(Water_water_type(g2), WATER_STREAM, "water_type roundtrips");
 
+    # --- 2.6.3: Stream's LFO rate follows the raw intensity, as in rust-old ---
+    test_group("water stream LFO rate");
+    var wl_a = water_new(WATER_STREAM, F64_TWO, f64_from(44100));
+    var wl_b = water_new(WATER_STREAM, F64_ONE, f64_from(44100));
+    assert(f64_eq(Lfo_frequency(Water_mod_lfo(wl_a)), f64_div(f64_from(9), F64_TWO)) == 1, "intensity 2 gives 4.5 Hz");
+    assert(f64_eq(Lfo_frequency(Water_mod_lfo(wl_b)), f64_div(f64_from(5), F64_TWO)) == 1, "intensity 1 gives 2.5 Hz");
+    assert(garjan_is_err(water_new(WATER_STREAM, f64_div(f64_from(0 - 3), f64_from(10)), f64_from(44100))) == 1,
+      "below -0.25 the LFO rate is negative, refused as in Rust");
+    var wl_sb = str_builder_new();
+    assert(garjan_is_err(water_to_json(wl_a, wl_sb)) == 0, "the document is written");
+    var wl_r = water_from_json_str(str_data(str_builder_build(wl_sb)));
+    assert(f64_eq(Lfo_frequency(Water_mod_lfo(wl_r)), f64_div(f64_from(9), F64_TWO)) == 1,
+      "the rate survives a restore");
+
     return assert_summary();
 }
 var ec = main();

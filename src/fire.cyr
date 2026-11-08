@@ -52,8 +52,12 @@ fn fire_build_naad(self) {
     if (garjan_is_err(cf) == 1) { return garjan_map_naad_error(cf); }
     Fire_set_roar_filter(self, rf);
     Fire_set_crackle_filter(self, cf);
-    Fire_set_roar_noise(self, noise_new(NOISE_BROWN, 6661));
-    Fire_set_crackle_noise(self, noise_new(NOISE_WHITE, 6662));
+    var ga_ng1 = garjan_noise_new(NOISE_BROWN, 6661);
+    if (garjan_is_err(ga_ng1) == 1) { return ga_ng1; }
+    Fire_set_roar_noise(self, ga_ng1);
+    var ga_ng2 = garjan_noise_new(NOISE_WHITE, 6662);
+    if (garjan_is_err(ga_ng2) == 1) { return ga_ng2; }
+    Fire_set_crackle_noise(self, ga_ng2);
     return GARJAN_OK;
 }
 
@@ -159,12 +163,7 @@ fn fire_process_block(self, output) {
 # vec pointer, or a negative code on invalid duration.
 #must_use
 fn fire_synthesize(self, duration) {
-    var e = garjan_validate_duration(duration);
-    if (garjan_is_err(e) == 1) { return e; }
-    var num = f64_to(f64_mul(Fire_sample_rate(self), duration));
-    var ga_ncheck = garjan_validate_sample_count(num);
-    if (garjan_is_err(ga_ncheck) == 1) { return ga_ncheck; }
-    var output = garjan_vec_zeros(num);
+    var output = garjan_synth_buffer(Fire_sample_rate(self), duration);
     if (garjan_is_err(output) == 1) { return output; }
     fire_process_block(self, output);
     return output;
@@ -190,13 +189,16 @@ fn fire_to_json(self, sb) {
     # Scalars via the derive, then the naad components' LIVE state spliced in
     # as "dsp" -- without it a restore resumes with zeroed filter memory.
     var psb = str_builder_new();
+    if (psb == 0) { return GARJAN_ERR_ALLOCATION; }
     var pe = FireParams_to_json(p, psb);
     if (garjan_is_err(pe) == 1) { return pe; }
     var dsp = bayan_json_v_obj_new();
-    bayan_json_v_obj_set(dsp, str_from("rf"), garjan_state_biquad(Fire_roar_filter(self)));
-    bayan_json_v_obj_set(dsp, str_from("cf"), garjan_state_biquad(Fire_crackle_filter(self)));
-    bayan_json_v_obj_set(dsp, str_from("rn"), garjan_state_noise(Fire_roar_noise(self)));
-    bayan_json_v_obj_set(dsp, str_from("cn"), garjan_state_noise(Fire_crackle_noise(self)));
+    var dput = 0;
+    dput = dput + garjan_is_err(garjan_dsp_put(dsp, "rf", garjan_state_biquad(Fire_roar_filter(self))));
+    dput = dput + garjan_is_err(garjan_dsp_put(dsp, "cf", garjan_state_biquad(Fire_crackle_filter(self))));
+    dput = dput + garjan_is_err(garjan_dsp_put(dsp, "rn", garjan_state_noise(Fire_roar_noise(self))));
+    dput = dput + garjan_is_err(garjan_dsp_put(dsp, "cn", garjan_state_noise(Fire_crackle_noise(self))));
+    if (dput > 0) { return GARJAN_ERR_ALLOCATION; }
     return garjan_emit_with_dsp(sb, psb, dsp);
 }
 
@@ -204,6 +206,8 @@ fn fire_to_json(self, sb) {
 # reconstruct the naad components fresh (rebuilt, not restored -- architecture note 001).
 #must_use
 fn fire_from_json_str(json) {
+    var dsp = garjan_json_open(json);
+    if (garjan_is_err(dsp) == 1) { return dsp; }
     var p = FireParams_from_json_str(json);
     if (p == 0) { return GARJAN_ERR_INVALID_PARAMETER; }   # not a JSON object
     # Deserialize must validate what the constructor validates. Before 2.5.1
@@ -215,15 +219,15 @@ fn fire_from_json_str(json) {
     if (garjan_is_err(vsr) == 1) { return vsr; }
     var self = garjan_alloc(sizeof(Fire));
     if (garjan_is_err(self) == 1) { return self; }
-    Fire_set_intensity(self, FireParams_intensity(p));
+    Fire_set_intensity(self, f64_clamp(FireParams_intensity(p), 0, F64_ONE));
     Fire_set_crackle_rate(self, FireParams_crackle_rate(p));
     Fire_set_sample_rate(self, FireParams_sample_rate(p));
     Fire_set_sample_position(self, FireParams_sample_position(p));
 
     var rng = rng_new(0);
     if (garjan_is_err(rng) == 1) { return rng; }
-    Rng_set_state(rng, FireParams_rng_state(p));
-    Rng_set_inc(rng, FireParams_rng_inc(p));
+    var ga_rr1 = rng_restore(rng, FireParams_rng_state(p), FireParams_rng_inc(p));
+    if (garjan_is_err(ga_rr1) == 1) { return ga_rr1; }
     Fire_set_rng(self, rng);
 
     var dc = garjan_dcblocker_new(FireParams_sample_rate(p));
@@ -237,14 +241,15 @@ fn fire_from_json_str(json) {
     if (garjan_is_err(b) == 1) { return b; }
 
     # Restore the components' live state on top of the freshly built ones. A
-    # document written before 2.5.0 has no "dsp" member; garjan_dsp_node
+    # document written before 2.5.0 has no "dsp" member; garjan_json_open
     # returns 0 and the synth simply resumes without it, as it always did.
-    var dsp = garjan_dsp_node(json);
+    var dbad = 0;
     if (dsp != 0) {
-        garjan_state_biquad_load(Fire_roar_filter(self), garjan_json_get(dsp, "rf"));
-        garjan_state_biquad_load(Fire_crackle_filter(self), garjan_json_get(dsp, "cf"));
-        garjan_state_noise_load(Fire_roar_noise(self), garjan_json_get(dsp, "rn"));
-        garjan_state_noise_load(Fire_crackle_noise(self), garjan_json_get(dsp, "cn"));
+        dbad = dbad + garjan_is_err(garjan_state_biquad_load(Fire_roar_filter(self), garjan_json_get(dsp, "rf")));
+        dbad = dbad + garjan_is_err(garjan_state_biquad_load(Fire_crackle_filter(self), garjan_json_get(dsp, "cf")));
+        dbad = dbad + garjan_is_err(garjan_state_noise_load(Fire_roar_noise(self), garjan_json_get(dsp, "rn")));
+        dbad = dbad + garjan_is_err(garjan_state_noise_load(Fire_crackle_noise(self), garjan_json_get(dsp, "cn")));
     }
+    if (dbad > 0) { return GARJAN_ERR_INVALID_PARAMETER; }
     return self;
 }

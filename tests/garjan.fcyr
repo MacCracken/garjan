@@ -16,10 +16,16 @@
 # A pass must not be vacuous, so the run also fails unless every entry point loads
 # its own unmutated document, exercises some mutated ones and refuses others.
 #
+# Since 2.6.3 it also drives the API: hostile f64 values (NaN, +-Inf, +-MAX, ...) through
+# every constructor argument, setter and synthesize duration, and out-of-range ids through
+# every enum parameter. The threat model is malformed data, not a hostile host, so loop
+# counts are not driven to absurd sizes here; Rust takes those unchecked too.
+#
 # Uses fork, setrlimit and alarm, so it is x86_64 Linux only, like CI.
 #
 # Run:    cyrius fuzz
 # Replay: cyrius build tests/garjan.fcyr build/fuzz && ./build/fuzz <entry> '<document>'
+#         or ./build/fuzz api <stage> <slot> <value>, as a failed API case prints.
 # A replay runs in this process, so a crash lands in a debugger.
 
 include "src/error.cyr"
@@ -131,7 +137,7 @@ fn entry_make(e, sr) {
     if (e == 4) { return cloth_new(CLOTH_FLAG, sr); }
     if (e == 5) { return surf_new(SURF_MODERATE, sr); }
     if (e == 6) { return texture_new(TEXTURE_TYPE_FOREST, F64_HALF, sr); }
-    if (e == 7) { return rolling_new(MATERIAL_WOOD, MATERIAL_STONE, sr); }
+    if (e == 7) { return rolling_new(ROLLING_WHEEL, MATERIAL_STONE, sr); }
     if (e == 8) { return water_new(WATER_STREAM, F64_HALF, sr); }
     if (e == 9) { return whoosh_new(WHOOSH_SWING, sr); }
     if (e == 10) { return precipitation_new(PRECIP_HAIL, STONE_MEDIUM, TERRAIN_METAL, sr); }
@@ -142,7 +148,7 @@ fn entry_make(e, sr) {
     if (e == 15) { return impact_new(MATERIAL_STONE, sr); }
     if (e == 16) { return insect_new_swarm(INSECT_CICADA_DRONE, 3, sr); }
     if (e == 17) { return underwater_new(UNDERWATER_DEPTH_MEDIUM, sr); }
-    if (e == 18) { return creak_new(MATERIAL_WOOD, sr); }
+    if (e == 18) { return creak_new(CREAK_HINGE, sr); }
     if (e == 19) { return wingflap_new(BIRD_SIZE_MEDIUM, sr); }
     if (e == 20) { return whistle_new(WHISTLE_PIPE, sr); }
     return voice_pool_new(4, STEAL_OLDEST);
@@ -419,6 +425,77 @@ fn dsp_shape(i) {
     return 0;
 }
 
+# Returns the i-th malformed number: strict JSON (RFC 8259) refuses each, so bayan's tree
+# parser does, and so must every deserializer.
+fn malformed(i) {
+    if (i == 0) { return "01"; }
+    if (i == 1) { return "-01"; }
+    if (i == 2) { return "00"; }
+    if (i == 3) { return "1."; }
+    if (i == 4) { return "1e"; }
+    if (i == 5) { return "-"; }
+    if (i == 6) { return "-.5"; }
+    if (i == 7) { return "-e5"; }
+    if (i == 8) { return "+1"; }
+    if (i == 9) { return ".5"; }
+    if (i == 10) { return "1e+"; }
+    if (i == 11) { return "0x10"; }
+    return 0;
+}
+
+# Runs a document that must be refused, not merely survived: since 2.6.3 garjan_json_open
+# refuses everything strict JSON does (ADR-0010), so one that loads is a regression.
+fn must_refuse(stage, e, doc) {
+    var v = run_case(stage, e, doc);
+    if (v == CHILD_EXERCISED) {
+        FUZZ_FAILS = FUZZ_FAILS + 1;
+        put("fuzz: FAIL entry ");
+        fmt_int(e);
+        put(" stage ");
+        put(stage);
+        put(": loaded a document that must be refused\n  ");
+        put(doc);
+        put("\n");
+    }
+    return v;
+}
+
+# Replaces numbers with malformed ones, and repeats each root member at the front of the
+# document. bayan 1.11 refuses all of these; 2.6.1 ran them by hand.
+fn sweep_malformed(e, base) {
+    scan_numbers(base, 0, 2);
+    var i = 0;
+    while (i < NUM_COUNT) {
+        var h = 0;
+        while (malformed(h) != 0) {
+            var bad = splice(FUZZ_BUF0, base, load64(NUM_START + i * 8), load64(NUM_END + i * 8), malformed(h));
+            must_refuse("malformed", e, bad);
+            h = h + 1;
+        }
+        i = i + 1;
+    }
+    scan_numbers(base, 1, 0);
+    i = 0;
+    while (i < NUM_COUNT) {
+        var vs = load64(NUM_START + i * 8);
+        var ks = vs - 3;                                             # past `":` before the value
+        while (ks > 0 && load8(base + ks) != 34) { ks = ks - 1; }    # the key's opening quote
+        var pair = splice(FUZZ_BUF1, base, 0, ks, "");
+        store8(pair + (load64(NUM_END + i * 8) - ks), 0);           # just `"key":value`
+        if (load8(pair) != 34 || load8(pair + 1) == 34 || load8(pair + 1) == 58) {
+            FUZZ_FAILS = FUZZ_FAILS + 1;                             # the sweep would test nothing
+            put("fuzz: FAIL the duplicate-key builder made no `\"key\":value` pair: ");
+            put(pair);
+            put("\n");
+        }
+        var dup = splice(FUZZ_BUF0, base, 1, 1, pair);
+        var d2 = splice(FUZZ_BUF1, dup, 1 + strlen(pair), 1 + strlen(pair), ",");
+        must_refuse("duplicate", e, d2);
+        i = i + 1;
+    }
+    return 0;
+}
+
 # Returns the i-th document that is not derived from a fixture.
 fn garbage(i) {
     if (i == 0) { return ""; }
@@ -685,6 +762,247 @@ fn random_stage() {
     return 0;
 }
 
+# ---- the API stage ----------------------------------------------------------------
+
+var API_CASES = 0;
+var API_EXERCISED = 0;
+var API_REFUSED = 0;
+
+# Returns the i-th hostile f64 for an argument or setter, or the 0 that ends the list.
+fn hostile_f64(i) {
+    if (i == 0) { return 0x7FF0000000000000; }                       # +Inf
+    if (i == 1) { return 0xFFF0000000000000; }                       # -Inf
+    if (i == 2) { return 0x7FF8000000000000; }                       # NaN
+    if (i == 3) { return 0x7FEFFFFFFFFFFFFF; }                       # MAX
+    if (i == 4) { return 0xFFEFFFFFFFFFFFFF; }                       # -MAX
+    if (i == 5) { return f64_mul(f64_from(1000000000), f64_from(100000000000)); }   # 1e20
+    if (i == 6) { return 1; }                                         # the smallest denormal
+    if (i == 7) { return f64_neg(F64_ONE); }
+    if (i == 8) { return f64_neg(f64_from(3)); }
+    return 0;
+}
+var HOSTILE_F64 = 9;
+
+# Returns the i-th hostile enum id.
+fn hostile_id(i) {
+    if (i == 0) { return 0 - 1; }
+    if (i == 1) { return 99; }
+    if (i == 2) { return 0x7FFFFFFFFFFFFFFF; }
+    if (i == 3) { return 0x8000000000000000; }
+    return F64_HALF;                                                  # an f64 where an id belongs
+}
+var HOSTILE_ID = 5;
+
+# One API call with hostile value `v` in argument slot `k`. Returns the object to render,
+# a negative code when refused, or 1 when there is nothing left to render.
+fn api_call(k, v, sr) {
+    if (k < ENTRY_COUNT - 1) { return entry_make(k, v); }             # 0..20: the sample rate
+    var j = k - (ENTRY_COUNT - 1);
+    if (j == 0) { return fire_new(v, sr); }
+    if (j == 1) { return thunder_new(v, sr); }
+    if (j == 2) { return wind_new(v, F64_HALF, sr); }
+    if (j == 3) { return wind_new(f64_from(15), v, sr); }
+    if (j == 4) { return water_new(WATER_STREAM, v, sr); }
+    if (j == 5) { return texture_new(TEXTURE_TYPE_FOREST, v, sr); }
+    if (j == 6) {
+        var mp = material_properties_new(v, f64_from(200), F64_HALF, F64_HALF, F64_HALF);
+        return api_modes(mp, sr);
+    }
+    if (j == 7) {
+        var mp2 = material_properties_new(f64_from(800), v, F64_HALF, F64_HALF, F64_HALF);
+        return api_modes(mp2, sr);
+    }
+    if (j == 8) {
+        var mp3 = material_properties_new(f64_from(800), f64_from(200), v, F64_HALF, F64_HALF);
+        return api_modes(mp3, sr);
+    }
+    if (j == 9) {
+        var mp4 = material_properties_new(f64_from(800), f64_from(200), F64_HALF, v, F64_HALF);
+        return api_modes(mp4, sr);
+    }
+    if (j == 10) { var ex = exciter_new(EXCITATION_NOISE_BURST, 64, v); return api_excite(ex); }
+    return 1;
+}
+var API_F64_SLOTS = 11;
+
+# The same with a hostile id in an enum slot.
+fn api_call_id(k, v, sr) {
+    if (k == 0) { return bubble_new(v, sr); }
+    if (k == 1) { return cloth_new(v, sr); }
+    if (k == 2) { return creak_new(v, sr); }
+    if (k == 3) { return foliage_new(v, sr); }
+    if (k == 4) { return footstep_new(v, MOVEMENT_WALK, sr); }
+    if (k == 5) { return footstep_new(TERRAIN_GRAVEL, v, sr); }
+    if (k == 6) { return friction_new(v, MATERIAL_WOOD, sr); }
+    if (k == 7) { return friction_new(FRICTION_SLIDE, v, sr); }
+    if (k == 8) { return impact_new(v, sr); }
+    if (k == 9) { return impact_new_interaction(v, MATERIAL_WOOD, sr); }
+    if (k == 10) { return impact_new_interaction(MATERIAL_WOOD, v, sr); }
+    if (k == 11) { return insect_new(v, sr); }
+    if (k == 12) { return precipitation_new(v, STONE_MEDIUM, TERRAIN_METAL, sr); }
+    if (k == 13) { return precipitation_new(PRECIP_HAIL, v, TERRAIN_METAL, sr); }
+    if (k == 14) { return precipitation_new(PRECIP_HAIL, STONE_MEDIUM, v, sr); }
+    if (k == 15) { return rain_new(v, sr); }
+    if (k == 16) { return rolling_new(v, MATERIAL_STONE, sr); }
+    if (k == 17) { return rolling_new(ROLLING_WHEEL, v, sr); }
+    if (k == 18) { return surf_new(v, sr); }
+    if (k == 19) { return texture_new(v, F64_HALF, sr); }
+    if (k == 20) { return underwater_new(v, sr); }
+    if (k == 21) { return water_new(v, F64_HALF, sr); }
+    if (k == 22) { return whistle_new(v, sr); }
+    if (k == 23) { return whoosh_new(v, sr); }
+    if (k == 24) { return wingflap_new(v, sr); }
+    if (k == 25) { return voice_pool_new(4, v); }
+    if (k == 26) { var ex = exciter_new(v, 64, F64_ONE); return api_excite(ex); }
+    if (k == 27) {
+        var props = material_properties(MATERIAL_METAL);
+        var specs = generate_modes(props, v, 6, F64_ONE);
+        if (garjan_is_err(specs) == 1) { return specs; }
+        return 1;
+    }
+    if (k == 28) { var im = impact_new(MATERIAL_STONE, sr); return impact_synthesize(im, v); }
+    if (k == 29) { var vp = voice_pool_new(2, STEAL_OLDEST); return voice_pool_allocate(vp, v, 1); }
+    if (k == 30) { var vp2 = voice_pool_new(2, STEAL_OLDEST); return voice_pool_allocate(vp2, 1, v); }
+    if (k == 31) {
+        var vp3 = voice_pool_new(2, STEAL_OLDEST);
+        sink = voice_pool_release(vp3, v);
+        return voice_pool_slot(vp3, v);
+    }
+    return 1;
+}
+var API_ID_SLOTS = 32;
+
+# Builds modes and a bank from `props` and renders a block through it.
+fn api_modes(props, sr) {
+    if (garjan_is_err(props) == 1) { return props; }
+    var specs = generate_modes(props, MODE_PATTERN_PLATE, 8, F64_ONE);
+    if (garjan_is_err(specs) == 1) { return specs; }
+    var bank = modal_bank_new(specs, sr);
+    if (garjan_is_err(bank) == 1) { return bank; }
+    var i = 0;
+    while (i < 256) { sink = modal_bank_process_sample(bank, F64_ONE); i = i + 1; }
+    return 1;
+}
+
+# Triggers exciter `ex` and pulls 128 samples from it.
+fn api_excite(ex) {
+    if (garjan_is_err(ex) == 1) { return ex; }
+    sink = exciter_trigger(ex);
+    var i = 0;
+    while (i < 128) { sink = exciter_next_sample(ex); i = i + 1; }
+    return 1;
+}
+
+# Child body for one API case. stage 0: f64 slot, 1: id slot, 2: setter, 3: synthesize.
+fn api_exercise(stage, k, i) {
+    var sr = f64_from(44100);
+    var r = 0;
+    if (stage == 0) {
+        r = api_call(k, hostile_f64(i), sr);
+        if (garjan_is_err(r) == 1) { return CHILD_REFUSED; }
+        if (k < ENTRY_COUNT - 1) { exercise_object(k, r); }
+        return CHILD_EXERCISED;
+    }
+    if (stage == 1) {
+        r = api_call_id(k, hostile_id(i), sr);
+        if (garjan_is_err(r) == 1) { return CHILD_REFUSED; }
+        return CHILD_EXERCISED;
+    }
+    var o = entry_make(k, sr);
+    if (stage == 2) { sink = api_setter(k, o, hostile_f64(i)); exercise_object(k, o); return CHILD_EXERCISED; }
+    r = entry_synth(k, o, hostile_f64(i));
+    if (garjan_is_err(r) == 1) { return CHILD_REFUSED; }
+    return CHILD_EXERCISED;
+}
+
+# Calls synth `k`'s setters, all of them, with value `v`.
+fn api_setter(k, o, v) {
+    if (k == 4) { return cloth_set_wind_speed(o, v); }
+    if (k == 9) { return whoosh_set_speed(o, v); }
+    if (k == 10) { return precipitation_set_intensity(o, v); }
+    if (k == 11) { sink = foliage_set_wind_speed(o, v); return foliage_set_contact_intensity(o, v); }
+    if (k == 12) { return bubble_set_intensity(o, v); }
+    if (k == 13) { sink = friction_set_velocity(o, v); return friction_set_pressure(o, v); }
+    if (k == 7) { return rolling_set_velocity(o, v); }
+    if (k == 5) { return surf_set_volume(o, v); }
+    if (k == 16) { return insect_set_intensity(o, v); }
+    if (k == 17) { return underwater_set_intensity(o, v); }
+    if (k == 18) { sink = creak_set_tension(o, v); return creak_set_speed(o, v); }
+    if (k == 19) { return wingflap_set_intensity(o, v); }
+    if (k == 20) { return whistle_set_wind_speed(o, v); }
+    return 0;
+}
+
+# Runs one API case in a forked child, with the same limits as a document case.
+fn run_api(stage, k, i) {
+    if (FUZZ_FAILS >= FUZZ_MAX_FAILS) { return 0; }
+    FUZZ_CASES = FUZZ_CASES + 1;
+    API_CASES = API_CASES + 1;
+    var pid = sys_fork();
+    if (pid < 0) { put("fuzz: fork failed\n"); sys_exit(2); }
+    if (pid == 0) { limit_child(); sys_exit(api_exercise(stage, k, i)); }
+    var st[8];
+    store64(&st, 0);
+    sys_waitpid(pid, &st, 0);
+    var status = load64(&st);
+    if (WIFEXITED(status) == 1) {
+        var code = WEXITSTATUS(status);
+        if (code == CHILD_REFUSED) {
+            API_REFUSED = API_REFUSED + 1;
+            return 0;
+        }
+        if (code == CHILD_EXERCISED) {
+            API_EXERCISED = API_EXERCISED + 1;
+            return 0;
+        }
+    }
+    FUZZ_FAILS = FUZZ_FAILS + 1;
+    put("fuzz: FAIL api stage ");
+    fmt_int(stage);
+    put(" slot ");
+    fmt_int(k);
+    put(" value ");
+    fmt_int(i);
+    put(": ");
+    if (WIFSIGNALED(status) == 1) {
+        if (WTERMSIG(status) == FUZZ_SIGALRM) { put("hang"); } else { put("signal "); fmt_int(WTERMSIG(status)); }
+    } else {
+        put("exit ");
+        fmt_int(WEXITSTATUS(status));
+    }
+    put("\n  replay: ./build/fuzz api ");
+    fmt_int(stage); put(" "); fmt_int(k); put(" "); fmt_int(i); put("\n");
+    return 0;
+}
+
+# Every API slot against every hostile value. Fails the run if nothing was refused or
+# nothing exercised, so it cannot pass by reaching nothing.
+fn api_stage() {
+    var k = 0;
+    while (k < ENTRY_COUNT - 1 + API_F64_SLOTS) {
+        var i = 0;
+        while (i < HOSTILE_F64) { run_api(0, k, i); i = i + 1; }
+        k = k + 1;
+    }
+    k = 0;
+    while (k < API_ID_SLOTS) {
+        var i2 = 0;
+        while (i2 < HOSTILE_ID) { run_api(1, k, i2); i2 = i2 + 1; }
+        k = k + 1;
+    }
+    k = 0;
+    while (k < ENTRY_COUNT - 1) {
+        var i3 = 0;
+        while (i3 < HOSTILE_F64) { run_api(2, k, i3); run_api(3, k, i3); i3 = i3 + 1; }
+        k = k + 1;
+    }
+    if (API_EXERCISED == 0 || API_REFUSED == 0) {
+        put("fuzz: FAIL vacuous api stage\n");
+        FUZZ_FAILS = FUZZ_FAILS + 1;
+    }
+    return 0;
+}
+
 # Renders a fixture so its live state is not all zero, and keeps its document.
 fn build_base(e, sr) {
     var o = entry_make(e, sr);
@@ -718,6 +1036,12 @@ fn main() {
     alloc_init();
     args_init();
     sakshi_set_level(SK_FATAL);
+    if (argc() == 5 && memeq(argv(1), "api", 4) == 1) {
+        var verdict2 = api_exercise(atoi(argv(2)), atoi(argv(3)), atoi(argv(4)));
+        if (verdict2 == CHILD_REFUSED) { put("fuzz: replay refused\n"); }
+        if (verdict2 == CHILD_EXERCISED) { put("fuzz: replay exercised\n"); }
+        return 0;
+    }
     if (argc() == 3) {
         var verdict = exercise(atoi(argv(1)), argv(2));
         if (verdict == CHILD_REFUSED) { put("fuzz: replay refused\n"); }
@@ -754,9 +1078,11 @@ fn main() {
         sweep_truncation(e, base);
         sweep_dsp(e, base);
         sweep_garbage(e, base);
+        sweep_malformed(e, base);
         e = e + 1;
     }
     random_stage();
+    api_stage();
     if (FUZZ_FAILS >= FUZZ_MAX_FAILS) {
         put("fuzz: stopped after ");
         fmt_int(FUZZ_FAILS);

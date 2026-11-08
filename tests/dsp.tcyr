@@ -66,6 +66,15 @@ fn main() {
     assert_eq(vec_len(vz_small), 4, "below the default capacity");
     assert_eq(vec_get(vz_small, 3), 0, "below the default capacity is zeroed");
 
+    # --- 2.6.3: bounds the audit found missing ---
+    test_group("garjan_vec_zeros refuses impossible lengths");
+    assert(garjan_is_err(garjan_vec_zeros(0 - 1)) == 1, "negative length refused");
+    assert(garjan_is_err(garjan_vec_zeros(2305843009213693953)) == 1, "a length whose byte size wraps is refused");
+    test_group("garjan_emit_with_dsp refuses an empty document");
+    var ed_sb = str_builder_new();
+    assert_eq(garjan_emit_with_dsp(ed_sb, str_builder_new(), bayan_json_v_obj_new()), GARJAN_ERR_INVALID_PARAMETER,
+      "empty params refused as invalid, not as a failed allocation");
+
     return assert_summary();
 }
 

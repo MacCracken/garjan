@@ -62,6 +62,7 @@ struct Underwater {
 # Look up depth config (lp_cutoff, rumble_amp, bubble_rate, surface_noise_amp)
 # and stash it on `self`. Mirrors UnderwaterDepth::config's match.
 fn underwater_apply_config(self, depth) {
+    if (garjan_enum_invalid(depth, UNDERWATER_DEPTH_DEEP) == 1) { return GARJAN_ERR_INVALID_PARAMETER; }
     var lp_cutoff = f64_from(3000);
     var rumble_amp = f64_div(f64_from(15), f64_from(100));
     var bubble_rate = f64_from(5);
@@ -101,8 +102,12 @@ fn underwater_build_naad(self) {
     Underwater_set_rumble_filter(self, rf);
     Underwater_set_surface_filter(self, sf);
     Underwater_set_mod_lfo(self, lfo);
-    Underwater_set_rumble_noise(self, noise_new(NOISE_BROWN, 6060));
-    Underwater_set_surface_noise(self, noise_new(NOISE_PINK, 6061));
+    var ga_ng1 = garjan_noise_new(NOISE_BROWN, 6060);
+    if (garjan_is_err(ga_ng1) == 1) { return ga_ng1; }
+    Underwater_set_rumble_noise(self, ga_ng1);
+    var ga_ng2 = garjan_noise_new(NOISE_PINK, 6061);
+    if (garjan_is_err(ga_ng2) == 1) { return ga_ng2; }
+    Underwater_set_surface_noise(self, ga_ng2);
     return GARJAN_OK;
 }
 
@@ -243,12 +248,7 @@ fn underwater_process_block(self, output) {
 # the vec pointer, or a negative code on invalid duration.
 #must_use
 fn underwater_synthesize(self, duration) {
-    var e = garjan_validate_duration(duration);
-    if (garjan_is_err(e) == 1) { return e; }
-    var num = f64_to(f64_mul(Underwater_sample_rate(self), duration));
-    var ga_ncheck = garjan_validate_sample_count(num);
-    if (garjan_is_err(ga_ncheck) == 1) { return ga_ncheck; }
-    var output = garjan_vec_zeros(num);
+    var output = garjan_synth_buffer(Underwater_sample_rate(self), duration);
     if (garjan_is_err(output) == 1) { return output; }
     underwater_process_block(self, output);
     return output;
@@ -277,14 +277,17 @@ fn underwater_to_json(self, sb) {
     # Scalars via the derive, then the naad components' LIVE state spliced
     # in as "dsp" -- without it a restore resumes with zeroed filter memory.
     var psb = str_builder_new();
+    if (psb == 0) { return GARJAN_ERR_ALLOCATION; }
     var pe = UnderwaterParams_to_json(p, psb);
     if (garjan_is_err(pe) == 1) { return pe; }
     var dsp = bayan_json_v_obj_new();
-    bayan_json_v_obj_set(dsp, str_from("rf"), garjan_state_biquad(Underwater_rumble_filter(self)));
-    bayan_json_v_obj_set(dsp, str_from("sf"), garjan_state_biquad(Underwater_surface_filter(self)));
-    bayan_json_v_obj_set(dsp, str_from("ml"), garjan_state_lfo(Underwater_mod_lfo(self)));
-    bayan_json_v_obj_set(dsp, str_from("rn"), garjan_state_noise(Underwater_rumble_noise(self)));
-    bayan_json_v_obj_set(dsp, str_from("sn"), garjan_state_noise(Underwater_surface_noise(self)));
+    var dput = 0;
+    dput = dput + garjan_is_err(garjan_dsp_put(dsp, "rf", garjan_state_biquad(Underwater_rumble_filter(self))));
+    dput = dput + garjan_is_err(garjan_dsp_put(dsp, "sf", garjan_state_biquad(Underwater_surface_filter(self))));
+    dput = dput + garjan_is_err(garjan_dsp_put(dsp, "ml", garjan_state_lfo(Underwater_mod_lfo(self))));
+    dput = dput + garjan_is_err(garjan_dsp_put(dsp, "rn", garjan_state_noise(Underwater_rumble_noise(self))));
+    dput = dput + garjan_is_err(garjan_dsp_put(dsp, "sn", garjan_state_noise(Underwater_surface_noise(self))));
+    if (dput > 0) { return GARJAN_ERR_ALLOCATION; }
     return garjan_emit_with_dsp(sb, psb, dsp);
 }
 
@@ -292,6 +295,8 @@ fn underwater_to_json(self, sb) {
 # then reconstruct the naad components fresh (rebuilt, not restored -- architecture note 001).
 #must_use
 fn underwater_from_json_str(json) {
+    var dsp = garjan_json_open(json);
+    if (garjan_is_err(dsp) == 1) { return dsp; }
     var p = UnderwaterParams_from_json_str(json);
     if (p == 0) { return GARJAN_ERR_INVALID_PARAMETER; }   # not a JSON object
     # Deserialize must validate what the constructor validates. Before 2.5.1
@@ -313,12 +318,12 @@ fn underwater_from_json_str(json) {
     Underwater_set_bubble_rate(self, UnderwaterParams_bubble_rate(p));
     Underwater_set_surface_noise_amp(self, UnderwaterParams_surface_noise_amp(p));
     Underwater_set_lp_cutoff(self, UnderwaterParams_lp_cutoff(p));
-    Underwater_set_intensity(self, UnderwaterParams_intensity(p));
+    Underwater_set_intensity(self, f64_clamp(UnderwaterParams_intensity(p), 0, F64_ONE));
 
     var rng = rng_new(0);
     if (garjan_is_err(rng) == 1) { return rng; }
-    Rng_set_state(rng, UnderwaterParams_rng_state(p));
-    Rng_set_inc(rng, UnderwaterParams_rng_inc(p));
+    var ga_rr1 = rng_restore(rng, UnderwaterParams_rng_state(p), UnderwaterParams_rng_inc(p));
+    if (garjan_is_err(ga_rr1) == 1) { return ga_rr1; }
     Underwater_set_rng(self, rng);
 
     var dc = garjan_dcblocker_new(UnderwaterParams_sample_rate(p));
@@ -332,15 +337,19 @@ fn underwater_from_json_str(json) {
     if (garjan_is_err(b) == 1) { return b; }
 
     # Restore the components' live state onto the freshly built ones. A
-    # document written before 2.5.0 has no "dsp" member; garjan_dsp_node
+    # document written before 2.5.0 has no "dsp" member; garjan_json_open
     # returns 0 and the synth resumes without it, exactly as it used to.
-    var dsp = garjan_dsp_node(json);
+    var dbad = 0;
     if (dsp != 0) {
-        garjan_state_biquad_load(Underwater_rumble_filter(self), garjan_json_get(dsp, "rf"));
-        garjan_state_biquad_load(Underwater_surface_filter(self), garjan_json_get(dsp, "sf"));
-        garjan_state_lfo_load(Underwater_mod_lfo(self), garjan_json_get(dsp, "ml"));
-        garjan_state_noise_load(Underwater_rumble_noise(self), garjan_json_get(dsp, "rn"));
-        garjan_state_noise_load(Underwater_surface_noise(self), garjan_json_get(dsp, "sn"));
+        dbad = dbad + garjan_is_err(garjan_state_biquad_load(Underwater_rumble_filter(self),
+            garjan_json_get(dsp, "rf")));
+        dbad = dbad + garjan_is_err(garjan_state_biquad_load(Underwater_surface_filter(self),
+            garjan_json_get(dsp, "sf")));
+        dbad = dbad + garjan_is_err(garjan_state_lfo_load(Underwater_mod_lfo(self), garjan_json_get(dsp, "ml")));
+        dbad = dbad + garjan_is_err(garjan_state_noise_load(Underwater_rumble_noise(self), garjan_json_get(dsp, "rn")));
+        dbad = dbad + garjan_is_err(garjan_state_noise_load(Underwater_surface_noise(self),
+            garjan_json_get(dsp, "sn")));
     }
+    if (dbad > 0) { return GARJAN_ERR_INVALID_PARAMETER; }
     return self;
 }

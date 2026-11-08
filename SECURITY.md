@@ -17,10 +17,11 @@ division, or a table lookup. It does **not** defend against a compromised host
 process; it defends against malformed **data**.
 
 The highest-risk surface is `*_from_json_str`, the only entry point taking
-fully attacker-controlled input. Two audits have focused there:
-[2.0.2](docs/audit/2026-08-30-audit.md) and
-[2.5.1](docs/audit/2026-08-30-audit-2.md). `cyrius fuzz` drives hostile documents
-through all 22 of them.
+fully attacker-controlled input. Three audits have focused there:
+[2.0.2](docs/audit/2026-08-30-audit.md),
+[2.5.1](docs/audit/2026-08-30-audit-2.md) and
+[2.6.3](docs/audit/2026-11-07-audit-3.md). `cyrius fuzz` drives hostile documents
+through all 22 of them, and hostile values through every constructor and setter.
 
 ## Attack surface
 
@@ -30,8 +31,8 @@ through all 22 of them.
 | Duration | Unbounded allocation — 1e8 s once implied a 4.4-trillion-sample buffer | Rejected unless finite, positive and ≤ 600 s |
 | Sample count | Two individually legal inputs can still imply an illegal buffer (600 s at 768 kHz = 461 M) | Checked separately at all 21 `*_synthesize` sites; capped at 44.1 M |
 | Enum ids | Ported Rust enums are plain integers, so an invalid id would fall through an `if`/`elif` chain and silently select the last variant's table | `garjan_enum_invalid` at 21 constructors, 10 table dispatchers, and — since 2.5.1 — every deserialize path ([ADR-0006](docs/adr/0006-out-of-range-enum-ids-are-rejected.md)) |
-| Deserialized JSON | Crafted documents reaching allocation loops or wild pointers | Errors from component construction are propagated (not discarded); collection sizes come from the array present, never from a scalar; `swarm_count` re-clamped to 1..8 |
-| Serialized DSP state (`"dsp"`) | Type confusion and over-length arrays writing past a vector | Every loader checks the tag and length; writes bounded by the destination's own length. Tested against 12 hostile documents |
+| Deserialized JSON | Crafted documents reaching allocation loops, hangs or wild pointers | A document restores only states the public API can produce ([ADR-0010](docs/adr/0010-a-document-restores-only-states-the-api-can-produce.md)): wrong JSON types, non-finite numbers, negative former-unsigned fields and even rng increments are refused, and clamped or derived fields are re-clamped or re-derived. Errors from component construction are propagated; collection sizes come from the array present, never from a scalar |
+| Serialized DSP state (`"dsp"`) | Type confusion, over-length arrays, and states that freeze a generator or poison a filter | Every loader checks the tag and length, and writes are bounded by the destination's own length. Since 2.6.3 they refuse non-finite values, a zero generator state, a negative position and an even rng increment |
 | Allocation failure | `alloc` returns `0`, and `0` is `GARJAN_OK` — a failure would pass every error check and be written through as a null pointer | All allocation goes through `garjan_alloc`, mapping `0` to `GARJAN_ERR_ALLOCATION` ([ADR-0005](docs/adr/0005-allocation-failure-is-an-error-code-not-an-abort.md)). **Invariant: no raw `alloc(` in `src/` outside `garjan_alloc`** |
 | Poisson distribution | Near-infinite loop on a large rate | Rate clamped to 0–30 |
 | Modal bank coefficients | Numerical instability if radius ≥ 1 | Radius clamped to [0.0, 0.9999] |
@@ -47,9 +48,16 @@ through all 22 of them.
 
 ## Failure behaviour
 
-garjan never panics, aborts, or terminates the host process. Every failure is a
-negative `GARJAN_ERR_*` code returned to the caller. Rust's allocator aborted on
-OOM; the port deliberately does not.
+garjan's own code never panics or aborts. Every failure it detects is a negative
+`GARJAN_ERR_*` code returned to the caller. Rust's allocator aborted on OOM, and the
+port deliberately does not.
+
+**Its dependencies can still end the process when memory runs out.** The stdlib's
+`str_builder` and bayan's JSON builder exit on a refused allocation, so a `*_to_json`
+that runs out of memory terminates the host. naad's constructors and the `#derive`
+reader fault in the same situation. The 2.6.3 audit found these by refusing every
+allocation in turn, and
+[`dependency-watch.md`](docs/development/dependency-watch.md) lists them for upstream.
 
 ## Dependencies
 

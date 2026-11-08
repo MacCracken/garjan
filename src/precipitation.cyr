@@ -116,7 +116,7 @@ fn precipitation_build_naad(self) {
               MaterialModeConfig_damping_factor(mode_cfg));
             if (garjan_is_err(specs) == 1) { return specs; }
             var mb = modal_bank_new(specs, sr);
-            if (garjan_is_err(mb) == 1) { return garjan_map_naad_error(mb); }
+            if (garjan_is_err(mb) == 1) { return mb; }
             bank = mb;
         }
     }
@@ -145,7 +145,9 @@ fn precipitation_build_naad(self) {
 
     var sf = filter_biquad_new(NAAD_FILTER_BANDPASS, sr, filter_freq, f64_div(f64_from(15), f64_from(10)));
     if (garjan_is_err(sf) == 1) { return garjan_map_naad_error(sf); }
-    Precipitation_set_noise_gen(self, noise_new(nt, 5050));
+    var ga_ng1 = garjan_noise_new(nt, 5050);
+    if (garjan_is_err(ga_ng1) == 1) { return ga_ng1; }
+    Precipitation_set_noise_gen(self, ga_ng1);
     Precipitation_set_shape_filter(self, sf);
     return GARJAN_OK;
 }
@@ -297,12 +299,7 @@ fn precipitation_process_block(self, output) {
 # Returns the vec pointer, or a negative code on invalid duration.
 #must_use
 fn precipitation_synthesize(self, duration) {
-    var e = garjan_validate_duration(duration);
-    if (garjan_is_err(e) == 1) { return e; }
-    var num = f64_to(f64_mul(Precipitation_sample_rate(self), duration));
-    var ga_ncheck = garjan_validate_sample_count(num);
-    if (garjan_is_err(ga_ncheck) == 1) { return ga_ncheck; }
-    var output = garjan_vec_zeros(num);
+    var output = garjan_synth_buffer(Precipitation_sample_rate(self), duration);
     if (garjan_is_err(output) == 1) { return output; }
     precipitation_process_block(self, output);
     return output;
@@ -332,12 +329,15 @@ fn precipitation_to_json(self, sb) {
     # Scalars via the derive, then the naad components' LIVE state spliced
     # in as "dsp" -- without it a restore resumes with zeroed filter memory.
     var psb = str_builder_new();
+    if (psb == 0) { return GARJAN_ERR_ALLOCATION; }
     var pe = PrecipitationParams_to_json(p, psb);
     if (garjan_is_err(pe) == 1) { return pe; }
     var dsp = bayan_json_v_obj_new();
-    bayan_json_v_obj_set(dsp, str_from("ng"), garjan_state_noise(Precipitation_noise_gen(self)));
-    bayan_json_v_obj_set(dsp, str_from("sf"), garjan_state_biquad(Precipitation_shape_filter(self)));
-    bayan_json_v_obj_set(dsp, str_from("mb"), garjan_state_modal(Precipitation_modal_bank(self)));
+    var dput = 0;
+    dput = dput + garjan_is_err(garjan_dsp_put(dsp, "ng", garjan_state_noise(Precipitation_noise_gen(self))));
+    dput = dput + garjan_is_err(garjan_dsp_put(dsp, "sf", garjan_state_biquad(Precipitation_shape_filter(self))));
+    dput = dput + garjan_is_err(garjan_dsp_put(dsp, "mb", garjan_state_modal(Precipitation_modal_bank(self))));
+    if (dput > 0) { return GARJAN_ERR_ALLOCATION; }
     return garjan_emit_with_dsp(sb, psb, dsp);
 }
 
@@ -346,6 +346,8 @@ fn precipitation_to_json(self, sb) {
 # rebuilt, not restored -- architecture note 001).
 #must_use
 fn precipitation_from_json_str(json) {
+    var dsp = garjan_json_open(json);
+    if (garjan_is_err(dsp) == 1) { return dsp; }
     var p = PrecipitationParams_from_json_str(json);
     if (p == 0) { return GARJAN_ERR_INVALID_PARAMETER; }   # not a JSON object
     # Deserialize must validate what the constructor validates. Before 2.5.1
@@ -371,15 +373,20 @@ fn precipitation_from_json_str(json) {
     Precipitation_set_surface(self, PrecipitationParams_surface(p));
     Precipitation_set_sample_rate(self, PrecipitationParams_sample_rate(p));
     Precipitation_set_sample_position(self, PrecipitationParams_sample_position(p));
-    Precipitation_set_rate(self, PrecipitationParams_rate(p));
-    Precipitation_set_amplitude(self, PrecipitationParams_amplitude(p));
-    Precipitation_set_decay_samples(self, PrecipitationParams_decay_samples(p));
-    Precipitation_set_intensity(self, PrecipitationParams_intensity(p));
+    # Re-derived from stone_size and sample_rate as precipitation_new does: no public call
+    # changes them, and decay_samples bounded the work per event (ADR-0010).
+    var cfg = stone_size_config(PrecipitationParams_stone_size(p));
+    if (garjan_is_err(cfg) == 1) { return cfg; }
+    Precipitation_set_rate(self, StoneConfig_rate(cfg));
+    Precipitation_set_amplitude(self, StoneConfig_amplitude(cfg));
+    Precipitation_set_decay_samples(self, f64_to(f64_div(f64_mul(StoneConfig_decay_ms(cfg),
+            PrecipitationParams_sample_rate(p)), f64_from(1000))));
+    Precipitation_set_intensity(self, f64_clamp(PrecipitationParams_intensity(p), 0, F64_ONE));
 
     var rng = rng_new(0);
     if (garjan_is_err(rng) == 1) { return rng; }
-    Rng_set_state(rng, PrecipitationParams_rng_state(p));
-    Rng_set_inc(rng, PrecipitationParams_rng_inc(p));
+    var ga_rr1 = rng_restore(rng, PrecipitationParams_rng_state(p), PrecipitationParams_rng_inc(p));
+    if (garjan_is_err(ga_rr1) == 1) { return ga_rr1; }
     Precipitation_set_rng(self, rng);
 
     var dc = garjan_dcblocker_new(PrecipitationParams_sample_rate(p));
@@ -393,13 +400,16 @@ fn precipitation_from_json_str(json) {
     if (garjan_is_err(b) == 1) { return b; }
 
     # Restore the components' live state onto the freshly built ones. A
-    # document written before 2.5.0 has no "dsp" member; garjan_dsp_node
+    # document written before 2.5.0 has no "dsp" member; garjan_json_open
     # returns 0 and the synth resumes without it, exactly as it used to.
-    var dsp = garjan_dsp_node(json);
+    var dbad = 0;
     if (dsp != 0) {
-        garjan_state_modal_load(Precipitation_modal_bank(self), garjan_json_get(dsp, "mb"));
-        garjan_state_noise_load(Precipitation_noise_gen(self), garjan_json_get(dsp, "ng"));
-        garjan_state_biquad_load(Precipitation_shape_filter(self), garjan_json_get(dsp, "sf"));
+        dbad = dbad + garjan_is_err(garjan_state_modal_load(Precipitation_modal_bank(self),
+            garjan_json_get(dsp, "mb")));
+        dbad = dbad + garjan_is_err(garjan_state_noise_load(Precipitation_noise_gen(self), garjan_json_get(dsp, "ng")));
+        dbad = dbad + garjan_is_err(garjan_state_biquad_load(Precipitation_shape_filter(self),
+            garjan_json_get(dsp, "sf")));
     }
+    if (dbad > 0) { return GARJAN_ERR_INVALID_PARAMETER; }
     return self;
 }

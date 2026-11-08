@@ -99,7 +99,9 @@ fn wingflap_config_amplitude(bird_size) {
 fn wingflap_build_naad(self) {
     var sr = WingFlap_sample_rate(self);
     # naad: pink noise generator + bandpass shape filter (Q = 1.0).
-    WingFlap_set_noise_gen(self, noise_new(NOISE_PINK, 7070));
+    var ga_ng1 = garjan_noise_new(NOISE_PINK, 7070);
+    if (garjan_is_err(ga_ng1) == 1) { return ga_ng1; }
+    WingFlap_set_noise_gen(self, ga_ng1);
     var sf = filter_biquad_new(NAAD_FILTER_BANDPASS, sr, WingFlap_filter_freq(self), F64_ONE);
     if (garjan_is_err(sf) == 1) { return garjan_map_naad_error(sf); }
     WingFlap_set_shape_filter(self, sf);
@@ -218,12 +220,7 @@ fn wingflap_process_block(self, output) {
 # the vec pointer, or a negative code on invalid duration.
 #must_use
 fn wingflap_synthesize(self, duration) {
-    var e = garjan_validate_duration(duration);
-    if (garjan_is_err(e) == 1) { return e; }
-    var num = f64_to(f64_mul(WingFlap_sample_rate(self), duration));
-    var ga_ncheck = garjan_validate_sample_count(num);
-    if (garjan_is_err(ga_ncheck) == 1) { return ga_ncheck; }
-    var output = garjan_vec_zeros(num);
+    var output = garjan_synth_buffer(WingFlap_sample_rate(self), duration);
     if (garjan_is_err(output) == 1) { return output; }
     wingflap_process_block(self, output);
     return output;
@@ -253,11 +250,14 @@ fn wingflap_to_json(self, sb) {
     # Scalars via the derive, then the naad components' LIVE state spliced
     # in as "dsp" -- without it a restore resumes with zeroed filter memory.
     var psb = str_builder_new();
+    if (psb == 0) { return GARJAN_ERR_ALLOCATION; }
     var pe = WingFlapParams_to_json(p, psb);
     if (garjan_is_err(pe) == 1) { return pe; }
     var dsp = bayan_json_v_obj_new();
-    bayan_json_v_obj_set(dsp, str_from("ng"), garjan_state_noise(WingFlap_noise_gen(self)));
-    bayan_json_v_obj_set(dsp, str_from("sf"), garjan_state_biquad(WingFlap_shape_filter(self)));
+    var dput = 0;
+    dput = dput + garjan_is_err(garjan_dsp_put(dsp, "ng", garjan_state_noise(WingFlap_noise_gen(self))));
+    dput = dput + garjan_is_err(garjan_dsp_put(dsp, "sf", garjan_state_biquad(WingFlap_shape_filter(self))));
+    if (dput > 0) { return GARJAN_ERR_ALLOCATION; }
     return garjan_emit_with_dsp(sb, psb, dsp);
 }
 
@@ -265,6 +265,8 @@ fn wingflap_to_json(self, sb) {
 # reconstruct the naad components fresh (rebuilt, not restored -- architecture note 001).
 #must_use
 fn wingflap_from_json_str(json) {
+    var dsp = garjan_json_open(json);
+    if (garjan_is_err(dsp) == 1) { return dsp; }
     var p = WingFlapParams_from_json_str(json);
     if (p == 0) { return GARJAN_ERR_INVALID_PARAMETER; }   # not a JSON object
     # Deserialize must validate what the constructor validates. Before 2.5.1
@@ -284,13 +286,13 @@ fn wingflap_from_json_str(json) {
     WingFlap_set_flap_duration_samples(self, WingFlapParams_flap_duration_samples(p));
     WingFlap_set_amplitude(self, WingFlapParams_amplitude(p));
     WingFlap_set_flap_phase(self, WingFlapParams_flap_phase(p));
-    WingFlap_set_intensity(self, WingFlapParams_intensity(p));
+    WingFlap_set_intensity(self, f64_clamp(WingFlapParams_intensity(p), 0, F64_ONE));
     WingFlap_set_filter_freq(self, WingFlapParams_filter_freq(p));
 
     var rng = rng_new(0);
     if (garjan_is_err(rng) == 1) { return rng; }
-    Rng_set_state(rng, WingFlapParams_rng_state(p));
-    Rng_set_inc(rng, WingFlapParams_rng_inc(p));
+    var ga_rr1 = rng_restore(rng, WingFlapParams_rng_state(p), WingFlapParams_rng_inc(p));
+    if (garjan_is_err(ga_rr1) == 1) { return ga_rr1; }
     WingFlap_set_rng(self, rng);
 
     var dc = garjan_dcblocker_new(WingFlapParams_sample_rate(p));
@@ -304,12 +306,13 @@ fn wingflap_from_json_str(json) {
     if (garjan_is_err(b) == 1) { return b; }
 
     # Restore the components' live state onto the freshly built ones. A
-    # document written before 2.5.0 has no "dsp" member; garjan_dsp_node
+    # document written before 2.5.0 has no "dsp" member; garjan_json_open
     # returns 0 and the synth resumes without it, exactly as it used to.
-    var dsp = garjan_dsp_node(json);
+    var dbad = 0;
     if (dsp != 0) {
-        garjan_state_noise_load(WingFlap_noise_gen(self), garjan_json_get(dsp, "ng"));
-        garjan_state_biquad_load(WingFlap_shape_filter(self), garjan_json_get(dsp, "sf"));
+        dbad = dbad + garjan_is_err(garjan_state_noise_load(WingFlap_noise_gen(self), garjan_json_get(dsp, "ng")));
+        dbad = dbad + garjan_is_err(garjan_state_biquad_load(WingFlap_shape_filter(self), garjan_json_get(dsp, "sf")));
     }
+    if (dbad > 0) { return GARJAN_ERR_INVALID_PARAMETER; }
     return self;
 }

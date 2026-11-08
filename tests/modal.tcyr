@@ -114,6 +114,31 @@ fn main() {
     }
     assert_eq(er_rep, 1, "reused exciter matches a fresh one on every repeat");
 
+    # --- 2.6.3: ADR-0006 in modal, and Rust's saturating u64 seed ---
+    test_group("modal enum ids are refused");
+    var me_props = material_properties(MATERIAL_METAL);
+    assert(garjan_is_err(exciter_new(99, 10, F64_ONE)) == 1, "exciter_new refuses 99");
+    assert(garjan_is_err(exciter_new(0 - 1, 10, F64_ONE)) == 1, "exciter_new refuses -1");
+    var me_ex = exciter_new(EXCITATION_IMPULSE, 10, F64_ONE);
+    assert(garjan_is_err(exciter_reset(me_ex, 99, 10, F64_ONE)) == 1, "exciter_reset refuses 99");
+    assert_eq(Exciter_excitation_type(me_ex), EXCITATION_IMPULSE, "a refused reset changes nothing");
+    assert(garjan_is_err(generate_modes(me_props, 99, 4, F64_ONE)) == 1, "generate_modes refuses 99");
+    assert(garjan_is_err(generate_modes(me_props, F64_HALF, 4, F64_ONE)) == 1, "generate_modes refuses an f64");
+    test_group("generate_modes seeds as Rust's u64 cast does");
+    var ms_props = material_properties_new(f64_from(0 - 100), f64_from(200), F64_ONE, F64_HALF, F64_HALF);
+    var msm = generate_modes(ms_props, MODE_PATTERN_DAMPED, 3, F64_ONE);
+    var ms_want = vec_new();
+    vec_push(ms_want, f64_div(f64_from(0 - 10787), f64_from(100)));
+    vec_push(ms_want, f64_div(f64_from(0 - 9434), f64_from(100)));
+    vec_push(ms_want, f64_div(f64_from(0 - 9721), f64_from(100)));
+    var ms_i = 0;
+    var ms_worst = 0;
+    while (ms_i < 3) {
+        ms_worst = f64_max(ms_worst, f64_abs(f64_sub(ModeSpec_frequency(vec_get(msm, ms_i)), vec_get(ms_want, ms_i))));
+        ms_i = ms_i + 1;
+    }
+    assert(f64_lt(ms_worst, f64_div(F64_ONE, f64_from(20))) == 1, "negative resonance matches Rust's seed");
+
     return assert_summary();
 }
 var ec = main();

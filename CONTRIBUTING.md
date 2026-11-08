@@ -30,7 +30,7 @@ frozen at [`rust-old/`](rust-old/) as the parity oracle. There is no cargo here.
 cyrius deps                              # resolve + vendor dependencies
 cyrius distlib                           # REGENERATE dist/ -- see the trap below
 cyrius build src/main.cyr build/garjan   # must be WARNING-clean, not just OK
-cyrius test                              # 33 suites
+cyrius test                              # 34 suites
 cyrius fuzz
 cyrius audit                             # fmt / lint / docs / tests / bench
 ```
@@ -74,7 +74,7 @@ Three traps that have each bitten this project:
 ## Changing DSP or Optimizing
 
 **The test suite does not verify sample values** — it asserts finiteness,
-energy and serde round-trips. An optimization can pass all 33 suites while
+energy and serde round-trips. An optimization can pass all 34 suites while
 silently changing the audio. Use the bit-exactness oracle:
 
 ```sh

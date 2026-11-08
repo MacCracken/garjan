@@ -73,6 +73,11 @@ fn main() {
     # restored synth resumes the SAME rng sequence
     assert_eq(rng_next_u32(Underwater_rng(g)), rng_next_u32(Underwater_rng(g2)), "restored underwater resumes rng");
 
+    # --- 2.6.3: ADR-0006 in the depth helper ---
+    test_group("underwater_apply_config refuses unknown ids");
+    var ua = underwater_new(UNDERWATER_DEPTH_MEDIUM, f64_from(44100));
+    assert(garjan_is_err(underwater_apply_config(ua, 99)) == 1, "99 refused");
+
     return assert_summary();
 }
 var ec = main();

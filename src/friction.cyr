@@ -89,7 +89,7 @@ fn friction_build_naad(self) {
       MaterialModeConfig_damping_factor(mode_cfg));
     if (garjan_is_err(specs) == 1) { return specs; }
     var bank = modal_bank_new(specs, sr);
-    if (garjan_is_err(bank) == 1) { return garjan_map_naad_error(bank); }
+    if (garjan_is_err(bank) == 1) { return bank; }
     Friction_set_modal_bank(self, bank);
 
     # Bandpass shape filter (naad), q = 1.5.
@@ -99,7 +99,9 @@ fn friction_build_naad(self) {
     Friction_set_shape_filter(self, sf);
 
     # White noise generator seeded 7777 (matches Rust).
-    Friction_set_noise_gen(self, noise_new(NOISE_WHITE, 7777));
+    var ga_ng1 = garjan_noise_new(NOISE_WHITE, 7777);
+    if (garjan_is_err(ga_ng1) == 1) { return ga_ng1; }
+    Friction_set_noise_gen(self, ga_ng1);
     return GARJAN_OK;
 }
 
@@ -236,12 +238,7 @@ fn friction_process_block(self, output) {
 # the vec pointer, or a negative code on invalid duration.
 #must_use
 fn friction_synthesize(self, duration) {
-    var e = garjan_validate_duration(duration);
-    if (garjan_is_err(e) == 1) { return e; }
-    var num = f64_to(f64_mul(Friction_sample_rate(self), duration));
-    var ga_ncheck = garjan_validate_sample_count(num);
-    if (garjan_is_err(ga_ncheck) == 1) { return ga_ncheck; }
-    var output = garjan_vec_zeros(num);
+    var output = garjan_synth_buffer(Friction_sample_rate(self), duration);
     if (garjan_is_err(output) == 1) { return output; }
     friction_process_block(self, output);
     return output;
@@ -272,12 +269,15 @@ fn friction_to_json(self, sb) {
     # Scalars via the derive, then the naad components' LIVE state spliced
     # in as "dsp" -- without it a restore resumes with zeroed filter memory.
     var psb = str_builder_new();
+    if (psb == 0) { return GARJAN_ERR_ALLOCATION; }
     var pe = FrictionParams_to_json(p, psb);
     if (garjan_is_err(pe) == 1) { return pe; }
     var dsp = bayan_json_v_obj_new();
-    bayan_json_v_obj_set(dsp, str_from("sf"), garjan_state_biquad(Friction_shape_filter(self)));
-    bayan_json_v_obj_set(dsp, str_from("ng"), garjan_state_noise(Friction_noise_gen(self)));
-    bayan_json_v_obj_set(dsp, str_from("mb"), garjan_state_modal(Friction_modal_bank(self)));
+    var dput = 0;
+    dput = dput + garjan_is_err(garjan_dsp_put(dsp, "sf", garjan_state_biquad(Friction_shape_filter(self))));
+    dput = dput + garjan_is_err(garjan_dsp_put(dsp, "ng", garjan_state_noise(Friction_noise_gen(self))));
+    dput = dput + garjan_is_err(garjan_dsp_put(dsp, "mb", garjan_state_modal(Friction_modal_bank(self))));
+    if (dput > 0) { return GARJAN_ERR_ALLOCATION; }
     return garjan_emit_with_dsp(sb, psb, dsp);
 }
 
@@ -286,6 +286,8 @@ fn friction_to_json(self, sb) {
 # skip/reconstruct semantics).
 #must_use
 fn friction_from_json_str(json) {
+    var dsp = garjan_json_open(json);
+    if (garjan_is_err(dsp) == 1) { return dsp; }
     var p = FrictionParams_from_json_str(json);
     if (p == 0) { return GARJAN_ERR_INVALID_PARAMETER; }   # not a JSON object
     # Deserialize must validate what the constructor validates. Before 2.5.1
@@ -309,13 +311,13 @@ fn friction_from_json_str(json) {
     Friction_set_stick_threshold(self, FrictionParams_stick_threshold(p));
     Friction_set_base_rate(self, FrictionParams_base_rate(p));
     Friction_set_noise_mix(self, FrictionParams_noise_mix(p));
-    Friction_set_velocity(self, FrictionParams_velocity(p));
-    Friction_set_pressure(self, FrictionParams_pressure(p));
+    Friction_set_velocity(self, f64_clamp(FrictionParams_velocity(p), 0, F64_ONE));
+    Friction_set_pressure(self, f64_clamp(FrictionParams_pressure(p), 0, F64_ONE));
 
     var rng = rng_new(0);
     if (garjan_is_err(rng) == 1) { return rng; }
-    Rng_set_state(rng, FrictionParams_rng_state(p));
-    Rng_set_inc(rng, FrictionParams_rng_inc(p));
+    var ga_rr1 = rng_restore(rng, FrictionParams_rng_state(p), FrictionParams_rng_inc(p));
+    if (garjan_is_err(ga_rr1) == 1) { return ga_rr1; }
     Friction_set_rng(self, rng);
 
     var dc = garjan_dcblocker_new(FrictionParams_sample_rate(p));
@@ -329,13 +331,14 @@ fn friction_from_json_str(json) {
     if (garjan_is_err(b) == 1) { return b; }
 
     # Restore the components' live state onto the freshly built ones. A
-    # document written before 2.5.0 has no "dsp" member; garjan_dsp_node
+    # document written before 2.5.0 has no "dsp" member; garjan_json_open
     # returns 0 and the synth resumes without it, exactly as it used to.
-    var dsp = garjan_dsp_node(json);
+    var dbad = 0;
     if (dsp != 0) {
-        garjan_state_modal_load(Friction_modal_bank(self), garjan_json_get(dsp, "mb"));
-        garjan_state_biquad_load(Friction_shape_filter(self), garjan_json_get(dsp, "sf"));
-        garjan_state_noise_load(Friction_noise_gen(self), garjan_json_get(dsp, "ng"));
+        dbad = dbad + garjan_is_err(garjan_state_modal_load(Friction_modal_bank(self), garjan_json_get(dsp, "mb")));
+        dbad = dbad + garjan_is_err(garjan_state_biquad_load(Friction_shape_filter(self), garjan_json_get(dsp, "sf")));
+        dbad = dbad + garjan_is_err(garjan_state_noise_load(Friction_noise_gen(self), garjan_json_get(dsp, "ng")));
     }
+    if (dbad > 0) { return GARJAN_ERR_INVALID_PARAMETER; }
     return self;
 }

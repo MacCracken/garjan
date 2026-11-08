@@ -2,6 +2,15 @@
 include "src/error.cyr"
 include "src/voice.cyr"
 
+# Joins three literal pieces into one NUL-terminated JSON document.
+fn json_doc4v(a, b, c) {
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, a);
+    str_builder_add_cstr(sb, b);
+    str_builder_add_cstr(sb, c);
+    return str_data(str_builder_build(sb));
+}
+
 # Runs the parity tests for src/voice.cyr. Returns the failure count, used as the exit code.
 fn main() {
     alloc_init();
@@ -93,6 +102,29 @@ fn main() {
     assert(garjan_is_err(voice_pool_from_json_str("not json")) == 1, "a non-document refused");
     assert(garjan_is_err(voice_pool_from_json_str("{\"steal_policy\":0,\"max_voices\":1,\"slots\":[]}")) == 0,
       "an empty slots array still loads");
+
+    # --- 2.6.3: Rust's u64 age saturates, and its u8 / bool / u32 fields bound the rest ---
+    test_group("voice fields keep Rust's bounds");
+    var vb_p = voice_pool_from_json_str(json_doc4v("{\"steal_policy\":0,\"max_voices\":2,\"slots\":[",
+        "{\"active\":1,\"priority\":0,\"age\":9223372036854775807,\"tag\":0},",
+        "{\"active\":1,\"priority\":0,\"age\":5,\"tag\":0}]}"));
+    assert(garjan_is_err(vb_p) == 0, "a pool at the top age loads");
+    voice_pool_tick(vb_p);
+    assert_eq(VoiceSlot_age(voice_pool_slot(vb_p, 0)), 9223372036854775807, "age saturates");
+    assert_eq(voice_pool_allocate(vb_p, 1, 1), 0, "the oldest slot is stolen");
+    var vb_q = voice_pool_new(2, STEAL_OLDEST);
+    assert(garjan_is_err(voice_pool_allocate(vb_q, 256, 1)) == 1, "priority 256 refused");
+    assert(garjan_is_err(voice_pool_allocate(vb_q, 0 - 1, 1)) == 1, "priority -1 refused");
+    assert(garjan_is_err(voice_pool_allocate(vb_q, 1, 0 - 1)) == 1, "a negative tag refused");
+    assert(garjan_is_err(voice_pool_from_json_str(
+          "{\"steal_policy\":0,\"max_voices\":1,\"slots\":[{\"active\":2,\"priority\":0,\"age\":0,\"tag\":0}]}")) == 1,
+      "active 2 refused");
+    assert(garjan_is_err(voice_pool_from_json_str(json_doc4v("{\"steal_policy\":0,\"max_voices\":1,\"slots\":",
+            "[{\"active\":0,\"priority\":300,", "\"age\":0,\"tag\":0}]}"))) == 1,
+      "priority 300 refused");
+    assert(garjan_is_err(voice_pool_from_json_str(
+          "{\"steal_policy\":0,\"max_voices\":1,\"slots\":[{\"active\":0,\"priority\":0,\"age\":-1,\"tag\":0}]}")) == 1,
+      "a negative age refused");
 
     return assert_summary();
 }

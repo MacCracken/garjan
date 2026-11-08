@@ -113,3 +113,103 @@ fn garjan_frac(num, den) {
 fn garjan_json_get(v, key) {
     return bayan_json_v_obj_get_by_str(v, str_from(key));
 }
+
+# Rust's `x as u64` for an f64, as a 64-bit word: 0 for NaN and anything below 1, all ones
+# from 2^64, and the exact value between, past 2^63 too (where f64_to would saturate).
+#must_use
+fn garjan_f64_to_u64(x) {
+    if (f64_eq(x, x) == 0) { return 0; }                          # NaN
+    if (f64_lt(x, F64_ONE) == 1) { return 0; }                    # below 1, -Inf included
+    if (garjan_is_finite(x) == 0) { return 0 - 1; }               # +Inf
+    var two63 = f64_mul(f64_from(1 << 62), f64_from(2));
+    if (f64_lt(x, two63) == 1) { return f64_to(x); }
+    var hi = f64_sub(x, two63);
+    if (f64_lt(hi, two63) == 0) { return 0 - 1; }
+    return f64_to(hi) + (1 << 63);
+}
+
+# Returns 1 if Str `key` is the NUL-terminated `lit`, and 0 if either is null.
+fn garjan_key_is(key, lit) {
+    if (key == 0 || lit == 0) { return 0; }
+    var n = strlen(lit);
+    if (str_len(key) != n) { return 0; }
+    return memeq(str_data(key), lit, n);
+}
+
+# Returns 1 for a document key whose rust-old field was unsigned (usize, u32, u64): a
+# negative value is one no constructor or setter produces, and serde refused it.
+fn garjan_json_unsigned_key(key) {
+    if (garjan_key_is(key, "sample_position") == 1) { return 1; }
+    if (garjan_key_is(key, "samples_since_last_step") == 1) { return 1; }
+    if (garjan_key_is(key, "step_interval_samples") == 1) { return 1; }
+    if (garjan_key_is(key, "base_step_interval") == 1) { return 1; }
+    if (garjan_key_is(key, "decay_samples") == 1) { return 1; }
+    if (garjan_key_is(key, "envelope_samples") == 1) { return 1; }
+    if (garjan_key_is(key, "event_duration_samples") == 1) { return 1; }
+    if (garjan_key_is(key, "flap_duration_samples") == 1) { return 1; }
+    if (garjan_key_is(key, "swarm_count") == 1) { return 1; }
+    if (garjan_key_is(key, "trigger_position") == 1) { return 1; }
+    if (garjan_key_is(key, "wave_period_samples") == 1) { return 1; }
+    if (garjan_key_is(key, "exc_position") == 1) { return 1; }
+    if (garjan_key_is(key, "max_voices") == 1) { return 1; }
+    return 0;
+}
+
+# Returns 1 for a document key whose rust-old field was a bool, stored here as 0 or 1.
+fn garjan_json_bool_key(key) {
+    if (garjan_key_is(key, "active") == 1) { return 1; }
+    if (garjan_key_is(key, "exc_active") == 1) { return 1; }
+    if (garjan_key_is(key, "noise_highpass") == 1) { return 1; }
+    if (garjan_key_is(key, "snap_pending") == 1) { return 1; }
+    if (garjan_key_is(key, "step_pending") == 1) { return 1; }
+    return 0;
+}
+
+# Checks a document before anything is built from it, and finds its "dsp" node. Refuses
+# what bayan's tree parser refuses (malformed JSON; from bayan 1.11, also duplicate keys and
+# leading zeros), a root that is not an object, a null or non-finite number, a value of the
+# wrong JSON type, a negative value in a former unsigned field, and a bool field outside
+# 0..1. An older bayan keeps both copies of a duplicate key, and both are checked here.
+# Returns the "dsp" object, 0 when there is none (a pre-2.5.0 document), or
+# GARJAN_ERR_INVALID_PARAMETER. ADR-0010 has the rule.
+#must_use
+fn garjan_json_open(json) {
+    var root = bayan_json_v_parse_buf(json, strlen(json));
+    if (root == 0) { return GARJAN_ERR_INVALID_PARAMETER; }
+    if (bayan_json_v_tag(root) != JTAG_OBJ) { return GARJAN_ERR_INVALID_PARAMETER; }
+    var dsp = 0;
+    var n = bayan_json_v_obj_len(root);
+    var i = 0;
+    while (i < n) {
+        var key = bayan_json_v_obj_key(root, i);
+        var v = bayan_json_v_obj_val(root, i);
+        var t = bayan_json_v_tag(v);
+        if (garjan_key_is(key, "dsp") == 1) {
+            if (t != JTAG_OBJ) { return GARJAN_ERR_INVALID_PARAMETER; }
+            dsp = v;
+        } elif (garjan_key_is(key, "slots") == 1) {
+            if (t != JTAG_ARR) { return GARJAN_ERR_INVALID_PARAMETER; }
+        } elif (t == JTAG_INT) {
+            var iv = bayan_json_v_int(v);
+            if (garjan_json_unsigned_key(key) == 1 && iv < 0) { return GARJAN_ERR_INVALID_PARAMETER; }
+            if (garjan_json_bool_key(key) == 1 && iv != 0 && iv != 1) { return GARJAN_ERR_INVALID_PARAMETER; }
+        } elif (t == JTAG_FLOAT) {
+            if (garjan_is_finite(bayan_json_v_float(v)) == 0) { return GARJAN_ERR_INVALID_PARAMETER; }
+            if (garjan_json_unsigned_key(key) == 1 || garjan_json_bool_key(key) == 1) {
+                return GARJAN_ERR_INVALID_PARAMETER;
+            }
+        } else {
+            return GARJAN_ERR_INVALID_PARAMETER;
+        }
+        i = i + 1;
+    }
+    return dsp;
+}
+
+# Returns 1 if the document's root object has member `key`, otherwise 0.
+fn garjan_json_has(json, key) {
+    var root = bayan_json_v_parse_buf(json, strlen(json));
+    if (root == 0) { return 0; }
+    if (garjan_json_get(root, key) == 0) { return 0; }
+    return 1;
+}

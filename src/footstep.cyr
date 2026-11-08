@@ -104,14 +104,16 @@ fn footstep_build_naad(self) {
           MaterialModeConfig_damping_factor(mode_cfg));
         if (garjan_is_err(specs) == 1) { return specs; }
         var bank = modal_bank_new(specs, sr);
-        if (garjan_is_err(bank) == 1) { return garjan_map_naad_error(bank); }
+        if (garjan_is_err(bank) == 1) { return bank; }
         Footstep_set_modal_bank(self, bank);
     }
 
     # Noise generator: white/pink/brown per terrain config (seed 8888).
     var noise_cfg = terrain_noise_config(terrain);
     if (garjan_is_err(noise_cfg) == 1) { return noise_cfg; }
-    Footstep_set_noise_gen(self, noise_new(TerrainNoiseConfig_noise_type(noise_cfg), 8888));
+    var ga_ng1 = garjan_noise_new(TerrainNoiseConfig_noise_type(noise_cfg), 8888);
+    if (garjan_is_err(ga_ng1) == 1) { return ga_ng1; }
+    Footstep_set_noise_gen(self, ga_ng1);
 
     # Shape filter: highpass or lowpass per config.
     var ft = NAAD_FILTER_LOWPASS;
@@ -271,12 +273,7 @@ fn footstep_process_block(self, output) {
 # the vec pointer, or a negative code on invalid duration.
 #must_use
 fn footstep_synthesize(self, duration) {
-    var e = garjan_validate_duration(duration);
-    if (garjan_is_err(e) == 1) { return e; }
-    var num = f64_to(f64_mul(Footstep_sample_rate(self), duration));
-    var ga_ncheck = garjan_validate_sample_count(num);
-    if (garjan_is_err(ga_ncheck) == 1) { return ga_ncheck; }
-    var output = garjan_vec_zeros(num);
+    var output = garjan_synth_buffer(Footstep_sample_rate(self), duration);
     if (garjan_is_err(output) == 1) { return output; }
     footstep_process_block(self, output);
     return output;
@@ -309,13 +306,16 @@ fn footstep_to_json(self, sb) {
     # Scalars via the derive, then the naad components' LIVE state spliced
     # in as "dsp" -- without it a restore resumes with zeroed filter memory.
     var psb = str_builder_new();
+    if (psb == 0) { return GARJAN_ERR_ALLOCATION; }
     var pe = FootstepParams_to_json(p, psb);
     if (garjan_is_err(pe) == 1) { return pe; }
     var dsp = bayan_json_v_obj_new();
-    bayan_json_v_obj_set(dsp, str_from("ng"), garjan_state_noise(Footstep_noise_gen(self)));
-    bayan_json_v_obj_set(dsp, str_from("sf"), garjan_state_biquad(Footstep_shape_filter(self)));
-    bayan_json_v_obj_set(dsp, str_from("mb"), garjan_state_modal(Footstep_modal_bank(self)));
-    bayan_json_v_obj_set(dsp, str_from("ex"), garjan_state_exciter(Footstep_exciter(self)));
+    var dput = 0;
+    dput = dput + garjan_is_err(garjan_dsp_put(dsp, "ng", garjan_state_noise(Footstep_noise_gen(self))));
+    dput = dput + garjan_is_err(garjan_dsp_put(dsp, "sf", garjan_state_biquad(Footstep_shape_filter(self))));
+    dput = dput + garjan_is_err(garjan_dsp_put(dsp, "mb", garjan_state_modal(Footstep_modal_bank(self))));
+    dput = dput + garjan_is_err(garjan_dsp_put(dsp, "ex", garjan_state_exciter(Footstep_exciter(self))));
+    if (dput > 0) { return GARJAN_ERR_ALLOCATION; }
     return garjan_emit_with_dsp(sb, psb, dsp);
 }
 
@@ -323,6 +323,8 @@ fn footstep_to_json(self, sb) {
 # reconstruct the Exciter / ModalBank / naad components fresh.
 #must_use
 fn footstep_from_json_str(json) {
+    var dsp = garjan_json_open(json);
+    if (garjan_is_err(dsp) == 1) { return dsp; }
     var p = FootstepParams_from_json_str(json);
     if (p == 0) { return GARJAN_ERR_INVALID_PARAMETER; }   # not a JSON object
     # Deserialize must validate what the constructor validates. Before 2.5.1
@@ -353,8 +355,8 @@ fn footstep_from_json_str(json) {
 
     var rng = rng_new(0);
     if (garjan_is_err(rng) == 1) { return rng; }
-    Rng_set_state(rng, FootstepParams_rng_state(p));
-    Rng_set_inc(rng, FootstepParams_rng_inc(p));
+    var ga_rr1 = rng_restore(rng, FootstepParams_rng_state(p), FootstepParams_rng_inc(p));
+    if (garjan_is_err(ga_rr1) == 1) { return ga_rr1; }
     Footstep_set_rng(self, rng);
 
     var dc = garjan_dcblocker_new(FootstepParams_sample_rate(p));
@@ -368,14 +370,15 @@ fn footstep_from_json_str(json) {
     if (garjan_is_err(b) == 1) { return b; }
 
     # Restore the components' live state onto the freshly built ones. A
-    # document written before 2.5.0 has no "dsp" member; garjan_dsp_node
+    # document written before 2.5.0 has no "dsp" member; garjan_json_open
     # returns 0 and the synth resumes without it, exactly as it used to.
-    var dsp = garjan_dsp_node(json);
+    var dbad = 0;
     if (dsp != 0) {
-        garjan_state_modal_load(Footstep_modal_bank(self), garjan_json_get(dsp, "mb"));
-        garjan_state_exciter_load(Footstep_exciter(self), garjan_json_get(dsp, "ex"));
-        garjan_state_noise_load(Footstep_noise_gen(self), garjan_json_get(dsp, "ng"));
-        garjan_state_biquad_load(Footstep_shape_filter(self), garjan_json_get(dsp, "sf"));
+        dbad = dbad + garjan_is_err(garjan_state_modal_load(Footstep_modal_bank(self), garjan_json_get(dsp, "mb")));
+        dbad = dbad + garjan_is_err(garjan_state_exciter_load(Footstep_exciter(self), garjan_json_get(dsp, "ex")));
+        dbad = dbad + garjan_is_err(garjan_state_noise_load(Footstep_noise_gen(self), garjan_json_get(dsp, "ng")));
+        dbad = dbad + garjan_is_err(garjan_state_biquad_load(Footstep_shape_filter(self), garjan_json_get(dsp, "sf")));
     }
+    if (dbad > 0) { return GARJAN_ERR_INVALID_PARAMETER; }
     return self;
 }

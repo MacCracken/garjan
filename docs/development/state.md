@@ -5,7 +5,7 @@
 
 ## Version
 
-**2.6.2** (2026-11-07). Per-release detail is in the
+**2.6.3** (2026-11-07). Per-release detail is in the
 [CHANGELOG](../../CHANGELOG.md); this file is current state only.
 
 The 2.x line so far: the Rust→Cyrius port (2.0.0), a toolchain and dependency
@@ -14,7 +14,8 @@ optimization (2.0.5, 2.3.0), parity completion — integration suite, benchmarks
 examples (2.1.0) — boundary validation (2.2.0, 2.4.0), serde live-state parity
 (2.5.0, the last outstanding divergence from the Rust oracle), a second full
 audit sweep (2.5.1), toolchain moves to cyrius 6.6.3 (2.5.2), 6.6.20 (2.5.3), 6.7.9
-(2.6.0) and 6.7.18 (2.6.1), and the roadmap's quick repairs (2.6.2).
+(2.6.0) and 6.7.18 (2.6.1), the roadmap's quick repairs (2.6.2), and a third full
+audit sweep (2.6.3).
 
 ## Toolchain
 
@@ -33,26 +34,28 @@ audit sweep (2.5.1), toolchain moves to cyrius 6.6.3 (2.5.2), 6.6.20 (2.5.3), 6.
 
 ## Tests
 
-- **33 module suites** in `tests/*.tcyr`, **847 assertions, all green**.
-  `tests/garjan.tcyr` is the cross-module integration suite (367 of those),
-  ported from `rust-old/tests/integration.rs`.
+- **34 suites** in `tests/*.tcyr`, **936 assertions, all green**.
+  `tests/garjan.tcyr` is the cross-module integration suite (413 of those),
+  ported from `rust-old/tests/integration.rs`. `tests/naad_failure.tcyr` replaces
+  naad's `noise_new` for its whole binary, so it is a suite of its own.
   Covers parity (incl. bit-exact PCG32), synthesis finiteness/energy, and
   serde roundtrips. `cyrius test` runs them; each also builds standalone.
 - Cleanliness: `cyrius audit` exits 0 (fmt, lint, docs and tests all clean; CI
   does not run it), `cyrius build` warning-free, `cyrius vet` 0 missing (it lists
   `dist/garjan.cyr` as untrusted, as it did on 6.6.3), `cyrius distlib --check` in
   sync, 0 lines > 120 chars in `src/` or `tests/`.
-- **Fuzz**: `tests/garjan.fcyr` drives **19,603 hostile documents** through all 22
-  `*_from_json_str` entry points in about 12 s on a quiet machine (under a minute at a
-  load average of 40), each in a forked child with a time and memory limit. CI runs it, and releases gate on CI. It covers JSON only: constructors
-  and setters are still swept by hand, as
-  [`dependency-watch.md`](dependency-watch.md) describes.
+- **Fuzz**: `tests/garjan.fcyr` runs **25,672 cases** in about 9 s on a quiet machine,
+  each in a forked child with a time and memory limit. Hostile documents go through all 22
+  `*_from_json_str` entry points, including malformed numbers and duplicate keys. Since
+  2.6.3 an API stage also feeds hostile f64 values and ids through every constructor,
+  setter and synthesize duration. CI runs it, and releases gate on CI.
 - ⚠ **Verify formatting by running the formatter and diffing, not with
   `cyrius fmt --check`** — `--check` has reported a file clean that the
   formatter then rewrote (that false negative is what broke the `cyrius audit`
-  fmt gate at 2.0.2). Diff against the toolchain's `cyrfmt <file>`: at 6.6.20
-  `cyrius fmt <file>` prints nothing to stdout. Formatting follows the 6.5.36
-  canon: continuation lines indent 2 spaces per open paren, 4 also accepted.
+  fmt gate at 2.0.2). Diff against the toolchain's `cyrfmt <file>`, which prints the
+  canonical text: at 6.7.18 `cyrius fmt <file>` rewrites the file in place and prints
+  nothing. Formatting follows the 6.5.36 canon: continuation lines indent 2 spaces per
+  open paren, 4 also accepted.
 - ⚠ **`cyrius build` does not regenerate `dist/`** — it compiles the stale
   bundle and still reports `OK`. Run `cyrius distlib` after any `src/` edit.
 - Benchmarks: **26 ops**, `cyrius bench tests/garjan.bcyr` — see
@@ -76,19 +79,20 @@ Declared in `cyrius.cyml`:
 These tags are what the dependencies themselves pin, so the flattened graph is
 consistent: naad 2.3.3 → hisab 3.4.1 + goonj 2.3.1; goonj 2.3.1 → hisab 3.4.1;
 hisab 3.4.1 → sakshi 2.5.10, which is also the sakshi folded into cyrius 6.7.18.
-`lib/` is 45 of 48 files byte-identical to the 6.7.18 snapshot, plus the naad,
-hisab and goonj bundles byte-identical to their tags. `lib/boxed.cyr`,
-`lib/callback.cyr` and `lib/tagged.cyr` are vendored but no longer referenced.
-Symbol-collision audit: garjan's 426 top-level `fn`/`var` symbols intersect every
+`lib/` is 45 files: 42 byte-identical to the 6.7.18 snapshot, plus the naad, hisab and
+goonj bundles byte-identical to their tags. 2.6.3 removed `lib/boxed.cyr`,
+`lib/callback.cyr` and `lib/tagged.cyr`, which nothing included.
+Symbol-collision audit: garjan's 441 top-level `fn`/`var` symbols intersect every
 vendored file at zero — re-run it on any dep bump, since Cyrius gives no
 diagnostic for a duplicate top-level `var`.
 
 ## Consumers
 
 - **dhvani** pins garjan 2.5.2 on cyrius 6.6.10, and calls it from
-  `src/environment.cyr`. Its `tests/environment.tcyr` passes all 10 on the 2.6.2 bundle,
-  and all 21 synths round-trip under its toolchain and tags, so it can take 2.6.2 without
-  moving anything else. Adopting garjan's own dep set would need cyrius 6.7.2. dhvani's
+  `src/environment.cyr`. Its `tests/environment.tcyr` passes all 10 on the 2.6.3 bundle,
+  and all 21 synths round-trip under its toolchain and tags, so it can take 2.6.3 without
+  moving anything else. Under its older bayan, duplicate keys and leading zeros in a
+  document still load. Both copies of a duplicate key are checked, so ADR-0010 still holds. Adopting garjan's own dep set would need cyrius 6.7.2. dhvani's
   pins are why `garjan_json_get` and `whistle_svf_band_pass` exist and why `src/` stays
   off 6.7.x syntax: see [`dependency-watch.md`](dependency-watch.md).
 
@@ -96,8 +100,10 @@ Expected: kiran, joshua, and any AGNOS component needing environmental audio.
 
 ## Next
 
-**2.6.3, the P(-1) audit, hardening, refactor and optimization sweep**, is scheduled
-next. Its method and open items are in [`roadmap.md`](roadmap.md), as is everything after it.
+Every remaining roadmap item waits on a gate outside this repository: dhvani moving its
+pins, a decision on sample-changing performance, soorat, or an upstream fix. They are in
+[`roadmap.md`](roadmap.md). The upstream allocation defects the 2.6.3 audit found are
+listed in [`dependency-watch.md`](dependency-watch.md).
 
 ## Port completeness
 

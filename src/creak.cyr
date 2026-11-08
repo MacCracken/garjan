@@ -104,11 +104,12 @@ fn creak_build_naad(self) {
     var specs = generate_modes(props, pattern, mode_count, MaterialModeConfig_damping_factor(mode_cfg));
     if (garjan_is_err(specs) == 1) { return specs; }
     var bank = modal_bank_new(specs, sr);
-    if (garjan_is_err(bank) == 1) { return garjan_map_naad_error(bank); }
+    if (garjan_is_err(bank) == 1) { return bank; }
     Creak_set_modal_bank(self, bank);
 
     # ---- naad noise_gen (pink, seed 5555) + lowpass shape filter (Q 0.7) ----
-    var ng = noise_new(NOISE_PINK, 5555);
+    var ng = garjan_noise_new(NOISE_PINK, 5555);
+    if (garjan_is_err(ng) == 1) { return ng; }
     Creak_set_noise_gen(self, ng);
     var ffreq = creak_shape_filter_freq(source);
     var sf = filter_biquad_new(NAAD_FILTER_LOWPASS, sr, ffreq, f64_div(f64_from(7), f64_from(10)));
@@ -246,12 +247,7 @@ fn creak_process_block(self, output) {
 # vec pointer, or a negative code on invalid duration.
 #must_use
 fn creak_synthesize(self, duration) {
-    var e = garjan_validate_duration(duration);
-    if (garjan_is_err(e) == 1) { return e; }
-    var num = f64_to(f64_mul(Creak_sample_rate(self), duration));
-    var ga_ncheck = garjan_validate_sample_count(num);
-    if (garjan_is_err(ga_ncheck) == 1) { return ga_ncheck; }
-    var output = garjan_vec_zeros(num);
+    var output = garjan_synth_buffer(Creak_sample_rate(self), duration);
     if (garjan_is_err(output) == 1) { return output; }
     creak_process_block(self, output);
     return output;
@@ -281,12 +277,15 @@ fn creak_to_json(self, sb) {
     # Scalars via the derive, then the naad components' LIVE state spliced
     # in as "dsp" -- without it a restore resumes with zeroed filter memory.
     var psb = str_builder_new();
+    if (psb == 0) { return GARJAN_ERR_ALLOCATION; }
     var pe = CreakParams_to_json(p, psb);
     if (garjan_is_err(pe) == 1) { return pe; }
     var dsp = bayan_json_v_obj_new();
-    bayan_json_v_obj_set(dsp, str_from("ng"), garjan_state_noise(Creak_noise_gen(self)));
-    bayan_json_v_obj_set(dsp, str_from("sf"), garjan_state_biquad(Creak_shape_filter(self)));
-    bayan_json_v_obj_set(dsp, str_from("mb"), garjan_state_modal(Creak_modal_bank(self)));
+    var dput = 0;
+    dput = dput + garjan_is_err(garjan_dsp_put(dsp, "ng", garjan_state_noise(Creak_noise_gen(self))));
+    dput = dput + garjan_is_err(garjan_dsp_put(dsp, "sf", garjan_state_biquad(Creak_shape_filter(self))));
+    dput = dput + garjan_is_err(garjan_dsp_put(dsp, "mb", garjan_state_modal(Creak_modal_bank(self))));
+    if (dput > 0) { return GARJAN_ERR_ALLOCATION; }
     return garjan_emit_with_dsp(sb, psb, dsp);
 }
 
@@ -295,6 +294,8 @@ fn creak_to_json(self, sb) {
 # restored their state instead (architecture note 001).
 #must_use
 fn creak_from_json_str(json) {
+    var dsp = garjan_json_open(json);
+    if (garjan_is_err(dsp) == 1) { return dsp; }
     var p = CreakParams_from_json_str(json);
     if (p == 0) { return GARJAN_ERR_INVALID_PARAMETER; }   # not a JSON object
     # Deserialize must validate what the constructor validates. Before 2.5.1
@@ -314,13 +315,13 @@ fn creak_from_json_str(json) {
     Creak_set_freq_lo(self, CreakParams_freq_lo(p));
     Creak_set_freq_hi(self, CreakParams_freq_hi(p));
     Creak_set_noise_mix(self, CreakParams_noise_mix(p));
-    Creak_set_tension(self, CreakParams_tension(p));
-    Creak_set_speed(self, CreakParams_speed(p));
+    Creak_set_tension(self, f64_clamp(CreakParams_tension(p), 0, F64_ONE));
+    Creak_set_speed(self, f64_clamp(CreakParams_speed(p), 0, F64_ONE));
 
     var rng = rng_new(0);
     if (garjan_is_err(rng) == 1) { return rng; }
-    Rng_set_state(rng, CreakParams_rng_state(p));
-    Rng_set_inc(rng, CreakParams_rng_inc(p));
+    var ga_rr1 = rng_restore(rng, CreakParams_rng_state(p), CreakParams_rng_inc(p));
+    if (garjan_is_err(ga_rr1) == 1) { return ga_rr1; }
     Creak_set_rng(self, rng);
 
     var dc = garjan_dcblocker_new(CreakParams_sample_rate(p));
@@ -334,13 +335,14 @@ fn creak_from_json_str(json) {
     if (garjan_is_err(b) == 1) { return b; }
 
     # Restore the components' live state onto the freshly built ones. A
-    # document written before 2.5.0 has no "dsp" member; garjan_dsp_node
+    # document written before 2.5.0 has no "dsp" member; garjan_json_open
     # returns 0 and the synth resumes without it, exactly as it used to.
-    var dsp = garjan_dsp_node(json);
+    var dbad = 0;
     if (dsp != 0) {
-        garjan_state_modal_load(Creak_modal_bank(self), garjan_json_get(dsp, "mb"));
-        garjan_state_noise_load(Creak_noise_gen(self), garjan_json_get(dsp, "ng"));
-        garjan_state_biquad_load(Creak_shape_filter(self), garjan_json_get(dsp, "sf"));
+        dbad = dbad + garjan_is_err(garjan_state_modal_load(Creak_modal_bank(self), garjan_json_get(dsp, "mb")));
+        dbad = dbad + garjan_is_err(garjan_state_noise_load(Creak_noise_gen(self), garjan_json_get(dsp, "ng")));
+        dbad = dbad + garjan_is_err(garjan_state_biquad_load(Creak_shape_filter(self), garjan_json_get(dsp, "sf")));
     }
+    if (dbad > 0) { return GARJAN_ERR_INVALID_PARAMETER; }
     return self;
 }
