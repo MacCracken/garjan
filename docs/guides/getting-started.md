@@ -16,7 +16,7 @@ cyrius test                              # run tests/*.tcyr
 
 ## Layout
 
-- `src/*.cyr` — the library: 32 modules, listed in dependency order in
+- `src/*.cyr` — the library: 33 modules, listed in dependency order in
   `cyrius.cyml`'s `[lib] modules`. Modules do not `include` each other; the
   entry or test harness sets the order.
 - `src/main.cyr` — a small **smoke entry**, not the library. It includes the

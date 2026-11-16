@@ -85,6 +85,33 @@ sample-identically. Documents written before 2.5.0 have no `"dsp"` member and
 still load, restoring parameters only. See
 [ADR-0008](../adr/0008-serde-carries-live-dsp-state.md).
 
+## Visualization data for soorat
+
+Since 2.7.0 garjan also builds what a renderer draws beside a sound, from the same
+physical inputs. Each constructor returns a pointer or a negative `GARJAN_ERR_*` code, and
+each type has `*_to_json` / `*_from_json_str`.
+
+```cyrius
+# 500 raindrops in a 10 x 20 x 10 m box, moderate rain, 2 m/s wind along x
+var rain = precipitation_field_rain(500, 0, 0, 0, f64_from(10), f64_from(20), f64_from(10),
+  F64_HALF, f64_from(2), 0);
+if (garjan_is_err(rain) == 1) { return rain; }
+var i = 0;
+while (i < precipitation_field_len(rain)) {
+    var p = precipitation_field_particle(rain, i);
+    # PrecipitationParticle_position_x/_y/_z, _velocity_x/_y/_z, _size, _life
+    i = i + 1;
+}
+
+var fire = fire_emitter_from_intensity(0, 0, 0, F64_HALF);   # FireEmitter_flame_height, ...
+var wind = wind_field_gradient(8, 8, 0, 0, 0, F64_ONE, F64_ONE, f64_from(12), F64_ONE);
+# point (x, z) is index z * nx + x: wind_field_vx(wind, i), wind_field_vz(wind, i)
+```
+
+`precipitation_field_snow` takes the same arguments as `_rain`. A field holds at most
+`GARJAN_MAX_FIELD_POINTS` (2^20) points, and a negative or larger count is refused
+([ADR-0012](../adr/0012-soorat-visualization-data-is-ported-ungated.md)).
+
 ## Where garjan stops
 
 garjan produces raw mono sources. Propagation is **goonj**, mixing and

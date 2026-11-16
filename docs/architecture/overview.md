@@ -36,7 +36,8 @@ garjan/
 │   ├── voice.cyr       VoicePool (priority polyphony)
 │   ├── lod.cyr         Quality scaling
 │   ├── bridge.cyr      Science crate parameter conversion
-│   └── builder.cyr     Ergonomic constructors
+│   ├── builder.cyr     Ergonomic constructors
+│   └── soorat.cyr      Visualization data: PrecipitationField, FireEmitter, WindField
 │
 ├── Shared types
 │   ├── contact.cyr     Terrain, MovementType, FrictionType, etc.
@@ -47,8 +48,10 @@ garjan/
 │
 └── Internal
     ├── dsp.cyr         DcBlocker, validate_sample_rate/duration
-    ├── math.rs        no_std compat (sin, cos, exp, sqrt, powf)
     └── rng.cyr         PCG32 PRNG with Poisson distribution
+
+rust-old/src/math.rs (no_std sin/cos/exp/sqrt/powf) has no Cyrius file: those are cycc
+intrinsics plus ganita's f64_pow (architecture note 002).
 ```
 
 ## Synthesizer Pattern

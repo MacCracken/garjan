@@ -54,6 +54,7 @@ modules = [
     # integration (Tier 4)
     "src/bridge.cyr",
     "src/builder.cyr",
+    "src/soorat.cyr",
 ]
 
 # stdlib: alloc/vec/str for heap+buffers; math (clamp/min/max/lerp/F64_*) +
@@ -63,7 +64,11 @@ modules = [
 # not garjan's own code. NOTE sin/cos/exp/sqrt/abs are cycc INTRINSICS, not
 # ganita: verify with `grep -l '^fn f64_sin(' lib/*.cyr` (no match). bayan
 # (JSON parse) + fmt + str drive the `#derive(Serialize)` codec; bench for
-# .bcyr harnesses; assert for .tcyr.
+# .bcyr harnesses; assert for .tcyr. sakshi (logging) is a stdlib leaf: garjan
+# calls it directly (src/logging.cyr -> sakshi_warn/info/debug/error/fatal), the
+# layer the Rust crate gated behind `tracing`. It was a `[deps.sakshi]` package
+# through 2.6.3; hisab 3.4.2 dropped that package, and 6.7.18 folds sakshi 2.5.10,
+# the same bytes.
 [deps]
 stdlib = [
     "syscalls",
@@ -79,35 +84,29 @@ stdlib = [
     "ganita",
     "bayan",
     "bench",
+    "sakshi",
 ]
 
 # naad — audio synthesis primitives. garjan consumes the noise/filter/
 # modulation surface (NoiseGenerator, BiquadFilter, StateVariableFilter,
 # Lfo) from the single monolithic dist bundle. The bundle references
-# hisab + goonj + sakshi symbols, resolved from THIS manifest below.
+# hisab + goonj + sakshi symbols, resolved from THIS manifest.
 [deps.naad]
 git = "https://github.com/MacCracken/naad.git"
-tag = "2.3.3"
+tag = "2.3.5"
 modules = ["dist/naad.cyr"]
 
 # hisab — math/geometry. Referenced by naad's bundle (HVec3/HComplex/FFT/
-# ganita least-squares). Pinned to the tag naad itself consumes.
+# ganita least-squares). Pinned to the tag naad and goonj themselves consume.
 [deps.hisab]
 git = "https://github.com/MacCracken/hisab.git"
-tag = "3.4.1"
+tag = "3.5.0"
 modules = ["dist/hisab.cyr"]
 
 # goonj — acoustics engine. Referenced by naad's acoustics/* modules
-# (present in the monolithic bundle). Pulls sakshi + hisab transitively.
+# (present in the monolithic bundle). Its `dist/goonj.deps` sidecar names the
+# sakshi and simd stdlib leaves. 2.3.2's BVH query needs hisab >= 3.4.2.
 [deps.goonj]
 git = "https://github.com/MacCracken/goonj.git"
-tag = "2.3.1"
+tag = "2.3.2"
 modules = ["dist/goonj.cyr"]
-
-# sakshi — structured logging. garjan calls it directly (src/logging.cyr →
-# sakshi_warn/info/debug/error/fatal) to wire the `logging` layer the Rust
-# crate gated behind `tracing`. Also arrives transitively via hisab/goonj.
-[deps.sakshi]
-git = "https://github.com/MacCracken/sakshi.git"
-tag = "2.5.10"
-modules = ["dist/sakshi.cyr"]

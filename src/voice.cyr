@@ -205,6 +205,25 @@ fn voice_pool_release_all(p) {
     return 0;
 }
 
+# Returns the index of the first active slot at or after `start`, or VOICE_NONE when there
+# is none. A negative `start` searches from 0. Ports VoicePool::active_voices, which returned
+# an iterator of (index, &slot); Cyrius has no iterators, and a vec of results would
+# allocate on every call. Walk the active voices with:
+#   var i = voice_pool_next_active(p, 0);
+#   while (i != VOICE_NONE) { var s = voice_pool_slot(p, i); ...; i = voice_pool_next_active(p, i + 1); }
+#must_use
+fn voice_pool_next_active(p, start) {
+    var slots = VoicePool_slots(p);
+    var n = vec_len(slots);
+    var i = start;
+    if (i < 0) { i = 0; }
+    while (i < n) {
+        if (VoiceSlot_active(vec_get(slots, i)) == 1) { return i; }
+        i = i + 1;
+    }
+    return VOICE_NONE;
+}
+
 # ---- serde (hand-rolled: VoicePool holds a Vec<VoiceSlot>, which
 # #derive(Serialize) can't express). Emits {steal_policy, max_voices,
 # slots:[VoiceSlot...]} reusing the derived VoiceSlot codec; parses back with

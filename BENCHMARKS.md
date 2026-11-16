@@ -2,49 +2,63 @@
 
 Run: `cyrius bench tests/garjan.bcyr`
 
-26 benchmarks, mirroring `rust-old/benches/benchmarks.rs`. Each `_1s` op is a
+26 benchmarks, one for each in `rust-old/benches/benchmarks.rs`, though several run other
+settings (see the note below the tables). Each `_1s` op is a
 `process_block` over one second of audio (44,100 samples) at 44.1 kHz, so the
 figure is the wall-clock time to synthesize 1 s of sound. Measured on x86_64
 Linux; 20 iterations per synth (200 for the 512-sample ops).
 
 | Synthesizer                | Time / 1 s audio | Real-time factor |
 |----------------------------|------------------|------------------|
-| cloth (Flag, 12 m/s)       | 1.50 ms          | ~668x            |
-| precipitation (hail/metal) | 1.85 ms          | ~539x            |
-| rain (Moderate)            | 1.96 ms          | ~511x            |
-| wingflap (Medium)          | 2.24 ms          | ~446x            |
-| bubble (Boiling)           | 2.35 ms          | ~426x            |
-| fire                       | 3.43 ms          | ~292x            |
-| whoosh (Swing)             | 4.04 ms          | ~248x            |
-| thunder (2 km)             | 4.09 ms          | ~244x            |
-| impact (glass shatter)     | 5.97 ms          | ~168x            |
-| footstep (gravel walk)     | 6.11 ms          | ~164x            |
-| water (Waves)              | 6.21 ms          | ~161x            |
-| wind (15 m/s)              | 7.71 ms          | ~130x            |
-| impact (metal strike)      | 7.86 ms          | ~127x            |
-| rolling (wheel on wood)    | 7.92 ms          | ~126x            |
-| foliage (rustle)           | 8.23 ms          | ~121x            |
-| water (Stream)             | 8.40 ms          | ~119x            |
-| whistle (Pipe)             | 10.20 ms         | ~98x             |
-| underwater (Medium depth)  | 10.48 ms         | ~95x             |
-| friction (scrape metal)    | 10.66 ms         | ~94x             |
-| surf (Moderate, 2 s op)    | 22.71 ms         | ~88x             |
-| texture (Forest)           | 12.53 ms         | ~80x             |
-| impact (wood strike)       | 15.88 ms         | ~63x             |
-| creak (Door)               | 16.63 ms         | ~60x             |
-| **insect (swarm of 8)**    | **33.98 ms**     | **~29x**         |
+| cloth (Flag, 12 m/s)       | 1.46 ms          | ~684x            |
+| precipitation (hail/metal) | 1.85 ms          | ~540x            |
+| rain (Moderate)            | 1.92 ms          | ~522x            |
+| wingflap (Medium)          | 2.25 ms          | ~444x            |
+| bubble (Boiling)           | 2.36 ms          | ~424x            |
+| fire                       | 3.41 ms          | ~293x            |
+| whoosh (Swing)             | 3.99 ms          | ~250x            |
+| thunder (2 km)             | 4.05 ms          | ~247x            |
+| impact (glass shatter)     | 5.98 ms          | ~167x            |
+| water (Waves)              | 5.98 ms          | ~167x            |
+| footstep (gravel walk)     | 6.08 ms          | ~165x            |
+| wind (15 m/s)              | 7.63 ms          | ~131x            |
+| impact (metal strike)      | 7.75 ms          | ~129x            |
+| rolling (wheel on wood)    | 7.74 ms          | ~129x            |
+| foliage (rustle)           | 8.15 ms          | ~123x            |
+| water (Stream)             | 8.20 ms          | ~122x            |
+| whistle (Pipe)             | 10.55 ms         | ~95x             |
+| friction (scrape metal)    | 10.65 ms         | ~94x             |
+| underwater (Medium depth)  | 10.79 ms         | ~93x             |
+| surf (Moderate, 2 s op)    | 22.96 ms         | ~87x             |
+| texture (Forest)           | 11.95 ms         | ~84x             |
+| impact (wood strike)       | 15.72 ms         | ~64x             |
+| creak (Door)               | 16.39 ms         | ~61x             |
+| **insect (swarm of 8)**    | **33.63 ms**     | **~30x**         |
 
 Sub-block ops:
 
 | Op                        | Time      |
 |---------------------------|-----------|
-| `process_block` wind, 512 | 91.4 us  |
-| modal bank, 8 modes, 512  | 161.4 us  |
+| `process_block` wind, 512 | 88.5 us   |
+| modal bank, 8 modes, 512  | 151.2 us  |
 
-Last measured on Cyrius 6.7.18 with naad 2.3.3 / hisab 3.4.1 / goonj 2.3.1.
-Run-to-run spread is roughly 3%, so treat single-run differences under that as
-noise.
+Last measured on Cyrius 6.7.18 with naad 2.3.5 / hisab 3.5.0 / goonj 2.3.2, as the best
+of 6 alternating rounds against the 2.6.3 build, at a load average near 5.5. Run-to-run
+spread is roughly 3%, so treat single-run differences under that as noise.
 
+> **These ops are not like-for-like with `rust-old/benches/benchmarks.rs`.** Several run
+> other settings: thunder at 2 km, not 500 m; fire at 0.5, not 0.7; an insect swarm of 8
+> cicadas at full intensity, renamed `insect_swarm_1s`, not 5 wing-buzzes at 0.6; impact
+> through `process_block`, not `synthesize`. Compare the two tables only after aligning
+> them (see the roadmap).
+
+> **Moving to naad 2.3.5, hisab 3.5.0 and goonj 2.3.2 (2.7.0) was flat**: median -0.2%
+> across the 26 ops. Every audio hash is unchanged. The one real move is whistle, +3.6%:
+> it now calls naad's `filter_svf_process_sample_into`, which also computes the high-pass
+> and notch outputs whistle discards, in place of a copy of the band-pass step. That was
+> the price of dropping the copy, and the roadmap's control-rate update would more than
+> repay it.
+>
 > **Moving from 6.6.3 to 6.6.20 was flat**: median +0.8% across the 26 ops, both
 > built and run back to back on one machine. Most of the gap from the previous
 > table is the machine, not the toolchain, so compare only same-machine runs.

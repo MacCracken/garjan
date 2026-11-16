@@ -1,0 +1,630 @@
+# soorat.cyr -- visualization data for soorat: a precipitation particle field, a
+# fire emitter and a wind flow field, built from the same physical inputs as the
+# synthesizers.
+#
+# Ports rust-old/src/integration/soorat.rs (the Rust `soorat-compat` feature). Like
+# bridge.cyr it is pure data over primitives and calls nothing in soorat, so it is
+# always compiled and no gate waits on soorat. ADR-0012 records the port's choices:
+#   - f32 -> f64, as everywhere else in the port.
+#   - [f32; N] fields -> flattened scalars (position_x/_y/_z, wind_bias_x/_z, nx/nz,
+#     origin_x/_y/_z). [f32; N] arguments -> scalar arguments in the same order.
+#   - Vec<PrecipitationParticle> -> a stdlib vec of PrecipitationParticle pointers.
+#     Vec<[f32; 2]> -> a flat f64 vec, vx then vz per point, row-major (z * nx + x).
+#   - Rust's constructors cannot fail. Here a negative count or grid size, a field
+#     past GARJAN_MAX_FIELD_POINTS and a refused allocation return a negative
+#     GARJAN_* code (ADR-0005, ADR-0007). Non-finite inputs pass through, as in Rust
+#     and bridge.cyr.
+#   - The JSON shape follows the flattened fields, not Rust's arrays. A loader
+#     refuses a missing member, and a wind field whose nx * nz disagrees with its
+#     velocity count, both of which serde accepted.
+# Requires: error.cyr (garjan_alloc, garjan_frac, garjan_is_finite, garjan_json_open).
+
+# Most points a field may hold: particles in a PrecipitationField, grid points in a
+# WindField. 2^20, about 72 MB of particles. Rust had no bound; ADR-0012 has why.
+var GARJAN_MAX_FIELD_POINTS = 1048576;
+
+# ---- PrecipitationParticle: one drop or flake (Rust: position/velocity [f32; 3]) ----
+#derive(accessors)
+#derive(Serialize)
+struct PrecipitationParticle {
+    position_x: f64;
+    position_y: f64;
+    position_z: f64;
+    velocity_x: f64;
+    velocity_y: f64;
+    velocity_z: f64;
+    size: f64;
+    life: f64;
+}
+
+# ---- PrecipitationField: the particles plus field-wide parameters ----
+#   particles: vec of PrecipitationParticle pointers;  is_snow: 0/1;
+#   intensity: 0..1 from the constructors;  wind_bias_x/_z: horizontal wind, m/s.
+#derive(accessors)
+struct PrecipitationField {
+    particles;
+    is_snow;
+    intensity;
+    wind_bias_x;
+    wind_bias_z;
+}
+
+# The field's scalars, for the derived float writer. Internal to the codec.
+#derive(accessors)
+#derive(Serialize)
+struct PrecipitationFieldParams {
+    is_snow: i64;
+    intensity: f64;
+    wind_bias_x: f64;
+    wind_bias_z: f64;
+}
+
+# ---- FireEmitter: a fire's visual parameters at one moment ----
+#derive(accessors)
+#derive(Serialize)
+struct FireEmitter {
+    position_x: f64;
+    position_y: f64;
+    position_z: f64;
+    intensity: f64;
+    color_temperature_k: f64;
+    flame_height: f64;
+    base_radius: f64;
+    ember_rate: f64;
+}
+
+# ---- WindField: horizontal wind velocity on an nx-by-nz grid in the XZ plane ----
+#   velocities: flat f64 vec, [vx, vz] per point, point index z * nx + x;
+#   nx/nz: grid dimensions;  origin_x/_y/_z: min corner, metres;
+#   spacing: cell size, metres;  speed: overall wind speed, m/s.
+#derive(accessors)
+struct WindField {
+    velocities;
+    nx;
+    nz;
+    origin_x;
+    origin_y;
+    origin_z;
+    spacing;
+    speed;
+}
+
+# The field's scalars, for the derived float writer. Internal to the codec.
+#derive(accessors)
+#derive(Serialize)
+struct WindFieldParams {
+    nx: i64;
+    nz: i64;
+    origin_x: f64;
+    origin_y: f64;
+    origin_z: f64;
+    spacing: f64;
+    speed: f64;
+}
+
+# One grid point's velocity, for the derived float writer. Internal to the codec.
+#derive(accessors)
+#derive(Serialize)
+struct WindFieldVelocity {
+    vx: f64;
+    vz: f64;
+}
+
+# Rust's f32::fract: x minus x truncated toward zero.
+#must_use
+fn _soorat_fract(x) {
+    return f64_sub(x, f64_trunc(x));
+}
+
+# Rust's f32::signum: NaN for NaN, -1.0 when the sign bit is set (-0.0 included),
+# and 1.0 otherwise (+0.0 included).
+#must_use
+fn _soorat_signum(x) {
+    if (f64_eq(x, x) == 0) { return x; }
+    if (x < 0) { return f64_neg(F64_ONE); }    # the sign bit of the f64 word
+    return F64_ONE;
+}
+
+# ================================================================
+# PrecipitationField
+# ================================================================
+
+# Creates a rain field of `count` particles spread over the box from (min_x, min_y, min_z)
+# to (max_x, max_y, max_z). `intensity` (0..1) sets drop size and fall speed; wind_x and
+# wind_z are horizontal wind in m/s. The spread is deterministic; a consumer can jitter it.
+# Ports PrecipitationField::rain. Returns a pointer, GARJAN_ERR_INVALID_PARAMETER for a
+# negative count or one past GARJAN_MAX_FIELD_POINTS, or GARJAN_ERR_ALLOCATION.
+#must_use
+fn precipitation_field_rain(count, min_x, min_y, min_z, max_x, max_y, max_z, intensity, wind_x, wind_z) {
+    if (count < 0 || count > GARJAN_MAX_FIELD_POINTS) { return GARJAN_ERR_INVALID_PARAMETER; }
+    var particles = vec_new();
+    if (particles == 0) { return GARJAN_ERR_ALLOCATION; }
+    var dx = f64_sub(max_x, min_x);
+    var dy = f64_sub(max_y, min_y);
+    var dz = f64_sub(max_z, min_z);
+    var denom = f64_from(count);
+    if (count < 1) { denom = F64_ONE; }    # count.max(1)
+
+    # Rust computes these inside the loop from the unclamped intensity.
+    var drop_size = f64_add(garjan_frac(1, 1000), f64_mul(intensity, garjan_frac(4, 1000)));   # 1-5 mm
+    var fall_speed = f64_sub(f64_from(0 - 4), f64_mul(intensity, f64_from(5)));               # 4-9 m/s down
+    var drift = garjan_frac(3, 10);
+    var kx = garjan_frac(713, 100);
+    var ky = garjan_frac(337, 100);
+    var kz = garjan_frac(1179, 100);
+
+    var i = 0;
+    while (i < count) {
+        var t = f64_div(f64_from(i), denom);
+        var x = f64_add(min_x, f64_mul(_soorat_fract(f64_mul(t, kx)), dx));
+        var y = f64_add(min_y, f64_mul(_soorat_fract(f64_mul(t, ky)), dy));
+        var z = f64_add(min_z, f64_mul(_soorat_fract(f64_mul(t, kz)), dz));
+        var p = garjan_alloc(sizeof(PrecipitationParticle));
+        if (garjan_is_err(p) == 1) { return p; }
+        PrecipitationParticle_set_position_x(p, x);
+        PrecipitationParticle_set_position_y(p, y);
+        PrecipitationParticle_set_position_z(p, z);
+        PrecipitationParticle_set_velocity_x(p, f64_mul(wind_x, drift));
+        PrecipitationParticle_set_velocity_y(p, fall_speed);
+        PrecipitationParticle_set_velocity_z(p, f64_mul(wind_z, drift));
+        PrecipitationParticle_set_size(p, drop_size);
+        PrecipitationParticle_set_life(p, f64_sub(y, min_y));    # time to ground ~ height / speed
+        vec_push(particles, p);
+        i = i + 1;
+    }
+
+    var f = garjan_alloc(sizeof(PrecipitationField));
+    if (garjan_is_err(f) == 1) { return f; }
+    PrecipitationField_set_particles(f, particles);
+    PrecipitationField_set_is_snow(f, 0);
+    PrecipitationField_set_intensity(f, f64_clamp(intensity, 0, F64_ONE));
+    PrecipitationField_set_wind_bias_x(f, wind_x);
+    PrecipitationField_set_wind_bias_z(f, wind_z);
+    return f;
+}
+
+# Creates a snow field: the rain field with is_snow set, each particle falling at a fifth
+# of the speed and three times the size. Ports PrecipitationField::snow. Returns what
+# precipitation_field_rain returns.
+#must_use
+fn precipitation_field_snow(count, min_x, min_y, min_z, max_x, max_y, max_z, intensity, wind_x, wind_z) {
+    var f = precipitation_field_rain(count, min_x, min_y, min_z, max_x, max_y, max_z, intensity, wind_x, wind_z);
+    if (garjan_is_err(f) == 1) { return f; }
+    PrecipitationField_set_is_snow(f, 1);
+    var slow = garjan_frac(2, 10);
+    var big = f64_from(3);
+    var particles = PrecipitationField_particles(f);
+    var n = vec_len(particles);
+    var i = 0;
+    while (i < n) {
+        var p = vec_get(particles, i);
+        PrecipitationParticle_set_velocity_y(p, f64_mul(PrecipitationParticle_velocity_y(p), slow));
+        PrecipitationParticle_set_size(p, f64_mul(PrecipitationParticle_size(p), big));
+        i = i + 1;
+    }
+    return f;
+}
+
+# Returns the number of particles in the field.
+#must_use
+fn precipitation_field_len(f) {
+    return vec_len(PrecipitationField_particles(f));
+}
+
+# Returns particle `index`, or 0 when it is out of range (Rust: particles.get(index)).
+#must_use
+fn precipitation_field_particle(f, index) {
+    var particles = PrecipitationField_particles(f);
+    if (index < 0 || index >= vec_len(particles)) { return 0; }
+    return vec_get(particles, index);
+}
+
+# ================================================================
+# FireEmitter
+# ================================================================
+
+# Creates a fire emitter at (pos_x, pos_y, pos_z) from an intensity, clamped to 0..1:
+# 1200-1800 K, flames 0.3-2.3 m tall on a 0.1-0.6 m base, 0-50 embers per second.
+# Ports FireEmitter::from_intensity. Returns a pointer, or GARJAN_ERR_ALLOCATION.
+#must_use
+fn fire_emitter_from_intensity(pos_x, pos_y, pos_z, intensity) {
+    var i = f64_clamp(intensity, 0, F64_ONE);
+    var e = garjan_alloc(sizeof(FireEmitter));
+    if (garjan_is_err(e) == 1) { return e; }
+    FireEmitter_set_position_x(e, pos_x);
+    FireEmitter_set_position_y(e, pos_y);
+    FireEmitter_set_position_z(e, pos_z);
+    FireEmitter_set_intensity(e, i);
+    FireEmitter_set_color_temperature_k(e, f64_add(f64_from(1200), f64_mul(i, f64_from(600))));
+    FireEmitter_set_flame_height(e, f64_add(garjan_frac(3, 10), f64_mul(i, f64_from(2))));
+    FireEmitter_set_base_radius(e, f64_add(garjan_frac(1, 10), f64_mul(i, F64_HALF)));
+    FireEmitter_set_ember_rate(e, f64_mul(i, f64_from(50)));
+    return e;
+}
+
+# ================================================================
+# WindField
+# ================================================================
+
+# Checks grid dimensions: neither negative (usize in Rust), and nx * nz at most
+# GARJAN_MAX_FIELD_POINTS, tested without forming a product that could wrap. Returns
+# GARJAN_OK or GARJAN_ERR_INVALID_PARAMETER.
+#must_use
+fn _wind_field_check_dims(nx, nz) {
+    if (nx < 0 || nz < 0) { return GARJAN_ERR_INVALID_PARAMETER; }
+    if (nx > 0 && nz > GARJAN_MAX_FIELD_POINTS / nx) { return GARJAN_ERR_INVALID_PARAMETER; }
+    return GARJAN_OK;
+}
+
+# Allocates a WindField with its scalars set and an empty velocity vec. Returns it, or
+# GARJAN_ERR_ALLOCATION.
+#must_use
+fn _wind_field_alloc(nx, nz, origin_x, origin_y, origin_z, spacing, speed) {
+    var v = vec_new();
+    if (v == 0) { return GARJAN_ERR_ALLOCATION; }
+    var f = garjan_alloc(sizeof(WindField));
+    if (garjan_is_err(f) == 1) { return f; }
+    WindField_set_velocities(f, v);
+    WindField_set_nx(f, nx);
+    WindField_set_nz(f, nz);
+    WindField_set_origin_x(f, origin_x);
+    WindField_set_origin_y(f, origin_y);
+    WindField_set_origin_z(f, origin_z);
+    WindField_set_spacing(f, spacing);
+    WindField_set_speed(f, speed);
+    return f;
+}
+
+# Creates an nx-by-nz wind field blowing (wind_vx, wind_vz) m/s at every point, with
+# its corner at (origin_x, origin_y, origin_z) and cells `spacing` metres apart. Ports
+# WindField::uniform. Returns a pointer, GARJAN_ERR_INVALID_PARAMETER for a negative
+# dimension or more than GARJAN_MAX_FIELD_POINTS points, or GARJAN_ERR_ALLOCATION.
+#must_use
+fn wind_field_uniform(nx, nz, origin_x, origin_y, origin_z, spacing, wind_vx, wind_vz) {
+    var d = _wind_field_check_dims(nx, nz);
+    if (garjan_is_err(d) == 1) { return d; }
+    var speed = f64_sqrt(f64_add(f64_mul(wind_vx, wind_vx), f64_mul(wind_vz, wind_vz)));
+    var f = _wind_field_alloc(nx, nz, origin_x, origin_y, origin_z, spacing, speed);
+    if (garjan_is_err(f) == 1) { return f; }
+    var v = WindField_velocities(f);
+    var count = nx * nz;
+    var i = 0;
+    while (i < count) {
+        vec_push(v, wind_vx);
+        vec_push(v, wind_vz);
+        i = i + 1;
+    }
+    return f;
+}
+
+# Creates an nx-by-nz wind field whose speed rises from min_speed at x = 0 to max_speed at
+# the last column, uniform along z, blowing along z in the direction of direction_z's sign.
+# Its speed is the mean of the two. Ports WindField::gradient. Returns what
+# wind_field_uniform returns.
+#must_use
+fn wind_field_gradient(nx, nz, origin_x, origin_y, origin_z, spacing, min_speed, max_speed, direction_z) {
+    var d = _wind_field_check_dims(nx, nz);
+    if (garjan_is_err(d) == 1) { return d; }
+    var avg = f64_mul(f64_add(min_speed, max_speed), F64_HALF);
+    var f = _wind_field_alloc(nx, nz, origin_x, origin_y, origin_z, spacing, avg);
+    if (garjan_is_err(f) == 1) { return f; }
+    var v = WindField_velocities(f);
+    var sign = _soorat_signum(direction_z);
+    var span = f64_sub(max_speed, min_speed);
+    var iz = 0;
+    while (iz < nz) {
+        var ix = 0;
+        while (ix < nx) {
+            var t = F64_HALF;
+            if (nx > 1) { t = f64_div(f64_from(ix), f64_from(nx - 1)); }
+            var speed = f64_add(min_speed, f64_mul(t, span));
+            vec_push(v, 0);
+            vec_push(v, f64_mul(speed, sign));
+            ix = ix + 1;
+        }
+        iz = iz + 1;
+    }
+    return f;
+}
+
+# Returns the number of grid points, nx * nz.
+#must_use
+fn wind_field_len(f) {
+    return vec_len(WindField_velocities(f)) / 2;
+}
+
+# Returns the x velocity at point `index` (z * nx + x), or 0.0 when it is out of range.
+#must_use
+fn wind_field_vx(f, index) {
+    if (index < 0 || index >= wind_field_len(f)) { return 0; }
+    return vec_get(WindField_velocities(f), index * 2);
+}
+
+# Returns the z velocity at point `index` (z * nx + x), or 0.0 when it is out of range.
+#must_use
+fn wind_field_vz(f, index) {
+    if (index < 0 || index >= wind_field_len(f)) { return 0; }
+    return vec_get(WindField_velocities(f), index * 2 + 1);
+}
+
+# ================================================================
+# serde. Each writer emits a derived scalar object, then splices its array in before
+# the closing brace. Each loader checks the document with garjan_json_open, then reads
+# every member from bayan's value tree, refusing any that is missing or not a finite
+# number.
+# ================================================================
+
+# Writes builder `psb` (a derived object) into `sb` without its closing brace, then
+# `,"key":[`. Returns GARJAN_OK, GARJAN_ERR_ALLOCATION, or GARJAN_ERR_INVALID_PARAMETER
+# when psb holds no object.
+fn _soorat_open_array(sb, psb, key) {
+    var s = str_builder_build(psb);
+    if (s == 0) { return GARJAN_ERR_ALLOCATION; }
+    if (str_len(s) < 2) { return GARJAN_ERR_INVALID_PARAMETER; }
+    var head = str_from_buf(str_data(s), str_len(s) - 1);    # drop the '}'
+    if (head == 0) { return GARJAN_ERR_ALLOCATION; }
+    str_builder_add(sb, head);
+    str_builder_add_cstr(sb, ",\"");
+    str_builder_add_cstr(sb, key);
+    str_builder_add_cstr(sb, "\":[");
+    return GARJAN_OK;
+}
+
+# Reads member `key` of JSON object `obj` as an f64 into the word at `out`. An integer is
+# converted. Returns GARJAN_OK, or GARJAN_ERR_INVALID_PARAMETER when `obj` is not an
+# object or the member is missing, not a number, or not finite.
+fn _soorat_json_f64(obj, key, out) {
+    var v = garjan_json_get(obj, key);
+    if (v == 0) { return GARJAN_ERR_INVALID_PARAMETER; }
+    var t = bayan_json_v_tag(v);
+    var x = 0;
+    if (t == JTAG_FLOAT) {
+        x = bayan_json_v_float(v);
+    } elif (t == JTAG_INT) {
+        x = f64_from(bayan_json_v_int(v));
+    } else {
+        return GARJAN_ERR_INVALID_PARAMETER;
+    }
+    if (garjan_is_finite(x) == 0) { return GARJAN_ERR_INVALID_PARAMETER; }
+    store64(out, x);
+    return GARJAN_OK;
+}
+
+# Reads member `key` of JSON object `obj` as an integer into the word at `out`. Returns
+# GARJAN_OK, or GARJAN_ERR_INVALID_PARAMETER when it is missing or not an integer.
+fn _soorat_json_int(obj, key, out) {
+    var v = garjan_json_get(obj, key);
+    if (v == 0) { return GARJAN_ERR_INVALID_PARAMETER; }
+    if (bayan_json_v_tag(v) != JTAG_INT) { return GARJAN_ERR_INVALID_PARAMETER; }
+    store64(out, bayan_json_v_int(v));
+    return GARJAN_OK;
+}
+
+# Serializes a precipitation field into str_builder `sb`:
+# {"is_snow":..,"intensity":..,"wind_bias_x":..,"wind_bias_z":..,"particles":[{..},..]}.
+# Returns GARJAN_OK or a negative code.
+#must_use
+fn precipitation_field_to_json(f, sb) {
+    var p = garjan_alloc(sizeof(PrecipitationFieldParams));
+    if (garjan_is_err(p) == 1) { return p; }
+    PrecipitationFieldParams_set_is_snow(p, PrecipitationField_is_snow(f));
+    PrecipitationFieldParams_set_intensity(p, PrecipitationField_intensity(f));
+    PrecipitationFieldParams_set_wind_bias_x(p, PrecipitationField_wind_bias_x(f));
+    PrecipitationFieldParams_set_wind_bias_z(p, PrecipitationField_wind_bias_z(f));
+    var psb = str_builder_new();
+    if (psb == 0) { return GARJAN_ERR_ALLOCATION; }
+    var pe = PrecipitationFieldParams_to_json(p, psb);
+    if (garjan_is_err(pe) == 1) { return pe; }
+    var oe = _soorat_open_array(sb, psb, "particles");
+    if (garjan_is_err(oe) == 1) { return oe; }
+    var particles = PrecipitationField_particles(f);
+    var n = vec_len(particles);
+    var i = 0;
+    while (i < n) {
+        if (i > 0) { str_builder_add_cstr(sb, ","); }
+        var ee = PrecipitationParticle_to_json(vec_get(particles, i), sb);
+        if (garjan_is_err(ee) == 1) { return ee; }
+        i = i + 1;
+    }
+    str_builder_add_cstr(sb, "]}");
+    return GARJAN_OK;
+}
+
+# Reads one particle from JSON object `obj` into a new PrecipitationParticle. Returns it,
+# GARJAN_ERR_INVALID_PARAMETER for a missing or non-finite member, or GARJAN_ERR_ALLOCATION.
+#must_use
+fn _precipitation_particle_from_node(obj) {
+    var w[64];    # the eight members, in struct order
+    var wp = &w;
+    var bad = 0;
+    bad = bad + garjan_is_err(_soorat_json_f64(obj, "position_x", wp));
+    bad = bad + garjan_is_err(_soorat_json_f64(obj, "position_y", wp + 8));
+    bad = bad + garjan_is_err(_soorat_json_f64(obj, "position_z", wp + 16));
+    bad = bad + garjan_is_err(_soorat_json_f64(obj, "velocity_x", wp + 24));
+    bad = bad + garjan_is_err(_soorat_json_f64(obj, "velocity_y", wp + 32));
+    bad = bad + garjan_is_err(_soorat_json_f64(obj, "velocity_z", wp + 40));
+    bad = bad + garjan_is_err(_soorat_json_f64(obj, "size", wp + 48));
+    bad = bad + garjan_is_err(_soorat_json_f64(obj, "life", wp + 56));
+    if (bad > 0) { return GARJAN_ERR_INVALID_PARAMETER; }
+    var p = garjan_alloc(sizeof(PrecipitationParticle));
+    if (garjan_is_err(p) == 1) { return p; }
+    PrecipitationParticle_set_position_x(p, load64(wp));
+    PrecipitationParticle_set_position_y(p, load64(wp + 8));
+    PrecipitationParticle_set_position_z(p, load64(wp + 16));
+    PrecipitationParticle_set_velocity_x(p, load64(wp + 24));
+    PrecipitationParticle_set_velocity_y(p, load64(wp + 32));
+    PrecipitationParticle_set_velocity_z(p, load64(wp + 40));
+    PrecipitationParticle_set_size(p, load64(wp + 48));
+    PrecipitationParticle_set_life(p, load64(wp + 56));
+    return p;
+}
+
+# Restores a precipitation field from precipitation_field_to_json's document. Returns a
+# pointer, GARJAN_ERR_INVALID_PARAMETER for a document garjan_json_open refuses, a missing
+# or non-finite member, an is_snow other than 0 or 1, or more than GARJAN_MAX_FIELD_POINTS
+# particles, or GARJAN_ERR_ALLOCATION.
+#must_use
+fn precipitation_field_from_json_str(json) {
+    var chk = garjan_json_open(json);
+    if (garjan_is_err(chk) == 1) { return chk; }
+    var root = bayan_json_v_parse_buf(json, strlen(json));
+    var s[32];    # is_snow, intensity, wind_bias_x, wind_bias_z
+    var sp = &s;
+    var bad = 0;
+    bad = bad + garjan_is_err(_soorat_json_int(root, "is_snow", sp));
+    bad = bad + garjan_is_err(_soorat_json_f64(root, "intensity", sp + 8));
+    bad = bad + garjan_is_err(_soorat_json_f64(root, "wind_bias_x", sp + 16));
+    bad = bad + garjan_is_err(_soorat_json_f64(root, "wind_bias_z", sp + 24));
+    if (bad > 0) { return GARJAN_ERR_INVALID_PARAMETER; }
+    var is_snow = load64(sp);
+    if (is_snow != 0 && is_snow != 1) { return GARJAN_ERR_INVALID_PARAMETER; }    # a bool in Rust
+    var arr = garjan_json_get(root, "particles");
+    if (arr == 0) { return GARJAN_ERR_INVALID_PARAMETER; }
+    if (bayan_json_v_tag(arr) != JTAG_ARR) { return GARJAN_ERR_INVALID_PARAMETER; }
+    var n = bayan_json_v_arr_len(arr);
+    if (n > GARJAN_MAX_FIELD_POINTS) { return GARJAN_ERR_INVALID_PARAMETER; }
+
+    var particles = vec_new();
+    if (particles == 0) { return GARJAN_ERR_ALLOCATION; }
+    var i = 0;
+    while (i < n) {
+        var p = _precipitation_particle_from_node(bayan_json_v_arr_get(arr, i));
+        if (garjan_is_err(p) == 1) { return p; }
+        vec_push(particles, p);
+        i = i + 1;
+    }
+    var f = garjan_alloc(sizeof(PrecipitationField));
+    if (garjan_is_err(f) == 1) { return f; }
+    PrecipitationField_set_particles(f, particles);
+    PrecipitationField_set_is_snow(f, is_snow);
+    PrecipitationField_set_intensity(f, load64(sp + 8));
+    PrecipitationField_set_wind_bias_x(f, load64(sp + 16));
+    PrecipitationField_set_wind_bias_z(f, load64(sp + 24));
+    return f;
+}
+
+# Serializes a fire emitter into str_builder `sb` as one flat object. Returns GARJAN_OK
+# or a negative code.
+#must_use
+fn fire_emitter_to_json(e, sb) {
+    return FireEmitter_to_json(e, sb);
+}
+
+# Restores a fire emitter from fire_emitter_to_json's document. Returns a pointer,
+# GARJAN_ERR_INVALID_PARAMETER for a document garjan_json_open refuses or a missing or
+# non-finite member, or GARJAN_ERR_ALLOCATION.
+#must_use
+fn fire_emitter_from_json_str(json) {
+    var chk = garjan_json_open(json);
+    if (garjan_is_err(chk) == 1) { return chk; }
+    var root = bayan_json_v_parse_buf(json, strlen(json));
+    var w[64];    # the eight members, in struct order
+    var wp = &w;
+    var bad = 0;
+    bad = bad + garjan_is_err(_soorat_json_f64(root, "position_x", wp));
+    bad = bad + garjan_is_err(_soorat_json_f64(root, "position_y", wp + 8));
+    bad = bad + garjan_is_err(_soorat_json_f64(root, "position_z", wp + 16));
+    bad = bad + garjan_is_err(_soorat_json_f64(root, "intensity", wp + 24));
+    bad = bad + garjan_is_err(_soorat_json_f64(root, "color_temperature_k", wp + 32));
+    bad = bad + garjan_is_err(_soorat_json_f64(root, "flame_height", wp + 40));
+    bad = bad + garjan_is_err(_soorat_json_f64(root, "base_radius", wp + 48));
+    bad = bad + garjan_is_err(_soorat_json_f64(root, "ember_rate", wp + 56));
+    if (bad > 0) { return GARJAN_ERR_INVALID_PARAMETER; }
+    var e = garjan_alloc(sizeof(FireEmitter));
+    if (garjan_is_err(e) == 1) { return e; }
+    FireEmitter_set_position_x(e, load64(wp));
+    FireEmitter_set_position_y(e, load64(wp + 8));
+    FireEmitter_set_position_z(e, load64(wp + 16));
+    FireEmitter_set_intensity(e, load64(wp + 24));
+    FireEmitter_set_color_temperature_k(e, load64(wp + 32));
+    FireEmitter_set_flame_height(e, load64(wp + 40));
+    FireEmitter_set_base_radius(e, load64(wp + 48));
+    FireEmitter_set_ember_rate(e, load64(wp + 56));
+    return e;
+}
+
+# Serializes a wind field into str_builder `sb`: {"nx":..,"nz":..,"origin_x":..,
+# "origin_y":..,"origin_z":..,"spacing":..,"speed":..,"velocities":[{"vx":..,"vz":..},..]}.
+# Returns GARJAN_OK or a negative code.
+#must_use
+fn wind_field_to_json(f, sb) {
+    var p = garjan_alloc(sizeof(WindFieldParams));
+    if (garjan_is_err(p) == 1) { return p; }
+    WindFieldParams_set_nx(p, WindField_nx(f));
+    WindFieldParams_set_nz(p, WindField_nz(f));
+    WindFieldParams_set_origin_x(p, WindField_origin_x(f));
+    WindFieldParams_set_origin_y(p, WindField_origin_y(f));
+    WindFieldParams_set_origin_z(p, WindField_origin_z(f));
+    WindFieldParams_set_spacing(p, WindField_spacing(f));
+    WindFieldParams_set_speed(p, WindField_speed(f));
+    var psb = str_builder_new();
+    if (psb == 0) { return GARJAN_ERR_ALLOCATION; }
+    var pe = WindFieldParams_to_json(p, psb);
+    if (garjan_is_err(pe) == 1) { return pe; }
+    var oe = _soorat_open_array(sb, psb, "velocities");
+    if (garjan_is_err(oe) == 1) { return oe; }
+    var pt[sizeof(WindFieldVelocity)];    # one point at a time: no allocation per point
+    var v = WindField_velocities(f);
+    var n = vec_len(v) / 2;
+    var i = 0;
+    while (i < n) {
+        if (i > 0) { str_builder_add_cstr(sb, ","); }
+        WindFieldVelocity_set_vx(&pt, vec_get(v, i * 2));
+        WindFieldVelocity_set_vz(&pt, vec_get(v, i * 2 + 1));
+        var ee = WindFieldVelocity_to_json(&pt, sb);
+        if (garjan_is_err(ee) == 1) { return ee; }
+        i = i + 1;
+    }
+    str_builder_add_cstr(sb, "]}");
+    return GARJAN_OK;
+}
+
+# Restores a wind field from wind_field_to_json's document. Returns a pointer,
+# GARJAN_ERR_INVALID_PARAMETER for a document garjan_json_open refuses, a missing or
+# non-finite member, a negative or oversized grid, or a velocity count other than
+# nx * nz, or GARJAN_ERR_ALLOCATION.
+#must_use
+fn wind_field_from_json_str(json) {
+    var chk = garjan_json_open(json);
+    if (garjan_is_err(chk) == 1) { return chk; }
+    var root = bayan_json_v_parse_buf(json, strlen(json));
+    var w[56];    # nx, nz, origin_x, origin_y, origin_z, spacing, speed
+    var wp = &w;
+    var bad = 0;
+    bad = bad + garjan_is_err(_soorat_json_int(root, "nx", wp));
+    bad = bad + garjan_is_err(_soorat_json_int(root, "nz", wp + 8));
+    bad = bad + garjan_is_err(_soorat_json_f64(root, "origin_x", wp + 16));
+    bad = bad + garjan_is_err(_soorat_json_f64(root, "origin_y", wp + 24));
+    bad = bad + garjan_is_err(_soorat_json_f64(root, "origin_z", wp + 32));
+    bad = bad + garjan_is_err(_soorat_json_f64(root, "spacing", wp + 40));
+    bad = bad + garjan_is_err(_soorat_json_f64(root, "speed", wp + 48));
+    if (bad > 0) { return GARJAN_ERR_INVALID_PARAMETER; }
+    var nx = load64(wp);
+    var nz = load64(wp + 8);
+    var d = _wind_field_check_dims(nx, nz);
+    if (garjan_is_err(d) == 1) { return d; }
+    var arr = garjan_json_get(root, "velocities");
+    if (arr == 0) { return GARJAN_ERR_INVALID_PARAMETER; }
+    if (bayan_json_v_tag(arr) != JTAG_ARR) { return GARJAN_ERR_INVALID_PARAMETER; }
+    var n = bayan_json_v_arr_len(arr);
+    # Rust kept dimensions and velocities as two unrelated fields. A field indexed by
+    # z * nx + x must have exactly nx * nz points, so a disagreement is refused.
+    if (n != nx * nz) { return GARJAN_ERR_INVALID_PARAMETER; }
+
+    var f = _wind_field_alloc(nx, nz, load64(wp + 16), load64(wp + 24), load64(wp + 32),
+      load64(wp + 40), load64(wp + 48));
+    if (garjan_is_err(f) == 1) { return f; }
+    var v = WindField_velocities(f);
+    var xz[16];
+    var xzp = &xz;
+    var i = 0;
+    while (i < n) {
+        var node = bayan_json_v_arr_get(arr, i);
+        if (garjan_is_err(_soorat_json_f64(node, "vx", xzp)) == 1) { return GARJAN_ERR_INVALID_PARAMETER; }
+        if (garjan_is_err(_soorat_json_f64(node, "vz", xzp + 8)) == 1) { return GARJAN_ERR_INVALID_PARAMETER; }
+        vec_push(v, load64(xzp));
+        vec_push(v, load64(xzp + 8));
+        i = i + 1;
+    }
+    return f;
+}

@@ -7,7 +7,8 @@
 # Requires: error.cyr (codes/is_finite), dsp.cyr (garjan_validate_sample_rate),
 # rng.cyr (Rng), material.cyr (MaterialProperties, used by generate_modes).
 # ModalBank/Exciter hold vec/pointer fields -> #derive(Serialize) can't express
-# them; their JSON codecs are hand-rolled in the serde pass.
+# them. Neither has a standalone codec, as Rust's did: their live state travels inside
+# the host synth's "dsp" member (dsp.cyr, ADR-0008). See the roadmap's 2.8.0.
 
 # ---- ModePattern ----
 var MODE_PATTERN_HARMONIC     = 0;   # f_k = f0*k (strings, tubes)

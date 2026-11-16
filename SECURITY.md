@@ -21,7 +21,8 @@ fully attacker-controlled input. Three audits have focused there:
 [2.0.2](docs/audit/2026-08-30-audit.md),
 [2.5.1](docs/audit/2026-08-30-audit-2.md) and
 [2.6.3](docs/audit/2026-11-07-audit-3.md). `cyrius fuzz` drives hostile documents
-through all 22 of them, and hostile values through every constructor and setter.
+through all 25 of them (the 21 synths, the voice pool and soorat's three visualization
+fields), and hostile values through every constructor and setter.
 
 ## Attack surface
 
@@ -38,7 +39,8 @@ through all 22 of them, and hostile values through every constructor and setter.
 | Modal bank coefficients | Numerical instability if radius ≥ 1 | Radius clamped to [0.0, 0.9999] |
 | DC blocker coefficient | Oscillation at very low sample rates | R clamped to [0.9, 0.9999] |
 | Real-time setters | Out-of-range intensity/velocity/pressure | Clamped on assignment |
-| Hot-path allocation | Unbounded growth in a long-running stream, since the arena never frees | `process_block` allocates nothing, pinned by test — see the known exception below |
+| Hot-path allocation | Unbounded growth in a long-running stream, since the arena never frees | `process_block` allocates nothing, pinned by test. `whistle` was the last exception, until 2.6.2 |
+| Visualization fields | A particle count or wind grid large enough to exhaust the arena, or an `nx * nz` that wraps | Refused when negative or past 2^20 points, with the product tested by division; a loaded wind field must carry exactly `nx * nz` velocities ([ADR-0012](docs/adr/0012-soorat-visualization-data-is-ported-ungated.md)) |
 
 ## Known issues
 
@@ -54,9 +56,9 @@ port deliberately does not.
 
 **Its dependencies can still end the process when memory runs out.** The stdlib's
 `str_builder` and bayan's JSON builder exit on a refused allocation, so a `*_to_json`
-that runs out of memory terminates the host. naad's constructors and the `#derive`
-reader fault in the same situation. The 2.6.3 audit found these by refusing every
-allocation in turn, and
+that runs out of memory terminates the host. The `#derive` reader faults in the same
+situation. naad's constructors did too, until naad 2.3.4, which garjan takes from 2.7.0.
+The 2.6.3 audit found these by refusing every allocation in turn, and
 [`dependency-watch.md`](docs/development/dependency-watch.md) lists them for upstream.
 
 ## Dependencies
@@ -65,7 +67,7 @@ allocation in turn, and
 |---|---|---|
 | `naad` | DSP primitives — noise, filters, LFOs | Consumed as a single dist bundle; no I/O |
 | `hisab`, `goonj` | naad's transitive maths/acoustics deps | Resolved from this manifest so the flat namespace stays consistent |
-| `sakshi` | Structured logging | Always compiled, gated at runtime; garjan installs no sink |
+| `sakshi` | Structured logging | A stdlib leaf since 2.7.0. Always compiled, gated at runtime; garjan installs no sink |
 | Cyrius stdlib | `alloc`, `vec`, `str`, `bayan` (JSON), … | Vendored into `lib/` from the toolchain pin |
 
 Pinned versions are in `cyrius.cyml`; resolved commits in `cyrius.lock`. See

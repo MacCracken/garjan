@@ -45,12 +45,14 @@ Procedural synthesis of weather, impacts, surfaces, fluids, fire, creatures, and
 - **LOD** for CPU scaling of distant sources
 - **Science bridge** mapping physical simulation outputs to synthesis parameters
 - **Builder pattern** for complex constructors
+- **Visualization data** for soorat: precipitation particle fields, fire emitters and wind
+  flow grids, built from the same physical inputs as the sounds
 
 ## Quick Start
 
 Consumers include the bundled `dist/garjan.cyr` and declare garjan's deps
-(naad / hisab / goonj / sakshi + stdlib) in their own `cyrius.cyml`, exactly as
-`src/main.cyr` does. Constructors return a heap pointer or a negative
+(naad / hisab / goonj, plus the stdlib leaves, sakshi and bayan among them) in their own
+`cyrius.cyml`, exactly as `src/main.cyr` does. Constructors return a heap pointer or a negative
 `GARJAN_ERR_*` code; `garjan_is_err(x)` checks it.
 
 ```cyrius
@@ -86,7 +88,9 @@ syscall(60, r);
 ```
 
 Every public type also serializes to / from JSON (`<type>_to_json(p, sb)` /
-`<type>_from_json_str(json)`), including the stateful synthesizers.
+`<type>_from_json_str(json)`), including the stateful synthesizers. The exceptions are
+`ModalBank` and `Exciter`, whose live state travels inside their host synth's document
+instead (see the roadmap).
 
 > **Round-tripping is a full session snapshot.** Since 2.5.0 the live DSP state
 > travels too — biquad and SVF memory, noise-generator position, LFO phase,
@@ -104,13 +108,13 @@ x86_64 Linux) — a representative slice, full table in
 
 | Synthesizer | Time for 1 s audio | Real-time factor |
 |---|---|---|
-| Precipitation (hail) | 1.88 ms | ~530x |
-| Cloth (Flag) | 2.02 ms | ~495x |
-| Rain (Moderate) | 3.86 ms | ~259x |
-| Fire | 4.24 ms | ~236x |
-| Wind | 10.44 ms | ~96x |
-| Texture (Forest) | 16.77 ms | ~60x |
-| **Insect (swarm of 8)** | **42.57 ms** | **~23x** |
+| Cloth (Flag) | 1.46 ms | ~684x |
+| Precipitation (hail) | 1.85 ms | ~540x |
+| Rain (Moderate) | 1.92 ms | ~522x |
+| Fire | 3.41 ms | ~293x |
+| Wind | 7.63 ms | ~131x |
+| Texture (Forest) | 11.95 ms | ~84x |
+| **Insect (swarm of 8)** | **33.63 ms** | **~30x** |
 
 `insect` is the slowest: its inner loop runs once per swarm voice, so cost
 scales linearly with `swarm_count` (max 8). Most of what remains there is
@@ -133,7 +137,7 @@ Cyrius has no cargo-style features; the Rust flags map to always-on wiring:
 | `naad-backend` | Always on — noise/filters/LFOs come from the naad bundle |
 | `logging` | Always compiled, wired through **sakshi**; gate at runtime with `sakshi_set_level` |
 | `std` | n/a — Cyrius targets AGNOS/bare-metal natively |
-| `soorat-compat` | Deferred (kept in `rust-old/`) until soorat is ported |
+| `soorat-compat` | Always on since 2.7.0 — `src/soorat.cyr` is plain data and calls nothing in soorat ([ADR-0012](docs/adr/0012-soorat-visualization-data-is-ported-ungated.md)) |
 
 ## Design
 

@@ -37,7 +37,18 @@ constants — `DcBlocker`'s clamp bounds were checked as bit patterns
 (`0x3FECCCCCCCCCCCCD` == 0.9), and the transcendentals measured against libm
 rather than assumed.
 
-**6. Check properties, not diffs.** Every defect in the 2.5.1 sweep came from
+**6. Match the tests by name, not by count.** A suite with as many assertions as the
+oracle can still miss its tests. The 2.7.0 audit found 11 `integration.rs` tests with no
+counterpart and about 15 weakened ones. The commonest weakening: `renders_ok` checked that
+samples were finite where Rust checked they were audible (`any |s| > 0.001`), so a variant
+gone silent would have passed. List every `#[test]` fn in `rust-old/` and find the group
+that asserts the same thing:
+
+```sh
+grep -rhoE 'fn test_[a-z0-9_]+|fn [a-z0-9_]+\(\)' rust-old/tests rust-old/src | sort -u
+```
+
+**7. Check properties, not diffs.** Every defect in the 2.5.1 sweep came from
 asking a question across the whole surface — *"does every deserialize entry
 point validate its sample rate?"*, *"does every vector-building function have
 the size guard?"* — rather than from re-reading code already reviewed. A

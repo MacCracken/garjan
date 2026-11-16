@@ -6,7 +6,7 @@ garjan is a Cyrius project. There is no cargo — `cyrius test` auto-discovers
 ## Running Tests
 
 ```sh
-cyrius test                      # all 34 suites
+cyrius test                      # all 35 suites
 cyrius test tests/fire.tcyr      # one suite
 cyrius fuzz                      # tests/garjan.fcyr, under a minute
 cyrius bench tests/garjan.bcyr   # 26 benchmarks
@@ -19,7 +19,7 @@ cyrius audit                     # fmt / lint / docs / tests / bench
 
 ## How the suites are split
 
-- **32 per-module suites** (`tests/<module>.tcyr`) — each includes the `src/`
+- **33 per-module suites** (`tests/<module>.tcyr`) — each includes the `src/`
   modules it needs and tests one module against itself: construction,
   validation, per-variant behaviour, serde round-trips.
 - **`tests/naad_failure.tcyr`** replaces naad's `noise_new` with one that fails, for its
@@ -30,24 +30,27 @@ cyrius audit                     # fmt / lint / docs / tests / bench
   assert: the uniform validation contract across all 21 constructors,
   exhaustive enum-variant sweeps, relative invariants *between* synths (heavier
   rain is louder than light), the uniform silence gates, determinism replay,
-  builder-vs-direct equivalence, and the hot-path allocation contract.
+  builder-vs-direct equivalence, and the hot-path allocation contract. Since 2.7.0 it
+  also carries every `integration.rs` test the port had dropped, named after the Rust
+  test, including the check that every enum variant makes sound and not just finite
+  samples.
 
-Total: **936 assertions** in 34 suites.
+Total: **1,120 assertions** in 35 suites.
 
 ## The fuzz harness
 
-`tests/garjan.fcyr` attacks the boundaries the suites can only sample. It runs 25,672
+`tests/garjan.fcyr` attacks the boundaries the suites can only sample. It runs 26,927
 cases, each in a forked child under a time and memory limit, so a crash, hang or runaway
 allocation fails that case without ending the run.
 
-- **Documents.** Hostile documents derived from each synth's own `*_to_json` output go
-  through all 22 deserializers. A document may be refused, or accepted and rendered.
+- **Documents.** Hostile documents derived from each entry point's own `*_to_json` output
+  go through all 25 deserializers: the 21 synths, the voice pool and soorat's three fields. A document may be refused, or accepted and rendered.
   Anything else fails.
 - **Malformed numbers and duplicate keys.** These must be refused. The stage also fails
   if its duplicate-key builder stops producing a real `"key":value` pair.
 - **The API.** 9 hostile f64 values (±Inf, NaN, ±MAX, 1e20, the smallest denormal, -1 and -3) go through every f64
   argument of every constructor, setter and synthesize duration, and 5 hostile ids through
-  every enum argument. A call may refuse or succeed. A crash or hang fails.
+  every enum argument, particle count, grid size and field index. A call may refuse or succeed. A crash or hang fails.
 
 The run also fails if any entry point stops exercising documents, so it cannot pass by
 reaching nothing.

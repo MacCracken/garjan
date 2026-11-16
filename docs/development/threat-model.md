@@ -29,6 +29,10 @@ garjan does NOT trust:
   a downstream naad component happening to reject bad input. Since 2.6.3 it also
   refuses any state the public API cannot produce
   ([ADR-0010](../adr/0010-a-document-restores-only-states-the-api-can-produce.md))
+- **visualization field sizes** — since 2.7.0, a particle count or wind grid is refused
+  when negative or past `GARJAN_MAX_FIELD_POINTS` (2^20 points), and `nx * nz` is tested
+  without forming a product that could wrap
+  ([ADR-0012](../adr/0012-soorat-visualization-data-is-ported-ungated.md))
 
 ## Attack surface: deserialization
 
@@ -126,12 +130,13 @@ rule.
   refused each allocation in turn on every path:
   - the stdlib's `str_builder` and bayan's builder **exit** when an allocation is
     refused, so a `*_to_json` that runs out of memory terminates the host;
-  - naad's constructors and the `#derive` reader write through a refused allocation and
-    **fault**.
+  - the `#derive` reader writes through a refused allocation and **faults**. naad's
+    constructors did too, until naad 2.3.4 made them return `NAAD_ERR_ALLOCATION`: since
+    2.7.0 every refused allocation in a synth constructor ends in
+    `GARJAN_ERR_ALLOCATION`, 650 of 650 in the constructor sweep.
 
-  Each is listed for filing upstream in [`dependency-watch.md`](dependency-watch.md).
-  garjan checks every result those dependencies return, including `noise_new`, which
-  cannot fail yet.
+  The rest are listed for filing upstream in [`dependency-watch.md`](dependency-watch.md).
+  garjan checks every result those dependencies return.
 - garjan emits log events through sakshi but installs no sink; verbosity is a
   runtime setting (`sakshi_set_level`), not a build feature.
 

@@ -1,9 +1,10 @@
 # garjan.fcyr -- fuzz harness for the JSON deserialize boundary.
 #
 # `*_from_json_str` is garjan's only entry point taking fully attacker-controlled
-# input (docs/development/threat-model.md). This drives all 22 of them, the 21
-# synths plus the voice pool, with hostile documents derived from each one's own
-# `*_to_json` output, then renders whatever a document manages to restore.
+# input (docs/development/threat-model.md). This drives all 25 of them, the 21
+# synths, the voice pool and the three soorat fields, with hostile documents derived
+# from each one's own `*_to_json` output, then renders or reads whatever a document
+# manages to restore.
 #
 # Every case runs in its own forked child under a time and memory limit:
 #   - one crash must not end the run, so the remaining cases still report;
@@ -60,9 +61,14 @@ include "src/surf.cyr"
 include "src/texture.cyr"
 include "src/bridge.cyr"
 include "src/builder.cyr"
+include "src/soorat.cyr"
 
-var ENTRY_COUNT = 22;
+var ENTRY_COUNT = 25;
+var SYNTH_COUNT = 21;                        # entries 0..20 are synths
 var ENTRY_VOICE = 21;
+var ENTRY_PRECIP_FIELD = 22;                 # entries 22..24 are soorat's data fields
+var ENTRY_FIRE_EMITTER = 23;
+var ENTRY_WIND_FIELD = 24;
 
 var FUZZ_SEED = 0x6761726A616E;              # "garjan"
 var FUZZ_RANDOM_CASES = 3000;
@@ -124,6 +130,9 @@ fn entry_name(e) {
     if (e == 18) { return "creak"; }
     if (e == 19) { return "wingflap"; }
     if (e == 20) { return "whistle"; }
+    if (e == ENTRY_PRECIP_FIELD) { return "precipitation_field"; }
+    if (e == ENTRY_FIRE_EMITTER) { return "fire_emitter"; }
+    if (e == ENTRY_WIND_FIELD) { return "wind_field"; }
     return "voice_pool";
 }
 
@@ -151,6 +160,10 @@ fn entry_make(e, sr) {
     if (e == 18) { return creak_new(CREAK_HINGE, sr); }
     if (e == 19) { return wingflap_new(BIRD_SIZE_MEDIUM, sr); }
     if (e == 20) { return whistle_new(WHISTLE_PIPE, sr); }
+    var ten = f64_from(10);
+    if (e == ENTRY_PRECIP_FIELD) { return precipitation_field_snow(3, 0, 0, 0, ten, ten, ten, F64_HALF, F64_ONE, 0); }
+    if (e == ENTRY_FIRE_EMITTER) { return fire_emitter_from_intensity(F64_ONE, 0, F64_HALF, F64_HALF); }
+    if (e == ENTRY_WIND_FIELD) { return wind_field_gradient(3, 2, 0, F64_ONE, 0, F64_HALF, F64_ONE, ten, F64_ONE); }
     return voice_pool_new(4, STEAL_OLDEST);
 }
 
@@ -177,6 +190,9 @@ fn entry_dump(e, o, sb) {
     if (e == 18) { return creak_to_json(o, sb); }
     if (e == 19) { return wingflap_to_json(o, sb); }
     if (e == 20) { return whistle_to_json(o, sb); }
+    if (e == ENTRY_PRECIP_FIELD) { return precipitation_field_to_json(o, sb); }
+    if (e == ENTRY_FIRE_EMITTER) { return fire_emitter_to_json(o, sb); }
+    if (e == ENTRY_WIND_FIELD) { return wind_field_to_json(o, sb); }
     return voice_pool_to_json(o, sb);
 }
 
@@ -203,6 +219,9 @@ fn entry_load(e, json) {
     if (e == 18) { return creak_from_json_str(json); }
     if (e == 19) { return wingflap_from_json_str(json); }
     if (e == 20) { return whistle_from_json_str(json); }
+    if (e == ENTRY_PRECIP_FIELD) { return precipitation_field_from_json_str(json); }
+    if (e == ENTRY_FIRE_EMITTER) { return fire_emitter_from_json_str(json); }
+    if (e == ENTRY_WIND_FIELD) { return wind_field_from_json_str(json); }
     return voice_pool_from_json_str(json);
 }
 
@@ -266,11 +285,35 @@ fn entry_excite(e, o) {
     return 0;
 }
 
+# Reads every value a soorat field holds, through its accessors.
+fn read_field(e, o) {
+    var acc = 0;
+    var i = 0;
+    if (e == ENTRY_PRECIP_FIELD) {
+        while (i < precipitation_field_len(o)) {
+            var p = precipitation_field_particle(o, i);
+            acc = f64_add(acc, PrecipitationParticle_position_y(p));
+            acc = f64_add(acc, PrecipitationParticle_velocity_y(p));
+            acc = f64_add(acc, PrecipitationParticle_life(p));
+            i = i + 1;
+        }
+        return acc;
+    }
+    if (e == ENTRY_FIRE_EMITTER) { return f64_add(FireEmitter_flame_height(o), FireEmitter_ember_rate(o)); }
+    while (i < wind_field_len(o)) {
+        acc = f64_add(acc, f64_add(wind_field_vx(o, i), wind_field_vz(o, i)));
+        i = i + 1;
+    }
+    return acc;
+}
+
 # Renders a restored object and serializes it back, so hostile state reaches the
-# DSP loops and the writer as well as the loader.
+# DSP loops and the writer as well as the loader. A soorat field is read instead.
 fn exercise_object(e, o) {
     var sb = str_builder_new();
-    if (e == ENTRY_VOICE) {
+    if (e >= ENTRY_PRECIP_FIELD) {
+        sink = read_field(e, o);
+    } elif (e == ENTRY_VOICE) {
         sink = voice_pool_allocate(o, 1, 1);
         sink = voice_pool_tick(o);
         sink = voice_pool_active_count(o);
@@ -796,8 +839,8 @@ var HOSTILE_ID = 5;
 # One API call with hostile value `v` in argument slot `k`. Returns the object to render,
 # a negative code when refused, or 1 when there is nothing left to render.
 fn api_call(k, v, sr) {
-    if (k < ENTRY_COUNT - 1) { return entry_make(k, v); }             # 0..20: the sample rate
-    var j = k - (ENTRY_COUNT - 1);
+    if (k < SYNTH_COUNT) { return entry_make(k, v); }                 # 0..20: the sample rate
+    var j = k - SYNTH_COUNT;
     if (j == 0) { return fire_new(v, sr); }
     if (j == 1) { return thunder_new(v, sr); }
     if (j == 2) { return wind_new(v, F64_HALF, sr); }
@@ -821,9 +864,27 @@ fn api_call(k, v, sr) {
         return api_modes(mp4, sr);
     }
     if (j == 10) { var ex = exciter_new(EXCITATION_NOISE_BURST, 64, v); return api_excite(ex); }
+    var ten = f64_from(10);
+    var h = F64_HALF;
+    if (j == 11) { return api_field(ENTRY_PRECIP_FIELD, precipitation_field_rain(8, v, 0, 0, ten, ten, ten, h, 0, 0)); }
+    if (j == 12) { return api_field(ENTRY_PRECIP_FIELD, precipitation_field_rain(8, 0, 0, 0, ten, v, ten, h, 0, 0)); }
+    if (j == 13) { return api_field(ENTRY_PRECIP_FIELD, precipitation_field_rain(8, 0, 0, 0, ten, ten, ten, v, 0, 0)); }
+    if (j == 14) { return api_field(ENTRY_PRECIP_FIELD, precipitation_field_snow(8, 0, 0, 0, ten, ten, ten, h, v, 0)); }
+    if (j == 15) { return api_field(ENTRY_FIRE_EMITTER, fire_emitter_from_intensity(0, 0, 0, v)); }
+    if (j == 16) { return api_field(ENTRY_FIRE_EMITTER, fire_emitter_from_intensity(v, 0, 0, h)); }
+    if (j == 17) { return api_field(ENTRY_WIND_FIELD, wind_field_uniform(3, 2, v, 0, 0, v, v, 0)); }
+    if (j == 18) { return api_field(ENTRY_WIND_FIELD, wind_field_gradient(3, 2, 0, 0, 0, F64_ONE, v, ten, F64_ONE)); }
+    if (j == 19) { return api_field(ENTRY_WIND_FIELD, wind_field_gradient(3, 2, 0, 0, 0, F64_ONE, F64_ONE, v, v)); }
     return 1;
 }
-var API_F64_SLOTS = 11;
+var API_F64_SLOTS = 20;
+
+# Reads and serializes soorat field `o` of entry `e`, or passes its refusal on.
+fn api_field(e, o) {
+    if (garjan_is_err(o) == 1) { return o; }
+    exercise_object(e, o);
+    return 1;
+}
 
 # The same with a hostile id in an enum slot.
 fn api_call_id(k, v, sr) {
@@ -868,9 +929,25 @@ fn api_call_id(k, v, sr) {
         sink = voice_pool_release(vp3, v);
         return voice_pool_slot(vp3, v);
     }
+    # Counts and grid sizes: soorat caps them, so a hostile one is refused, not looped on.
+    var ten = f64_from(10);
+    if (k == 32) { return api_field(ENTRY_PRECIP_FIELD, precipitation_field_rain(v, 0, 0, 0, ten, ten, ten, 0, 0, 0)); }
+    if (k == 33) { return api_field(ENTRY_WIND_FIELD, wind_field_uniform(v, 2, 0, 0, 0, F64_ONE, F64_ONE, 0)); }
+    if (k == 34) { return api_field(ENTRY_WIND_FIELD, wind_field_gradient(2, v, 0, 0, 0, F64_ONE, 0, ten, F64_ONE)); }
+    if (k == 35) {
+        var pf = precipitation_field_rain(2, 0, 0, 0, ten, ten, ten, 0, 0, 0);
+        sink = precipitation_field_particle(pf, v);
+        return 1;
+    }
+    if (k == 36) {
+        var wf = wind_field_uniform(2, 2, 0, 0, 0, F64_ONE, F64_ONE, 0);
+        sink = wind_field_vz(wf, v);
+        sink = wind_field_vx(wf, v);
+        return 1;
+    }
     return 1;
 }
-var API_ID_SLOTS = 32;
+var API_ID_SLOTS = 37;
 
 # Builds modes and a bank from `props` and renders a block through it.
 fn api_modes(props, sr) {
@@ -900,7 +977,7 @@ fn api_exercise(stage, k, i) {
     if (stage == 0) {
         r = api_call(k, hostile_f64(i), sr);
         if (garjan_is_err(r) == 1) { return CHILD_REFUSED; }
-        if (k < ENTRY_COUNT - 1) { exercise_object(k, r); }
+        if (k < SYNTH_COUNT) { exercise_object(k, r); }
         return CHILD_EXERCISED;
     }
     if (stage == 1) {
@@ -979,7 +1056,7 @@ fn run_api(stage, k, i) {
 # nothing exercised, so it cannot pass by reaching nothing.
 fn api_stage() {
     var k = 0;
-    while (k < ENTRY_COUNT - 1 + API_F64_SLOTS) {
+    while (k < SYNTH_COUNT + API_F64_SLOTS) {
         var i = 0;
         while (i < HOSTILE_F64) { run_api(0, k, i); i = i + 1; }
         k = k + 1;
@@ -991,7 +1068,7 @@ fn api_stage() {
         k = k + 1;
     }
     k = 0;
-    while (k < ENTRY_COUNT - 1) {
+    while (k < SYNTH_COUNT) {
         var i3 = 0;
         while (i3 < HOSTILE_F64) { run_api(2, k, i3); run_api(3, k, i3); i3 = i3 + 1; }
         k = k + 1;

@@ -1,0 +1,332 @@
+# soorat.tcyr -- tests for src/soorat.cyr, the port of rust-old/src/integration/soorat.rs.
+#
+# The first ten groups are Rust's ten unit tests, in the order soorat.rs declares them.
+# The rest pin what the port adds or decides (ADR-0012): exact values, the size cap,
+# refused negative sizes, f32::signum's zero and NaN cases, the accessors, and the codecs.
+include "src/error.cyr"
+include "src/logging.cyr"
+include "src/soorat.cyr"
+
+# Returns 1 if `a` and `b` differ by less than `eps`, otherwise 0.
+fn near(a, b, eps) { return f64_lt(f64_abs(f64_sub(a, b)), eps); }
+
+# Returns 1 if `a` and `b` differ by less than 0.01, Rust's tolerance in these tests.
+fn approx(a, b) { return near(a, b, garjan_frac(1, 100)); }
+
+# Returns 1 if `a` and `b` agree to 1e-12: the same formula, possibly regrouped.
+fn exact(a, b) { return near(a, b, garjan_frac(1, 1000000000000)); }
+
+# Serializes `f` as `kind` (0 precipitation field, 1 fire emitter, 2 wind field).
+# Returns the document, or 0 if the writer failed.
+fn doc_of(kind, f) {
+    var sb = str_builder_new();
+    var e = 0;
+    if (kind == 0) { e = precipitation_field_to_json(f, sb); }
+    if (kind == 1) { e = fire_emitter_to_json(f, sb); }
+    if (kind == 2) { e = wind_field_to_json(f, sb); }
+    if (garjan_is_err(e) == 1) { return 0; }
+    return str_data(str_builder_build(sb));
+}
+
+# Joins four cstrings into a new one.
+fn cat4(a, b, c, d) {
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, a);
+    str_builder_add_cstr(sb, b);
+    str_builder_add_cstr(sb, c);
+    str_builder_add_cstr(sb, d);
+    return str_data(str_builder_build(sb));
+}
+
+# Loads a precipitation document made of `head` and a valid remainder. Returns 1 if refused.
+fn precip_refused(head) {
+    var tail = ",\"wind_bias_x\":0.0,\"wind_bias_z\":0.0,\"particles\":[]}";
+    return garjan_is_err(precipitation_field_from_json_str(cat4(head, tail, "", "")));
+}
+
+# Loads a precipitation document whose particle array is `arr`. Returns 1 if refused.
+fn particles_refused(arr) {
+    var head = "{\"is_snow\":0,\"intensity\":0.5,\"wind_bias_x\":0.0,\"wind_bias_z\":0.0,\"particles\":";
+    return garjan_is_err(precipitation_field_from_json_str(cat4(head, arr, "}", "")));
+}
+
+# Loads a wind document with dimension members `dims` and velocity array `vel`. Returns 1 if refused.
+fn wind_refused(dims, vel) {
+    var mid = ",\"origin_x\":0.0,\"origin_y\":0.0,\"origin_z\":0.0,\"spacing\":1.0,\"speed\":1.0,\"velocities\":";
+    return garjan_is_err(wind_field_from_json_str(cat4(dims, mid, vel, "}")));
+}
+
+# Returns `doc` from its first comma on: every member after the first.
+fn after_first(doc) {
+    var i = 0;
+    while (load8(doc + i) != 0 && load8(doc + i) != 44) { i = i + 1; }
+    return doc + i;
+}
+
+# Runs the suite. Returns the failure count, used as the exit code.
+fn main() {
+    alloc_init();
+    sakshi_set_level(SK_ERROR);
+    var z = 0;
+    var ten = f64_from(10);
+    var twenty = f64_from(20);
+    var h = F64_HALF;
+
+    # ---- Rust's ten tests ----
+    test_group("rain_field_particle_count");
+    var r100 = precipitation_field_rain(100, z, z, z, ten, twenty, ten, h, f64_from(2), z);
+    assert_eq(precipitation_field_len(r100), 100, "100 particles");
+    assert_eq(PrecipitationField_is_snow(r100), 0, "rain is not snow");
+    assert(approx(PrecipitationField_intensity(r100), h) == 1, "intensity 0.5");
+
+    test_group("rain_field_empty");
+    var r0 = precipitation_field_rain(0, z, z, z, ten, ten, ten, h, z, z);
+    assert_eq(garjan_is_err(r0), 0, "an empty field is a field");
+    assert_eq(precipitation_field_len(r0), 0, "no particles");
+
+    test_group("snow_field_slower");
+    var rr = precipitation_field_rain(10, z, z, z, ten, twenty, ten, h, z, z);
+    var ss = precipitation_field_snow(10, z, z, z, ten, twenty, ten, h, z, z);
+    assert_eq(PrecipitationField_is_snow(ss), 1, "snow is snow");
+    var rp0 = precipitation_field_particle(rr, 0);
+    var sp0 = precipitation_field_particle(ss, 0);
+    assert(f64_lt(f64_abs(PrecipitationParticle_velocity_y(sp0)), f64_abs(PrecipitationParticle_velocity_y(rp0))) == 1,
+      "snow falls slower");
+    assert(f64_gt(PrecipitationParticle_size(sp0), PrecipitationParticle_size(rp0)) == 1, "snow is larger");
+
+    test_group("fire_emitter_low_intensity");
+    var fl = fire_emitter_from_intensity(z, z, z, z);
+    assert_eq(FireEmitter_intensity(fl), 0, "intensity 0.0");
+    assert(f64_ge(FireEmitter_color_temperature_k(fl), f64_from(1200)) == 1, "at least 1200 K");
+    assert(f64_gt(FireEmitter_flame_height(fl), z) == 1, "a flame even at 0");
+
+    test_group("fire_emitter_high_intensity");
+    var fh = fire_emitter_from_intensity(f64_from(5), z, f64_from(3), F64_ONE);
+    assert_eq(FireEmitter_intensity(fh), F64_ONE, "intensity 1.0");
+    assert(f64_gt(FireEmitter_color_temperature_k(fh), f64_from(1500)) == 1, "above 1500 K");
+    assert(f64_gt(FireEmitter_flame_height(fh), F64_ONE) == 1, "taller than 1 m");
+    assert(f64_gt(FireEmitter_ember_rate(fh), z) == 1, "throws embers");
+
+    test_group("fire_emitter_clamps");
+    assert_eq(FireEmitter_intensity(fire_emitter_from_intensity(z, z, z, f64_from(5))), F64_ONE, "5.0 clamps to 1.0");
+
+    test_group("wind_field_uniform");
+    var wu = wind_field_uniform(4, 4, z, z, z, F64_ONE, f64_from(5), z);
+    assert_eq(wind_field_len(wu), 16, "16 points");
+    assert_eq(WindField_nx(wu), 4, "nx 4");
+    assert_eq(WindField_nz(wu), 4, "nz 4");
+    var wbad = 0;
+    var wi = 0;
+    while (wi < 16) {
+        if (f64_eq(wind_field_vx(wu, wi), f64_from(5)) == 0) { wbad = wbad + 1; }
+        if (f64_eq(wind_field_vz(wu, wi), 0) == 0) { wbad = wbad + 1; }
+        wi = wi + 1;
+    }
+    assert_eq(wbad, 0, "every point is [5, 0]");
+    assert(approx(WindField_speed(wu), f64_from(5)) == 1, "speed 5");
+
+    test_group("wind_field_gradient");
+    var wg = wind_field_gradient(5, 3, z, z, z, f64_from(2), F64_ONE, ten, F64_ONE);
+    assert_eq(wind_field_len(wg), 15, "15 points");
+    assert(f64_gt(f64_abs(wind_field_vz(wg, 4)), f64_abs(wind_field_vz(wg, 0))) == 1, "last column faster than first");
+
+    test_group("wind_field_single_cell");
+    var w1 = wind_field_uniform(1, 1, z, z, z, F64_ONE, f64_from(3), f64_from(4));
+    assert_eq(wind_field_len(w1), 1, "1 point");
+    assert(approx(WindField_speed(w1), f64_from(5)) == 1, "3-4-5 triangle");
+
+    test_group("precipitation_particles_within_bounds");
+    var m5 = f64_from(0 - 5);
+    var p5 = f64_from(5);
+    var rb = precipitation_field_rain(50, m5, z, m5, p5, twenty, p5, h, z, z);
+    var ob = 0;
+    var bi = 0;
+    while (bi < 50) {
+        var bp = precipitation_field_particle(rb, bi);
+        if (f64_lt(PrecipitationParticle_position_x(bp), m5) == 1) { ob = ob + 1; }
+        if (f64_gt(PrecipitationParticle_position_x(bp), p5) == 1) { ob = ob + 1; }
+        if (f64_lt(PrecipitationParticle_position_y(bp), z) == 1) { ob = ob + 1; }
+        if (f64_gt(PrecipitationParticle_position_y(bp), twenty) == 1) { ob = ob + 1; }
+        if (f64_lt(PrecipitationParticle_position_z(bp), m5) == 1) { ob = ob + 1; }
+        if (f64_gt(PrecipitationParticle_position_z(bp), p5) == 1) { ob = ob + 1; }
+        bi = bi + 1;
+    }
+    assert_eq(ob, 0, "all 50 inside the box");
+
+    # ---- exact values: the formulas, not just their direction ----
+    test_group("rain values");
+    var p0 = precipitation_field_particle(r100, 0);
+    assert_eq(PrecipitationParticle_position_x(p0), 0, "particle 0 sits on the min corner");
+    assert(exact(PrecipitationParticle_velocity_x(p0), garjan_frac(6, 10)) == 1, "drift = wind_x * 0.3");
+    assert(exact(PrecipitationParticle_velocity_y(p0), garjan_frac(0 - 65, 10)) == 1, "fall = -4 - 0.5 * 5");
+    assert(exact(PrecipitationParticle_size(p0), garjan_frac(3, 1000)) == 1, "size = 0.001 + 0.5 * 0.004");
+    assert_eq(PrecipitationParticle_life(p0), 0, "life = y - min_y");
+    var p1 = precipitation_field_particle(r100, 1);
+    assert(exact(PrecipitationParticle_position_x(p1), garjan_frac(713, 1000)) == 1, "x = fract(0.01 * 7.13) * 10");
+    assert(exact(PrecipitationParticle_position_y(p1), garjan_frac(674, 1000)) == 1, "y = fract(0.01 * 3.37) * 20");
+    assert(exact(PrecipitationParticle_life(p1), PrecipitationParticle_position_y(p1)) == 1, "life = y - min_y");
+    var p50 = precipitation_field_particle(r100, 50);
+    assert(exact(PrecipitationParticle_position_z(p50), garjan_frac(8950, 1000)) == 1, "z = fract(0.5 * 11.79) * 10");
+    # Rust sizes and speeds from the UNCLAMPED intensity, and clamps only the stored one.
+    var r2 = precipitation_field_rain(1, z, z, z, ten, ten, ten, f64_from(2), z, z);
+    assert_eq(PrecipitationField_intensity(r2), F64_ONE, "stored intensity clamps");
+    assert(exact(PrecipitationParticle_velocity_y(precipitation_field_particle(r2, 0)), f64_from(0 - 14)) == 1,
+      "fall speed uses the raw intensity");
+    assert_eq(PrecipitationField_wind_bias_x(r100), f64_from(2), "wind bias x");
+
+    test_group("snow values");
+    var sv = precipitation_field_particle(precipitation_field_snow(100, z, z, z, ten, twenty, ten, h, z, z), 0);
+    assert(exact(PrecipitationParticle_velocity_y(sv), garjan_frac(0 - 13, 10)) == 1, "snow falls at 0.2x");
+    assert(exact(PrecipitationParticle_size(sv), garjan_frac(9, 1000)) == 1, "snow is 3x the size");
+
+    test_group("fire values");
+    var fm = fire_emitter_from_intensity(F64_ONE, f64_from(2), f64_from(3), h);
+    assert_eq(FireEmitter_position_y(fm), f64_from(2), "position kept");
+    assert(exact(FireEmitter_color_temperature_k(fm), f64_from(1500)) == 1, "1200 + 0.5 * 600");
+    assert(exact(FireEmitter_flame_height(fm), garjan_frac(13, 10)) == 1, "0.3 + 0.5 * 2");
+    assert(exact(FireEmitter_base_radius(fm), garjan_frac(35, 100)) == 1, "0.1 + 0.5 * 0.5");
+    assert(exact(FireEmitter_ember_rate(fm), f64_from(25)) == 1, "0.5 * 50");
+    assert_eq(FireEmitter_intensity(fire_emitter_from_intensity(z, z, z, f64_from(0 - 1))), 0, "-1 clamps to 0");
+
+    test_group("wind gradient values and f32::signum");
+    assert_eq(wind_field_vz(wg, 0), F64_ONE, "column 0 at min_speed");
+    assert_eq(wind_field_vz(wg, 4), ten, "last column at max_speed");
+    assert_eq(wind_field_vz(wg, 9), ten, "uniform along z");
+    assert_eq(wind_field_vx(wg, 2), 0, "no x component");
+    assert(exact(WindField_speed(wg), garjan_frac(55, 10)) == 1, "speed is the mean");
+    var wn = wind_field_gradient(2, 1, z, z, z, F64_ONE, F64_ONE, ten, f64_from(0 - 3));
+    assert_eq(wind_field_vz(wn, 1), f64_from(0 - 10), "a negative direction blows -z");
+    var wpz = wind_field_gradient(2, 1, z, z, z, F64_ONE, F64_ONE, ten, 0);
+    assert_eq(wind_field_vz(wpz, 1), ten, "+0.0 is signum +1");
+    var wmz = wind_field_gradient(2, 1, z, z, z, F64_ONE, F64_ONE, ten, f64_neg(0));
+    assert_eq(wind_field_vz(wmz, 1), f64_from(0 - 10), "-0.0 is signum -1");
+    var nan = f64_div(0, 0);
+    var wnan = wind_field_gradient(2, 1, z, z, z, F64_ONE, F64_ONE, ten, nan);
+    assert_eq(garjan_is_finite(wind_field_vz(wnan, 0)), 0, "a NaN direction gives NaN, as in Rust");
+    var w1x = wind_field_gradient(1, 2, z, z, z, F64_ONE, F64_ONE, ten, F64_ONE);
+    assert(exact(wind_field_vz(w1x, 1), garjan_frac(55, 10)) == 1, "one column sits at t = 0.5");
+
+    # ---- sizes: refused, not truncated or wrapped (ADR-0012) ----
+    test_group("size limits");
+    var cap = GARJAN_MAX_FIELD_POINTS;
+    assert_eq(precipitation_field_rain(0 - 1, z, z, z, ten, ten, ten, h, z, z), GARJAN_ERR_INVALID_PARAMETER,
+      "a negative count is refused");
+    assert_eq(precipitation_field_rain(cap + 1, z, z, z, ten, ten, ten, h, z, z), GARJAN_ERR_INVALID_PARAMETER,
+      "a count past the cap is refused");
+    assert_eq(precipitation_field_snow(0 - 1, z, z, z, ten, ten, ten, h, z, z), GARJAN_ERR_INVALID_PARAMETER,
+      "snow passes the refusal on");
+    assert_eq(wind_field_uniform(0 - 1, 4, z, z, z, F64_ONE, z, z), GARJAN_ERR_INVALID_PARAMETER, "negative nx");
+    assert_eq(wind_field_gradient(4, 0 - 1, z, z, z, F64_ONE, z, z, z), GARJAN_ERR_INVALID_PARAMETER, "negative nz");
+    assert_eq(wind_field_uniform(cap, 2, z, z, z, F64_ONE, z, z), GARJAN_ERR_INVALID_PARAMETER, "past the cap");
+    assert_eq(wind_field_uniform(1 << 32, 1 << 32, z, z, z, F64_ONE, z, z), GARJAN_ERR_INVALID_PARAMETER,
+      "a product that wraps i64 is refused");
+    var wcap = wind_field_uniform(cap / 4, 4, z, z, z, F64_ONE, F64_ONE, z);
+    assert_eq(wind_field_len(wcap), cap, "exactly the cap is accepted");
+    assert_eq(wind_field_len(wind_field_uniform(0, 5, z, z, z, F64_ONE, z, z)), 0, "a 0-wide grid is empty");
+
+    test_group("accessors refuse out-of-range indices");
+    assert_eq(precipitation_field_particle(r100, 0 - 1), 0, "particle -1");
+    assert_eq(precipitation_field_particle(r100, 100), 0, "particle len");
+    assert_eq(wind_field_vx(wu, 16), 0, "vx at len");
+    assert_eq(wind_field_vz(wu, 0 - 1), 0, "vz at -1");
+
+    # ---- codecs ----
+    test_group("round trips are byte-identical");
+    var j0 = doc_of(0, r100);
+    var r100b = precipitation_field_from_json_str(j0);
+    assert_eq(garjan_is_err(r100b), 0, "precipitation field loads");
+    assert(memeq(j0, doc_of(0, r100b), strlen(j0)) == 1, "precipitation field round-trips");
+    assert_eq(precipitation_field_len(r100b), 100, "with all 100 particles");
+    # The derived writer must be exact, not just stable: every word of every particle.
+    var rt_bad = 0;
+    var rt_i = 0;
+    while (rt_i < 100) {
+        var rt_a = precipitation_field_particle(r100, rt_i);
+        var rt_b = precipitation_field_particle(r100b, rt_i);
+        var rt_w = 0;
+        while (rt_w < 8) {
+            if (load64(rt_a + rt_w * 8) != load64(rt_b + rt_w * 8)) { rt_bad = rt_bad + 1; }
+            rt_w = rt_w + 1;
+        }
+        rt_i = rt_i + 1;
+    }
+    assert_eq(rt_bad, 0, "all 800 particle words restore bit for bit");
+    var wt_src = WindField_velocities(wg);
+    var wt_dst = WindField_velocities(wind_field_from_json_str(doc_of(2, wg)));
+    var wt_bad = 0;
+    var wt_i = 0;
+    while (wt_i < vec_len(wt_src)) {
+        if (vec_get(wt_src, wt_i) != vec_get(wt_dst, wt_i)) { wt_bad = wt_bad + 1; }
+        wt_i = wt_i + 1;
+    }
+    assert_eq(wt_bad, 0, "every wind velocity restores bit for bit");
+    assert_eq(PrecipitationField_is_snow(precipitation_field_from_json_str(doc_of(0, ss))), 1, "is_snow survives");
+    assert_eq(precipitation_field_len(precipitation_field_from_json_str(doc_of(0, r0))), 0, "an empty field");
+    var j1 = doc_of(1, fm);
+    var fmb = fire_emitter_from_json_str(j1);
+    assert_eq(garjan_is_err(fmb), 0, "fire emitter loads");
+    assert(memeq(j1, doc_of(1, fmb), strlen(j1)) == 1, "fire emitter round-trips");
+    var j2 = doc_of(2, wg);
+    var wgb = wind_field_from_json_str(j2);
+    assert_eq(garjan_is_err(wgb), 0, "wind field loads");
+    assert(memeq(j2, doc_of(2, wgb), strlen(j2)) == 1, "wind field round-trips");
+    assert_eq(wind_field_vz(wgb, 14), ten, "with its velocities");
+    var jz = doc_of(2, wind_field_uniform(0, 3, z, z, z, F64_ONE, z, z));
+    assert_eq(wind_field_len(wind_field_from_json_str(jz)), 0, "an empty grid round-trips");
+
+    test_group("hostile precipitation documents are refused");
+    assert_eq(precip_refused("{\"is_snow\":0,\"intensity\":0.5"), 0, "the control document loads");
+    var pr = 0;
+    pr = pr + precip_refused("{\"is_snow\":2,\"intensity\":0.5");       # a bool in Rust
+    pr = pr + precip_refused("{\"is_snow\":0.0,\"intensity\":0.5");     # a float in a bool
+    pr = pr + precip_refused("{\"is_snow\":0,\"intensity\":1e999");     # +Inf
+    pr = pr + precip_refused("{\"is_snow\":0,\"intensity\":null");
+    pr = pr + precip_refused("{\"is_snow\":0");                         # intensity missing
+    pr = pr + particles_refused("{}");                                 # not an array
+    pr = pr + particles_refused("[7]");                                # not an object
+    pr = pr + particles_refused("[{\"size\":1.0}]");                   # members missing
+    pr = pr + garjan_is_err(precipitation_field_from_json_str(
+        "{\"is_snow\":0,\"intensity\":0.5,\"wind_bias_x\":0.0,\"wind_bias_z\":0.0}"));
+    pr = pr + garjan_is_err(precipitation_field_from_json_str("[]"));
+    pr = pr + garjan_is_err(precipitation_field_from_json_str("{"));
+    assert_eq(pr, 11, "11 refused");
+    var gp = doc_of(0, precipitation_field_rain(1, z, z, z, ten, ten, ten, h, z, z));
+    var gpa = gp;
+    while (load8(gpa) != 91) { gpa = gpa + 1; }    # to the particle array's '['
+    var gpl = strlen(gpa);
+    store8(gpa + gpl - 1, 0);                        # without the document's closing '}'
+    assert_eq(particles_refused(gpa), 0, "a real one-particle array loads");
+    var bad1 = "[{\"position_x\":0.0,\"position_y\":0.0,\"position_z\":0.0,\"velocity_x\":0.0,";
+    var bad2 = "\"velocity_y\":-1e999,\"velocity_z\":0.0,\"size\":0.003,\"life\":0.0}]";
+    assert_eq(particles_refused(cat4(bad1, bad2, "", "")), 1, "a non-finite particle member is refused");
+
+    test_group("hostile emitter documents are refused");
+    var fdoc = doc_of(1, fl);
+    assert_eq(garjan_is_err(fire_emitter_from_json_str(fdoc)), 0, "the control emitter loads");
+    var fr = 0;
+    fr = fr + garjan_is_err(fire_emitter_from_json_str("{\"position_x\":0.0}"));
+    fr = fr + garjan_is_err(fire_emitter_from_json_str(cat4("{\"position_x\":\"a\"", after_first(fdoc), "", "")));
+    fr = fr + garjan_is_err(fire_emitter_from_json_str(cat4("{\"position_x\":1e999", after_first(fdoc), "", "")));
+    fr = fr + garjan_is_err(fire_emitter_from_json_str("{}"));
+    assert_eq(fr, 4, "4 refused");
+
+    test_group("hostile wind documents are refused");
+    var one = "[{\"vx\":1.0,\"vz\":0.0}]";
+    assert_eq(wind_refused("{\"nx\":1,\"nz\":1", one), 0, "the control wind field loads");
+    var wr = 0;
+    wr = wr + wind_refused("{\"nx\":2,\"nz\":1", one);                            # 2 points named, 1 given
+    wr = wr + wind_refused("{\"nx\":-1,\"nz\":-1", one);                          # usize in Rust
+    wr = wr + wind_refused("{\"nx\":1048577,\"nz\":1", "[]");                     # past the cap
+    wr = wr + wind_refused("{\"nx\":4294967296,\"nz\":4294967296", "[]");         # wraps i64
+    wr = wr + wind_refused("{\"nx\":1.0,\"nz\":1", one);                          # a float in a usize
+    wr = wr + wind_refused("{\"nx\":1,\"nz\":1", "[{\"vx\":1.0}]");               # vz missing
+    wr = wr + wind_refused("{\"nx\":1,\"nz\":1", "[{\"vx\":1.0,\"vz\":1e999}]");  # +Inf
+    wr = wr + wind_refused("{\"nx\":1,\"nz\":1", "[[1.0,0.0]]");                  # Rust's shape, not this one
+    wr = wr + wind_refused("{\"nx\":1,\"nz\":1", "7");                            # not an array
+    assert_eq(wr, 9, "9 refused");
+
+    return assert_summary();
+}
+
+var ec = main();
+syscall(60, ec);

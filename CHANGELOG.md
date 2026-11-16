@@ -5,6 +5,111 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.7.0] - Port closure
+
+The port's last Rust module, the three items that waited on dhvani's pins, the Rust tests
+the port had dropped, and the newest naad, hisab and goonj. cyrius stays **6.7.18**, still
+its newest release. **All 21 audio hashes match 2.6.3**, and so does every synth's
+serialized document and its restored output. dhvani can take this bundle without moving
+anything else.
+
+### Added
+
+- **`src/soorat.cyr`: visualization data for soorat**
+  ([ADR-0012](docs/adr/0012-soorat-visualization-data-is-ported-ungated.md)). It ports
+  `rust-old/src/integration/soorat.rs`, the last unported module, without waiting on soorat:
+  the module is plain data and never called soorat.
+  - `precipitation_field_rain` and `_snow` build a field of `PrecipitationParticle`s,
+    `fire_emitter_from_intensity` a `FireEmitter`, and `wind_field_uniform` and `_gradient`
+    a `WindField`. Accessors: `precipitation_field_len` / `_particle`, `wind_field_len` /
+    `_vx` / `_vz`, and the derived `Type_field` ones.
+  - Each type has `*_to_json` and `*_from_json_str`. The loaders refuse a missing member, a
+    non-finite number, an `is_snow` other than 0 or 1, and a wind field whose velocity count
+    is not `nx * nz`.
+  - A field holds at most `GARJAN_MAX_FIELD_POINTS` (2^20) points. A negative count or grid
+    size, or a larger one, is refused, and `nx * nz` is tested without forming a product
+    that could wrap. Rust had no bound.
+  - `[f32; N]` fields and arguments are flattened (`position_x`/`_y`/`_z`, `nx`/`nz`), so
+    the JSON shape differs from Rust's.
+- **`voice_pool_next_active(p, start)`**, the port of `VoicePool::active_voices`. Rust
+  returned an iterator; this returns the next active slot index, or `VOICE_NONE`, and
+  allocates nothing.
+- **The Rust tests the port had dropped or weakened.** An independent audit of `rust-old/`
+  matched every `integration.rs` test by name and found 11 with no counterpart and about
+  15 weakened. `tests/garjan.tcyr` now ports them, 413 → 506 assertions:
+  - the modal bank's Nyquist guard, reset and impulse decay; the half-sine exciter;
+    impact velocity, shatter debris and determinism; `MaterialModeConfig` serde; a
+    triggered footstep; the voice pool's ageing, stealing and active-voice walk;
+  - deterministic replay of all nine synths `integration.rs` replays, where the port
+    replayed two;
+  - **every variant of friction, creak, rolling, whoosh, whistle, insect, wingflap,
+    underwater and surf makes sound**, as `integration.rs` asserted. `renders_ok` only
+    checked finiteness, so a variant gone silent would have passed;
+  - the bridge's edge cases: wind at 0, 10, 20 and 40 m/s, fire at 500 and 3000 K, threat
+    levels 0 and 5, and the distance-gain clamp.
+
+  All of them pass: the port had not regressed, it was under-tested. Only
+  `test_serde_roundtrip_modal_bank` and `test_serde_roundtrip_exciter` remain, because
+  the port has no standalone codec for either. The roadmap's 2.8.0 decides.
+- `tests/soorat.tcyr` (90 assertions): Rust's ten soorat tests, plus exact values, the size
+  limits, f32::signum's zero and NaN cases, byte- and bit-identical round trips, and 25
+  hostile documents.
+- **`cyrius fuzz` covers the three soorat loaders and constructors**: 25 entry points, 20
+  f64 slots and 37 id slots. The run grows from 25,672 cases to 26,927.
+- `tests/naad_failure.tcyr` also checks naad's real `NAAD_ERR_ALLOCATION` code.
+
+### Changed
+
+- **`garjan_json_get` calls `bayan_json_v_obj_get_by_cstr`**, no longer allocating a `Str`
+  per lookup. It went through the Str lookup because `_by_cstr` does not exist before cyrius
+  6.6.13, and dhvani was on 6.6.10.
+- **`whistle` calls naad's `filter_svf_process_sample_into`**, with its output on the
+  stack, and `whistle_svf_band_pass`, the copy of naad's filter step, is gone with its
+  parity test. naad has had the `_into` form since 2.3.2. Output is bit-identical, and the
+  benchmark is 3.6% slower, because naad's step also computes the two outputs whistle
+  discards.
+- **6.7.x syntax is allowed in `src/`**: `const` for tables, `bool`, and `!`. It was held
+  back for dhvani's 6.6.10. Nothing is converted for its own sake.
+- `garjan_json_open` accepts an array under `particles` and `velocities`, as it did under
+  `slots`, through the new `garjan_json_array_key`.
+- The roadmap is reorganized around what each item waits on: 2.7.1 (ready), 2.8.0 (a
+  decision), 2.9.x (performance that changes samples), watch items and 3.0.0. The soorat
+  gate is gone.
+
+### Dependencies
+
+- **naad 2.3.3 → 2.3.5, hisab 3.4.1 → 3.5.0, goonj 2.3.1 → 2.3.2**, each its project's
+  newest tag, and each pinning the others' versions. None of the 12 dependency functions
+  garjan calls changed signature, and no audio hash moved.
+  - naad 2.3.4 fixes upstream items U1 and U1b: its constructors return
+    `NAAD_ERR_ALLOCATION` on a refused allocation instead of writing through it. garjan's
+    checks already handled a negative result, so nothing in `src/` changed. Refusing each
+    allocation of every synth constructor in turn, 650 cases, faulted 312 times against
+    naad 2.3.3 and never against 2.3.5.
+  - naad 2.3.4 renamed `power_spectrum` to `naad_power_spectrum`. garjan never called it.
+- **sakshi is a stdlib leaf**, no longer a `[deps.sakshi]` package, because hisab 3.4.2
+  dropped its package. The bytes are the same 2.5.10. The lock drops sakshi's row.
+- The floor for garjan's dep set is still cyrius 6.7.2, re-measured.
+
+### Verified
+
+- **Bit-identical across the bump**: all 21 audio hashes, every synth's `*_to_json`
+  bytes, and the block each restored synth renders.
+- **dhvani**, on its own pins (cyrius 6.7.18, naad 2.3.3, hisab 3.4.1, goonj 2.3.1) with
+  this bundle: environment 10/10, bundle, bundle_synth, integration 41/41 and
+  integration_advanced 125/125 pass, and its main binary builds with no undefined
+  function. A canary proved the 2.7.0 bundle was the one under test.
+- **Symbol collisions**: none across garjan's 534 names and the 45 vendored files. Across
+  dhvani's closure, one: prani's `struct DcBlocker`. It is harmless today and listed for
+  2.7.1.
+- **Revert proof**: each of the soorat module's 10 guards, reverted alone, fails
+  `tests/soorat.tcyr`. Three entries first added to `garjan_json_open`'s shared key lists
+  were caught by nothing, because the soorat loaders already refuse those values, and were
+  removed.
+- `cyrius audit` exits 0, the build has no warnings, `cyrius distlib --check` is in sync,
+  and the suite is 35 suites and 1,120 assertions, up from 34 and 936. The 26 benchmarks
+  are flat, median -0.2%.
+
 ## [2.6.3] - The P(-1) sweep
 
 Audit, hardening and refactor release, with no toolchain or dependency change. It is the

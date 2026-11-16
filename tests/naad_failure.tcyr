@@ -1,8 +1,8 @@
 # naad_failure.tcyr -- a failed naad noise generator reaches the caller as an error.
 #
-# naad 2.3.3's noise_new cannot fail: on a refused allocation it writes through the null
-# pointer and faults (docs/development/dependency-watch.md). Once naad checks that
-# allocation it will return a failure, and garjan must not store that failure as a
+# Since naad 2.3.4, noise_new returns NAAD_ERR_ALLOCATION (-6) on a refused allocation.
+# Through naad 2.3.3 it wrote through the null pointer and faulted instead (U1 in
+# docs/development/dependency-watch.md). garjan must not store that failure as a
 # component pointer, which is what all 28 call sites did before 2.6.3. ADR-0005 promises
 # an error code instead.
 #
@@ -91,6 +91,11 @@ fn main() {
     NF_RESULT = NAAD_ERR_INVALID_PARAMETER;
     check_all("all 21 constructors refuse a naad error");
     assert_eq(garjan_noise_new(NOISE_WHITE, 1), GARJAN_ERR_ALLOCATION, "a naad error is reported the same way");
+
+    test_group("naad's own refused-allocation code is an error, not a pointer");
+    NF_RESULT = NAAD_ERR_ALLOCATION;
+    check_all("all 21 constructors refuse NAAD_ERR_ALLOCATION");
+    assert_eq(garjan_noise_new(NOISE_WHITE, 1), GARJAN_ERR_ALLOCATION, "naad's code maps to GARJAN_ERR_ALLOCATION");
 
     return assert_summary();
 }

@@ -12,12 +12,14 @@ versions are in [`state.md`](state.md) — this file is the *why* and the
 ## The flattened-namespace constraint (read this first)
 
 garjan compiles `dist/garjan.cyr` together with the *monolithic dist bundles*
-of naad, hisab, goonj and sakshi. Everything lands in **one flat namespace**.
+of naad, hisab and goonj, and the stdlib leaves, sakshi among them. Everything lands in
+**one flat namespace**, and in a consumer it shares that namespace with every other
+bundle the consumer links.
 Two consequences drive every rule below:
 
-1. **Transitive pins must agree.** garjan re-declares hisab, goonj and sakshi
-   itself, even though naad pulls them — because the bundle resolves those
-   symbols from *this* manifest. If garjan's hisab tag differs from the one
+1. **Transitive pins must agree.** garjan re-declares hisab and goonj itself, even
+   though naad pulls them — because the bundle resolves those symbols from *this*
+   manifest. (sakshi was a third until 2.7.0; it is a stdlib leaf now.) If garjan's hisab tag differs from the one
    naad was built against, you get the wrong hisab. On any bump, read each
    dependency's own `cyrius.cyml` and match it:
 
@@ -26,17 +28,30 @@ Two consequences drive every rule below:
    ```
 
 2. **A duplicate top-level `var` draws NO diagnostic** from cycc or cyrlint —
-   it shadows silently. Duplicate `fn`s are caught, `var`s are not. Re-run the
-   collision audit on every dependency bump:
+   it shadows silently. A duplicate `fn` draws only a warning, `duplicate fn 'x' (last
+   definition wins)`, and the build still reports `OK`. Re-run the collision audit on
+   every dependency bump. Match `const`, `struct` and `enum` too, with an optional
+   `pub`/`public` prefix, and every enum member: naad 2.3.4 found that a
+   `^(fn|var)` pattern saw only 1,673 of hisab's 2,783 top-level names.
 
    ```sh
-   grep -hoE '^(fn|var) [A-Za-z_][A-Za-z0-9_]*' src/*.cyr | awk '{print $2}' | sort -u > /tmp/g.txt
-   for d in naad hisab goonj sakshi bayan ganita math; do
-     echo "$d: $(comm -12 /tmp/g.txt <(grep -hoE '^(fn|var) [A-Za-z_][A-Za-z0-9_]*' lib/$d.cyr | awk '{print $2}' | sort -u) | wc -l)"
+   pat='^(pub(lic)? )?(fn|var|const|struct|enum) [A-Za-z_][A-Za-z0-9_]*'
+   grep -hoE "$pat" src/*.cyr | awk '{print $NF}' | sort -u > /tmp/g.txt
+   for f in lib/*.cyr; do
+     n=$(comm -12 /tmp/g.txt <(grep -hoE "$pat" "$f" | awk '{print $NF}' | sort -u) | wc -l)
+     [ "$n" = 0 ] || echo "$f: $n"
    done
    ```
 
-   Expected: `0` for every row. It was 0 at 2.6.2 across garjan's 426 symbols.
+   Expected: no output. At 2.7.0 it is clean across garjan's 534 names and all 45
+   vendored files. (The pattern above skips enum members; garjan declares no enums, but
+   a dependency's members can still collide with a garjan `var`. Check them too.)
+
+   **Run it against each consumer's `lib/` as well.** At 2.7.0, dhvani's closure has one
+   collision: prani's `struct DcBlocker` and garjan's. Both derive accessors and a codec,
+   so dhvani's build warns nine times and keeps prani's functions. It is harmless while
+   both structs are three 8-byte words in the same order, and garjan's library code never
+   calls the codec. The roadmap renames garjan's, which was `pub(crate)` in Rust.
 
 ## naad
 
@@ -45,8 +60,8 @@ state-variable filters, LFOs, delay lines. Not optional; there is no fallback
 path in the Cyrius port (the Rust `naad-backend` feature gate is gone).
 
 **Upgrade gotcha — symbol prefixing.** naad has been progressively prefixing its
-top-level symbols to keep the flat namespace disjoint from goonj/hisab/sakshi.
-Two waves so far:
+top-level symbols to keep the flat namespace disjoint from goonj/hisab/sakshi and the
+libraries its consumers link. Three waves so far:
 
 - 2.1.3 — error constants took the `NAAD_ERR_` prefix.
 - ≤2.2.2 — filter modes took the `NAAD_FILTER_` prefix. This broke garjan at
@@ -59,6 +74,14 @@ Two waves so far:
   git show HEAD:lib/naad.cyr | grep -E '^var .*FILTER_[A-Z]+'
   grep -E '^var .*FILTER_[A-Z]+' lib/naad.cyr
   ```
+- 2.3.4 — `power_spectrum` became `naad_power_spectrum`, because abaco 2.8.0 defines a
+  4-argument `power_spectrum` and dhvani links both. garjan never called it.
+
+**naad 2.3.4 returns `NAAD_ERR_ALLOCATION` (-6)** from `noise_new`,
+`filter_biquad_with_gain`, `filter_svf_new` and `modulation_lfo_new` on a refused
+allocation, where 2.3.3 wrote through the null pointer. garjan's checks already treated
+any negative result as `GARJAN_ERR_ALLOCATION`, so nothing in `src/` changed, and the
+constructor sweep went from 312 faults in 650 refusals to none.
 
 Expect more prefixing. Budget a rename pass on each minor bump.
 
@@ -84,17 +107,22 @@ gate at runtime with `sakshi_set_level`.
 **Note:** as in the Rust era, garjan emits events but installs no subscriber —
 that stays the consuming application's job.
 
-**Take the tag hisab declares, not the newest.** At 6.7.18 that is 2.5.10, which is
-also the copy the toolchain folds. The two can differ: at 6.7.9 hisab declared 2.5.8,
-the fold, and hisab found 2.5.10 warned on every compile that `lib/` shadowed the
-toolchain's copy.
+**A stdlib leaf since 2.7.0.** It was a `[deps.sakshi]` git package through 2.6.3, pinned
+to the tag hisab declared. hisab 3.4.2 dropped that package, because nothing in hisab
+calls it, and goonj's `dist/goonj.deps` sidecar names the leaf instead. garjan now lists
+`"sakshi"` in `[deps].stdlib`. The bytes are the same 2.5.10 the 6.7.18 toolchain folds,
+and the lock drops sakshi's commit row.
+
+**`dist/garjan.deps` does not name it.** `cyrius distlib` writes only `bayan` there,
+though the bundle calls five `sakshi_*` functions. Consumers so far include sakshi
+themselves. Check the sidecar before relying on it for a new consumer.
 
 ## Cyrius toolchain + vendored stdlib
 
 **Status:** pinned to **6.7.18**
 ([tag `6.7.18`](https://github.com/MacCracken/cyrius/releases/tag/6.7.18),
-2026-10-23). naad 2.3.3, hisab 3.4.1 and goonj 2.3.1 pin it exactly, and at 2.6.1
-each was its project's newest tag. Check newest over HTTPS, `git ls-remote --tags
+2026-10-23), still the newest release at 2.7.0. naad 2.3.5, hisab 3.5.0 and goonj 2.3.2
+pin it exactly, and at 2.7.0 each was its project's newest tag. Check newest over HTTPS, `git ls-remote --tags
 https://github.com/MacCracken/<repo>.git`: the `origin` of a local clone is SSH.
 The pin tracks published releases only; never pin to
 `main` or an unreleased tag, because CI installs the pin through the canonical
@@ -135,23 +163,28 @@ every assertion green. Any new `f64_to` that sizes a buffer or bounds a loop tak
 build here proves nothing about an older pin. The deprecation warning on
 `bayan_json_v_obj_get` names `bayan_json_v_obj_get_by_cstr`, which first exists at
 6.6.13, so following it broke dhvani on 6.6.10 while every local gate stayed green.
-That is why `garjan_json_get` exists. Before replacing a stdlib call, check that the
+That is why `garjan_json_get` went through the Str lookup until 2.7.0, when dhvani's move
+to 6.7.18 let it call `_by_cstr`. Before replacing a stdlib call, check that the
 replacement exists in the oldest consumer's `~/.cyrius/versions/<pin>/lib/`.
 
-The same goes for syntax. `src/` must stay off 6.7.x features until dhvani moves:
-`const` and `do` stop its 6.6.10 build, but a `!` is worse, because before 6.7.3 it
-compiled as a silent no-op.
+The same goes for syntax. Through 2.6.3, `src/` stayed off 6.7.x features for dhvani's
+6.6.10: `const` and `do` stop that build, and a `!` is worse, because before 6.7.3 it
+compiled as a silent no-op. Since 2.7.0 the oldest consumer pin is 6.7.18, so 6.7.x syntax
+is allowed. The rule returns if a consumer arrives on an older pin.
 
-**Two deliberate couplings, each pinned by a test.** `whistle_svf_band_pass` copies naad's
-filter step, and `tests/whistle.tcyr` holds it to naad bit for bit. `garjan_vec_zeros` writes
-`lib/vec.cyr`'s header, and `tests/dsp.tcyr` holds that layout. A red test on either after a
-bump means upstream moved: follow it, and do not loosen the test.
+**One deliberate coupling, pinned by a test.** `garjan_vec_zeros` writes `lib/vec.cyr`'s
+header, and `tests/dsp.tcyr` holds that layout. A red test after a bump means upstream moved:
+follow it, and do not loosen the test. The second coupling, `whistle_svf_band_pass`, a copy
+of naad's filter step, went at 2.7.0: whistle calls naad's `filter_svf_process_sample_into`,
+which dhvani's naad has had since it moved to 2.3.3.
 
 **Upgrade gotcha — a consumer's floor can move with no garjan change.** Since 2.6.0
 garjan's dep set needs cyrius 6.7.2 or later: the bundles use `const`, including as
-array sizes. The bundle `dist/garjan.cyr` does not carry them, so a consumer on older
-tags is unaffected, and one that adopts this dep set gets a loud compile error below
-6.7.2. Measure the floor at each bump, because upstream's figure is for its own bundle.
+array sizes. Re-measured at 2.7.0 with naad 2.3.5, hisab 3.5.0 and goonj 2.3.2: 6.7.2
+builds the smoke binary and passes the soorat and whistle suites, and 6.7.1 fails inside
+naad's bundle. Since 2.7.0 `dist/garjan.cyr` itself uses `sizeof(...)` as an array size,
+in whistle and soorat. Measure the floor at each bump, because upstream's figure is for
+its own bundle.
 
 **Upgrade gotcha — the writer has to stay inside what the parser accepts.** bayan 1.11
 refuses duplicate keys, leading zeros, integers outside i64 and malformed numbers.
@@ -203,20 +236,23 @@ in garjan. Re-run the sweep when any of them is fixed. The method is in the
 
 | Item | Where | Defect |
 |---|---|---|
-| U1 | naad | `noise_new`, `filter_biquad_with_gain`, `filter_svf_new` and `modulation_lfo_new` write through a refused allocation |
-| U1b | naad | `naad_vec_zeros` does not check `vec_new` |
+| ~~U1~~ | naad | Fixed in naad 2.3.4: `noise_new`, `filter_biquad_with_gain`, `filter_svf_new` and `modulation_lfo_new` return `NAAD_ERR_ALLOCATION`. garjan takes it from 2.7.0 |
+| ~~U1b~~ | naad | Fixed in naad 2.3.4: `naad_vec_zeros` returns 0 for a refused or wrapping size |
 | U2 | cyrius | the `#derive(Serialize)` reader memsets a refused allocation |
 | U3 | stdlib, bayan | `str_builder` and bayan's builder exit the process on a refused allocation, and some growth paths fault first |
 | U4 | bayan | `bayan_json_v_obj_set` stores a null pair when its pair allocation is refused, and the builder then faults on it |
 
-**garjan's side of the contract is already in place.** Every naad constructor result is
-checked. `noise_new` cannot fail today, but `garjan_noise_new` treats a 0 or a negative
-return as `GARJAN_ERR_ALLOCATION`, and `tests/naad_failure.tcyr` proves it at all 21
-constructors. When naad fixes U1, nothing in garjan needs to change.
+**garjan's side of the contract held.** Every naad constructor result is checked, and
+`garjan_noise_new` treats a 0 or a negative return as `GARJAN_ERR_ALLOCATION`.
+`tests/naad_failure.tcyr` proves it at all 21 constructors, for `NAAD_ERR_ALLOCATION`
+among others. When naad fixed U1, nothing in garjan changed. At 2.7.0 a sweep that refuses
+each allocation of every synth constructor in turn, 650 cases, ends in an error code every
+time. Against naad 2.3.3, 312 of them faulted.
 
 **bayan's strictness depends on the consumer's toolchain.** bayan 1.11, garjan's pin,
-refuses duplicate keys, leading zeros and deep nesting. A consumer on an older bayan,
-such as dhvani on cyrius 6.6.10, gets a parser that accepts them. `garjan_json_open`
+refuses duplicate keys, leading zeros and deep nesting. A consumer on an older bayan gets
+a parser that accepts them. dhvani was one until it moved to cyrius 6.7.18, which ships
+bayan 1.11.1. `garjan_json_open`
 checks every member it sees, so both copies of a duplicate key go through the same
 checks, but a test that expects a refusal on those grounds passes only under the pin.
 
@@ -231,12 +267,20 @@ cyrius fuzz && cyrius bench tests/garjan.bcyr
 cyrius lint src/*.cyr && cyrius vet src/main.cyr && cyrius distlib --check
 ```
 
-Then: run the collision audit above, diff the arity of every library function
-garjan calls (old bundle vs new), and refresh `state.md` + `BENCHMARKS.md`.
+Then: run the collision audit above, against garjan's `lib/` and each consumer's, diff the
+arity of every library function garjan calls (old bundle vs new), and refresh `state.md` +
+`BENCHMARKS.md`.
 
 Then build the bundle under the oldest consumer pin, with that consumer's dependency
 tags. **Grep the output for `undefined function`.** `OK` is not enough: an entry that
 does not reach a broken symbol still reports it, but only as a warning.
+
+The way that works for dhvani: copy it to a scratch directory, add
+`path = "/path/to/garjan"` to the copy's `[deps.garjan]`, and build and test with
+`CYRIUS_LOCAL=1`, which resolves into `build/local-deps/lib/` from the working tree.
+**Copying `dist/garjan.cyr` over the copy's `lib/garjan.cyr` does not work**: a plain
+`cyrius build` re-verifies the lock and restores the tagged bundle, then reports `OK`. Prove
+which bundle ran with a canary, such as a call to a function only the new version has.
 
 Then compare behaviour across the two toolchains, because the suite asserts neither
 exact samples nor hostile input:

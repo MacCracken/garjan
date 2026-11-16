@@ -49,6 +49,7 @@ include "src/builder.cyr"
 
 var SR = 0;
 var NAN_BITS = 0x7FF8000000000000;
+var sink_i = 0;                             # discards a must_use result the test does not need
 
 # ---- helpers -------------------------------------------------------------
 
@@ -164,6 +165,33 @@ fn any_above(v, thr) {
         i = i + 1;
     }
     return 0;
+}
+
+# Sum of s*s, the energy integration.rs compares. Unlike energy() it can overflow to inf,
+# so use it only on rendered audio.
+#must_use
+fn sq_energy(v) {
+    var e = 0;
+    var i = 0;
+    while (i < vec_len(v)) { e = f64_add(e, f64_mul(vec_get(v, i), vec_get(v, i))); i = i + 1; }
+    return e;
+}
+
+# 1 iff `v` is a vec of finite samples with one above `thr` in magnitude: a synthesize
+# result that is not an error, not NaN and not silence.
+#must_use
+fn audible(v, thr) {
+    if (garjan_is_err(v) == 1) { return 0; }
+    if (all_finite(v) == 0) { return 0; }
+    return any_above(v, thr);
+}
+
+# 1 iff two synthesize results are both vecs and sample-identical.
+#must_use
+fn replays(a, b) {
+    if (garjan_is_err(a) == 1 || garjan_is_err(b) == 1) { return 0; }
+    if (vec_len(a) == 0) { return 0; }
+    return same_samples(a, b);
 }
 
 # Render one block through a synth's process_block and assert it is usable.
@@ -1251,6 +1279,260 @@ fn main() {
     assert_eq(Precipitation_decay_samples(dcp), Precipitation_decay_samples(dc_p), "precipitation decay re-derived");
     var dcl = foliage_from_json_str(swap_value(djl, "\"event_duration_samples\":", "1000000000000"));
     assert_eq(Foliage_event_duration_samples(dcl), Foliage_event_duration_samples(dj_l), "foliage duration re-derived");
+
+    # =====================================================================
+    # Rust tests the port had dropped or weakened, restored at 2.7.0. Each group names
+    # the integration.rs test it ports. test_serde_roundtrip_modal_bank and
+    # test_serde_roundtrip_exciter stay unported: ModalBank and Exciter have no
+    # standalone codec (see the roadmap).
+    # =====================================================================
+    var half_s = F64_HALF;
+    var one_s = F64_ONE;
+
+    test_group("test_modal_bank_impulse_response: the response decays");
+    var irs = vec_new();
+    vec_push(irs, modal_modespec_new(f64_from(440), F64_ONE, F64_HALF));
+    vec_push(irs, modal_modespec_new(f64_from(880), F64_HALF, garjan_frac(3, 10)));
+    var irb = modal_bank_new(irs, SR);
+    assert_eq(modal_bank_mode_count(irb), 2, "2 modes");
+    var ir_first = modal_bank_process_sample(irb, F64_ONE);
+    assert(f64_gt(f64_abs(ir_first), 0) == 1, "an impulse rings");
+    var ir_last = ir_first;
+    var iri = 0;
+    while (iri < 1000) { ir_last = modal_bank_process_sample(irb, 0); iri = iri + 1; }
+    assert(garjan_is_finite(ir_last) == 1, "finite after 1000 samples");
+    assert(f64_lt(f64_abs(ir_last), f64_abs(ir_first)) == 1, "quieter after 1000 samples");
+
+    test_group("test_modal_bank_nyquist_guard");
+    var nqs = vec_new();
+    vec_push(nqs, modal_modespec_new(f64_from(100), F64_ONE, F64_HALF));
+    vec_push(nqs, modal_modespec_new(f64_from(30000), F64_ONE, F64_HALF));
+    assert_eq(modal_bank_mode_count(modal_bank_new(nqs, SR)), 1, "a mode above Nyquist is dropped");
+
+    test_group("test_modal_bank_reset");
+    var rss = vec_new();
+    vec_push(rss, modal_modespec_new(f64_from(440), F64_ONE, F64_ONE));
+    var rsb = modal_bank_new(rss, SR);
+    sink_i = modal_bank_process_sample(rsb, F64_ONE);
+    assert(f64_gt(f64_abs(modal_bank_process_sample(rsb, 0)), 0) == 1, "rings after an impulse");
+    modal_bank_reset(rsb);
+    assert_eq(modal_bank_process_sample(rsb, 0), 0, "silent after reset");
+
+    test_group("test_exciter_half_sine");
+    var hs = exciter_new(EXCITATION_HALF_SINE, 50, F64_ONE);
+    exciter_trigger(hs);
+    var hs_peak = 0;
+    var hsi = 0;
+    while (hsi < 50) { hs_peak = f64_max(hs_peak, exciter_next_sample(hs)); hsi = hsi + 1; }
+    assert(f64_gt(hs_peak, F64_HALF) == 1, "peaks above 0.5");
+    assert_eq(exciter_next_sample(hs), 0, "spent after its duration");
+
+    test_group("test_impact_velocity");
+    var iv_soft = impact_synthesize_velocity(impact_new(MATERIAL_METAL, SR), IMPACT_STRIKE, garjan_frac(1, 10));
+    var iv_hard = impact_synthesize_velocity(impact_new(MATERIAL_METAL, SR), IMPACT_STRIKE, F64_ONE);
+    assert(f64_gt(sq_energy(iv_hard), sq_energy(iv_soft)) == 1, "a harder strike carries more energy");
+
+    test_group("test_impact_shatter_has_debris");
+    var sh = impact_synthesize(impact_new(MATERIAL_GLASS, SR), IMPACT_SHATTER);
+    var tp = impact_synthesize(impact_new(MATERIAL_GLASS, SR), IMPACT_TAP);
+    assert(f64_gt(sq_energy(sh), sq_energy(tp)) == 1, "shattering glass outweighs a tap");
+
+    test_group("test_impact_deterministic");
+    assert_eq(replays(impact_synthesize(impact_new(MATERIAL_WOOD, SR), IMPACT_STRIKE),
+        impact_synthesize(impact_new(MATERIAL_WOOD, SR), IMPACT_STRIKE)), 1, "two wood strikes are identical");
+
+    test_group("test_serde_roundtrip_material_mode_config");
+    var mmc = material_mode_config(MATERIAL_METAL);
+    var mmc_sb = str_builder_new();
+    MaterialModeConfig_to_json(mmc, mmc_sb);
+    var mmc2 = MaterialModeConfig_from_json_str(str_data(str_builder_build(mmc_sb)));
+    assert_eq(MaterialModeConfig_pattern(mmc2), MaterialModeConfig_pattern(mmc), "pattern survives");
+    assert_eq(MaterialModeConfig_mode_count(mmc2), MaterialModeConfig_mode_count(mmc), "mode_count survives");
+    assert_eq(MaterialModeConfig_damping_factor(mmc2), MaterialModeConfig_damping_factor(mmc), "damping survives");
+
+    test_group("test_footstep_trigger_step");
+    var tsf = footstep_new(TERRAIN_WOOD, MOVEMENT_WALK, SR);
+    footstep_trigger_step(tsf);
+    var tsb = mkbuf(512);
+    footstep_process_block(tsf, tsb);
+    assert_eq(any_above(tsb, garjan_frac(1, 1000)), 1, "a triggered step sounds in the first block");
+
+    test_group("test_voice_pool_fill_and_steal_oldest");
+    var fso = voice_pool_new(2, STEAL_OLDEST);
+    assert_eq(voice_pool_allocate(fso, 5, 1), 0, "slot 0");
+    voice_pool_tick(fso);
+    assert_eq(voice_pool_allocate(fso, 5, 2), 1, "slot 1");
+    assert_eq(voice_pool_active_count(fso), 2, "full");
+    assert_eq(voice_pool_allocate(fso, 5, 3), 0, "steals the older slot 0");
+    assert_eq(VoiceSlot_tag(voice_pool_slot(fso, 0)), 3, "slot 0 holds the newcomer");
+
+    test_group("test_voice_pool_tick_ages");
+    var tka = voice_pool_new(2, STEAL_OLDEST);
+    sink_i = voice_pool_allocate(tka, 5, 1);
+    assert_eq(VoiceSlot_age(voice_pool_slot(tka, 0)), 0, "age 0");
+    voice_pool_tick(tka);
+    assert_eq(VoiceSlot_age(voice_pool_slot(tka, 0)), 1, "age 1");
+    voice_pool_tick(tka);
+    assert_eq(VoiceSlot_age(voice_pool_slot(tka, 0)), 2, "age 2");
+
+    test_group("test_voice_pool_active_voices_iterator (voice_pool_next_active)");
+    var avi = voice_pool_new(4, STEAL_OLDEST);
+    sink_i = voice_pool_allocate(avi, 5, 10);
+    sink_i = voice_pool_allocate(avi, 3, 20);
+    var av0 = voice_pool_next_active(avi, 0);
+    assert_eq(VoiceSlot_tag(voice_pool_slot(avi, av0)), 10, "first active voice is tag 10");
+    var av1 = voice_pool_next_active(avi, av0 + 1);
+    assert_eq(VoiceSlot_tag(voice_pool_slot(avi, av1)), 20, "second active voice is tag 20");
+    assert_eq(voice_pool_next_active(avi, av1 + 1), VOICE_NONE, "then no more");
+    voice_pool_release(avi, 0);
+    assert_eq(voice_pool_next_active(avi, 0), 1, "a released slot is skipped");
+    assert_eq(voice_pool_next_active(avi, 0 - 5), 1, "a negative start searches from 0");
+    assert_eq(voice_pool_next_active(avi, 99), VOICE_NONE, "a start past the end finds none");
+
+    test_group("test_deterministic_replay_all_synths: all nine");
+    assert_eq(replays(rain_synthesize(rain_new(RAIN_INTENSITY_MODERATE, SR), half_s),
+        rain_synthesize(rain_new(RAIN_INTENSITY_MODERATE, SR), half_s)), 1, "rain");
+    assert_eq(replays(thunder_synthesize(thunder_new(f64_from(500), SR), one_s),
+        thunder_synthesize(thunder_new(f64_from(500), SR), one_s)), 1, "thunder");
+    assert_eq(replays(wind_synthesize(wind_new(f64_from(10), half_s, SR), half_s),
+        wind_synthesize(wind_new(f64_from(10), half_s, SR), half_s)), 1, "wind");
+    assert_eq(replays(fire_synthesize(fire_new(half_s, SR), half_s),
+        fire_synthesize(fire_new(half_s, SR), half_s)), 1, "fire");
+    assert_eq(replays(water_synthesize(water_new(WATER_STREAM, half_s, SR), half_s),
+        water_synthesize(water_new(WATER_STREAM, half_s, SR), half_s)), 1, "water");
+    assert_eq(replays(texture_synthesize(texture_new(TEXTURE_TYPE_FOREST, half_s, SR), half_s),
+        texture_synthesize(texture_new(TEXTURE_TYPE_FOREST, half_s, SR), half_s)), 1, "texture");
+    assert_eq(replays(impact_synthesize(impact_new(MATERIAL_METAL, SR), IMPACT_STRIKE),
+        impact_synthesize(impact_new(MATERIAL_METAL, SR), IMPACT_STRIKE)), 1, "impact");
+    var drf_a = friction_new(FRICTION_SCRAPE, MATERIAL_METAL, SR);
+    var drf_b = friction_new(FRICTION_SCRAPE, MATERIAL_METAL, SR);
+    friction_set_velocity(drf_a, half_s);
+    friction_set_velocity(drf_b, half_s);
+    assert_eq(replays(friction_synthesize(drf_a, half_s), friction_synthesize(drf_b, half_s)), 1, "friction");
+    var drb_a = bubble_new(BUBBLE_BOILING, SR);
+    var drb_b = bubble_new(BUBBLE_BOILING, SR);
+    bubble_set_intensity(drb_a, garjan_frac(8, 10));
+    bubble_set_intensity(drb_b, garjan_frac(8, 10));
+    assert_eq(replays(bubble_synthesize(drb_a, half_s), bubble_synthesize(drb_b, half_s)), 1, "bubble");
+
+    # integration.rs asserted `any(|s| s.abs() > 0.001)` for every variant of these, and
+    # renders_ok above checks only finiteness, so a variant gone silent would pass it.
+    test_group("every variant makes sound (the *_all_types tests)");
+    var thr = garjan_frac(1, 1000);
+    var vt = 0;
+    while (vt <= FRICTION_GRIND) {
+        var vf = friction_new(vt, MATERIAL_METAL, SR);
+        friction_set_velocity(vf, half_s);
+        friction_set_pressure(vf, half_s);
+        assert_eq(audible(friction_synthesize(vf, half_s), thr), 1, "friction type sounds");
+        vt = vt + 1;
+    }
+    vt = 0;
+    while (vt <= CREAK_WOOD_STRESS) {
+        var vc = creak_new(vt, SR);
+        creak_set_tension(vc, half_s);
+        creak_set_speed(vc, half_s);
+        assert_eq(audible(creak_synthesize(vc, half_s), thr), 1, "creak source sounds");
+        vt = vt + 1;
+    }
+    vt = 0;
+    while (vt <= ROLLING_BARREL) {
+        var vr = rolling_new(vt, MATERIAL_WOOD, SR);
+        rolling_set_velocity(vr, half_s);
+        assert_eq(audible(rolling_synthesize(vr, half_s), thr), 1, "rolling body sounds");
+        vt = vt + 1;
+    }
+    vt = 0;
+    while (vt <= WHOOSH_THROW) {
+        var vw = whoosh_new(vt, SR);
+        whoosh_set_speed(vw, garjan_frac(7, 10));
+        assert_eq(audible(whoosh_synthesize(vw, half_s), thr), 1, "whoosh type sounds");
+        vt = vt + 1;
+    }
+    vt = 0;
+    while (vt <= WHISTLE_WIRE) {
+        var vh = whistle_new(vt, SR);
+        whistle_set_wind_speed(vh, half_s);
+        assert_eq(audible(whistle_synthesize(vh, half_s), thr), 1, "whistle source sounds");
+        vt = vt + 1;
+    }
+    vt = 0;
+    while (vt <= INSECT_CICADA_DRONE) {
+        var vi = insect_new(vt, SR);
+        insect_set_intensity(vi, garjan_frac(8, 10));
+        assert_eq(audible(insect_synthesize(vi, half_s), thr), 1, "insect type sounds");
+        vt = vt + 1;
+    }
+    var vsw = insect_new_swarm(INSECT_WING_BUZZ, 5, SR);
+    insect_set_intensity(vsw, garjan_frac(6, 10));
+    assert_eq(audible(insect_synthesize(vsw, half_s), thr), 1, "a swarm of 5 sounds (test_insect_swarm)");
+    vt = 0;
+    while (vt <= BIRD_SIZE_LARGE) {
+        var vb = wingflap_new(vt, SR);
+        wingflap_set_intensity(vb, garjan_frac(8, 10));
+        assert_eq(audible(wingflap_synthesize(vb, half_s), thr), 1, "bird size sounds");
+        vt = vt + 1;
+    }
+    vt = 0;
+    while (vt <= UNDERWATER_DEPTH_DEEP) {
+        var vu = underwater_new(vt, SR);
+        underwater_set_intensity(vu, garjan_frac(7, 10));
+        assert_eq(audible(underwater_synthesize(vu, one_s), thr), 1, "underwater depth sounds");
+        vt = vt + 1;
+    }
+    vt = 0;
+    while (vt <= SURF_STORM) {
+        assert_eq(audible(surf_synthesize(surf_new(vt, SR), f64_from(2)), thr), 1, "surf intensity sounds");
+        vt = vt + 1;
+    }
+    assert_eq(audible(thunder_synthesize(thunder_new(f64_from(200), SR), f64_from(2)), garjan_frac(1, 100)), 1,
+      "close thunder is loud (test_thunder_close)");
+
+    test_group("a first block sounds (the test_process_block_* and trigger tests)");
+    var pbw = mkbuf(512);
+    wind_process_block(wind_new(f64_from(15), half_s, SR), pbw);
+    assert_eq(audible(pbw, thr), 1, "wind");
+    var pbf = mkbuf(4410);
+    fire_process_block(fire_new(garjan_frac(8, 10), SR), pbf);
+    assert_eq(audible(pbf, thr), 1, "fire");
+    var pbt = mkbuf(512);
+    texture_process_block(texture_new(TEXTURE_TYPE_FOREST, half_s, SR), pbt);
+    assert_eq(audible(pbt, thr), 1, "texture");
+    var pbs = foliage_new(FOLIAGE_BRANCH_SNAP, SR);
+    foliage_trigger_snap(pbs);
+    var pbsb = mkbuf(512);
+    foliage_process_block(pbs, pbsb);
+    assert_eq(audible(pbsb, thr), 1, "a triggered branch snap (test_foliage_branch_snap_trigger)");
+    var pbh = whoosh_new(WHOOSH_SWING, SR);
+    whoosh_set_speed(pbh, garjan_frac(8, 10));
+    whoosh_trigger(pbh);
+    var pbhb = mkbuf(512);
+    whoosh_process_block(pbh, pbhb);
+    assert_eq(audible(pbhb, thr), 1, "a triggered whoosh (test_whoosh_trigger)");
+
+    test_group("bridge edge cases integration.rs checked");
+    assert_eq(bridge_rain_intensity_from_rate(f64_from(20)), RAIN_INTENSITY_HEAVY, "20 mm/hr is heavy");
+    assert_eq(bridge_wind_speed_normalized(0), 0, "0 m/s -> 0.0");
+    assert_eq(bridge_wind_speed_normalized(f64_from(10)), F64_HALF, "10 m/s -> 0.5");
+    assert_eq(bridge_wind_speed_normalized(f64_from(20)), F64_ONE, "20 m/s -> 1.0");
+    assert_eq(bridge_wind_speed_normalized(f64_from(40)), F64_ONE, "40 m/s clamps to 1.0");
+    var btd = bridge_thunder_distance_from_flash(f64_from(3), f64_from(20));
+    assert(f64_gt(btd, f64_from(1000)) == 1 && f64_lt(btd, f64_from(1100)) == 1, "3 s at 20 C is 1-1.1 km");
+    assert_eq(bridge_fire_intensity_from_temperature(f64_from(500)), 0, "500 K -> 0.0");
+    assert_eq(bridge_fire_intensity_from_temperature(f64_from(3000)), F64_ONE, "3000 K -> 1.0");
+    var bt_dist = 0;
+    var bt_wind = 0;
+    var bt_rain = 0;
+    bridge_weather_from_threat_level(0, &bt_dist, &bt_wind, &bt_rain);
+    assert_eq(bt_rain, BRIDGE_NO_RAIN, "threat 0: no rain");
+    bridge_weather_from_threat_level(5, &bt_dist, &bt_wind, &bt_rain);
+    assert(f64_lt(bt_dist, f64_from(200)) == 1, "threat 5: thunder within 200 m");
+    assert(f64_gt(bt_wind, f64_from(25)) == 1, "threat 5: wind above 25 m/s");
+    assert_eq(bt_rain, RAIN_INTENSITY_TORRENTIAL, "threat 5: torrential rain");
+    assert_eq(bridge_gain_from_distance(F64_ONE, F64_ONE), F64_ONE, "gain 1 at the reference distance");
+    assert(f64_lt(f64_abs(f64_sub(bridge_gain_from_distance(F64_ONE, f64_from(10)), garjan_frac(1, 10))),
+        garjan_frac(1, 1000)) == 1, "gain 0.1 at 10x");
+    assert_eq(bridge_gain_from_distance(F64_ONE, F64_HALF), F64_ONE, "inside the reference distance clamps to 1");
 
     return assert_summary();
 }
