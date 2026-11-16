@@ -47,11 +47,12 @@ Two consequences drive every rule below:
    vendored files. (The pattern above skips enum members; garjan declares no enums, but
    a dependency's members can still collide with a garjan `var`. Check them too.)
 
-   **Run it against each consumer's `lib/` as well.** At 2.7.0, dhvani's closure has one
-   collision: prani's `struct DcBlocker` and garjan's. Both derive accessors and a codec,
-   so dhvani's build warns nine times and keeps prani's functions. It is harmless while
-   both structs are three 8-byte words in the same order, and garjan's library code never
-   calls the codec. The roadmap renames garjan's, which was `pub(crate)` in Rust.
+   **Run it against each consumer's `lib/` as well.** It found one collision at 2.7.0:
+   prani's `struct DcBlocker` and garjan's. Both derive accessors and a codec, so dhvani's
+   build warned nine times and kept prani's functions over garjan's. That was harmless
+   only because both structs were three 8-byte words in the same order. garjan's is
+   `GarjanDcBlocker` since 2.7.0 (Rust's was `pub(crate)`), and dhvani's closure is clean:
+   69 other bundles plus dhvani's own source.
 
 ## naad
 

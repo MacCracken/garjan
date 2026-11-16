@@ -92,27 +92,26 @@ consistent: naad 2.3.5 → hisab 3.5.0 + goonj 2.3.2; goonj 2.3.2 → hisab 3.5.
 pin cyrius 6.7.18. `lib/` is 45 files: 42 byte-identical to the 6.7.18 snapshot, plus the
 naad, hisab and goonj bundles byte-identical to their tags.
 Symbol-collision audit: garjan's 534 top-level names (fn, var, const, struct) intersect
-every vendored file at zero. Against dhvani's whole closure there is one collision, prani's
-`struct DcBlocker`, which the roadmap fixes. Re-run both on any dep bump, since Cyrius gives
+every vendored file at zero, and dhvani's whole closure too: its 69 other bundles and its
+own source. The one collision found there, prani's `struct DcBlocker`, was fixed at 2.7.0
+by renaming garjan's to `GarjanDcBlocker`. Re-run both on any dep bump, since Cyrius gives
 no diagnostic for a duplicate top-level `var`.
 
 ## Consumers
 
 - **dhvani** pins garjan 2.6.3 on cyrius 6.7.18, naad 2.3.3, hisab 3.4.1 and goonj 2.3.1,
   and calls it from `src/environment.cyr`. The 2.7.0 bundle passes its environment (10),
-  bundle, bundle_synth, integration (41) and integration_advanced (125) suites under those
-  pins, and its main binary builds with no undefined function. So it can take 2.7.0 without
-  moving anything else.
+  bundle, bundle_synth, integration (41), integration_advanced (125) and creature (12)
+  suites under those pins, and its main binary builds with no undefined function and no
+  duplicate garjan symbol. So it can take 2.7.0 without moving anything else.
 
 Expected: kiran, joshua, soorat (for the 2.7.0 field types, once its port finishes), and
 any AGNOS component needing environmental audio.
 
 ## Next
 
-2.7.1 is ready to start: rename garjan's internal `DcBlocker`, which collides with prani's in
-dhvani's closure. After it, 2.8.0 needs a decision on standalone `ModalBank` and `Exciter`
-codecs. Everything else waits on a decision or on something outside this repository:
-[`roadmap.md`](roadmap.md). The upstream allocation defects still open are U2 to U4, in
+2.8.0 needs a decision on standalone `ModalBank` and `Exciter` codecs. Everything else waits
+on a decision or on something outside this repository: [`roadmap.md`](roadmap.md). The upstream allocation defects still open are U2 to U4, in
 [`dependency-watch.md`](dependency-watch.md).
 
 ## Port completeness

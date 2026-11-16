@@ -47,7 +47,7 @@ garjan/
 │   └── error.cyr       GarjanError
 │
 └── Internal
-    ├── dsp.cyr         DcBlocker, validate_sample_rate/duration
+    ├── dsp.cyr         GarjanDcBlocker (Rust's DcBlocker), validate_sample_rate/duration
     └── rng.cyr         PCG32 PRNG with Poisson distribution
 
 rust-old/src/math.rs (no_std sin/cos/exp/sqrt/powf) has no Cyrius file: those are cycc

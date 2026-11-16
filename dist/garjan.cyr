@@ -268,14 +268,16 @@ fn garjan_log_debug(msg) { sakshi_debug(msg, strlen(msg)); return 0; }
 # code. Requires: error.cyr (codes + garjan_is_finite), logging.cyr (warn/error).
 
 # ================================================================
-# DcBlocker -- one-pole highpass removing DC offset:
+# GarjanDcBlocker -- Rust's DcBlocker, a one-pole highpass removing DC offset:
 #   y[n] = x[n] - x[n-1] + R * y[n-1],  R ~ 10 Hz cutoff at any sample rate.
 # Fields are TYPED for #derive(Serialize) (untyped f64 would serialize as its
-# raw bit pattern and fail to roundtrip).
+# raw bit pattern and fail to roundtrip). Renamed at 2.7.0: prani declares a
+# DcBlocker too, and in a consumer that links both, cycc kept prani's derived
+# functions over these. Rust's was pub(crate), so no public name changed.
 # ================================================================
 #derive(accessors)
 #derive(Serialize)
-struct DcBlocker {
+struct GarjanDcBlocker {
     x_prev: f64;
     y_prev: f64;
     r: f64;
@@ -286,19 +288,21 @@ struct DcBlocker {
 fn garjan_dcblocker_new(sample_rate) {
     var raw = f64_sub(F64_ONE, f64_div(f64_mul(F64_TAU, f64_from(10)), sample_rate));
     var r = f64_clamp(raw, 0x3FECCCCCCCCCCCCD, 0x3FEFFF2E48E8A71E);   # 0.9 .. 0.9999
-    var self = garjan_alloc(sizeof(DcBlocker));
+    var self = garjan_alloc(sizeof(GarjanDcBlocker));
     if (garjan_is_err(self) == 1) { return self; }
-    DcBlocker_set_x_prev(self, 0);
-    DcBlocker_set_y_prev(self, 0);
-    DcBlocker_set_r(self, r);
+    GarjanDcBlocker_set_x_prev(self, 0);
+    GarjanDcBlocker_set_y_prev(self, 0);
+    GarjanDcBlocker_set_r(self, r);
     return self;
 }
 
 # Process one sample, removing DC offset.
 fn garjan_dcblocker_process(self, x) {
-    var y = f64_add(f64_sub(x, DcBlocker_x_prev(self)), f64_mul(DcBlocker_r(self), DcBlocker_y_prev(self)));
-    DcBlocker_set_x_prev(self, x);
-    DcBlocker_set_y_prev(self, y);
+    var x_prev = GarjanDcBlocker_x_prev(self);
+    var y_prev = GarjanDcBlocker_y_prev(self);
+    var y = f64_add(f64_sub(x, x_prev), f64_mul(GarjanDcBlocker_r(self), y_prev));
+    GarjanDcBlocker_set_x_prev(self, x);
+    GarjanDcBlocker_set_y_prev(self, y);
     return y;
 }
 
@@ -2210,9 +2214,9 @@ fn fire_to_json(self, sb) {
     FireParams_set_rng_state(p, Rng_state(rng));
     FireParams_set_rng_inc(p, Rng_inc(rng));
     var dc = Fire_dc_blocker(self);
-    FireParams_set_dcb_x_prev(p, DcBlocker_x_prev(dc));
-    FireParams_set_dcb_y_prev(p, DcBlocker_y_prev(dc));
-    FireParams_set_dcb_r(p, DcBlocker_r(dc));
+    FireParams_set_dcb_x_prev(p, GarjanDcBlocker_x_prev(dc));
+    FireParams_set_dcb_y_prev(p, GarjanDcBlocker_y_prev(dc));
+    FireParams_set_dcb_r(p, GarjanDcBlocker_r(dc));
 
     # Scalars via the derive, then the naad components' LIVE state spliced in
     # as "dsp" -- without it a restore resumes with zeroed filter memory.
@@ -2260,9 +2264,9 @@ fn fire_from_json_str(json) {
 
     var dc = garjan_dcblocker_new(FireParams_sample_rate(p));
     if (garjan_is_err(dc) == 1) { return dc; }
-    DcBlocker_set_x_prev(dc, FireParams_dcb_x_prev(p));
-    DcBlocker_set_y_prev(dc, FireParams_dcb_y_prev(p));
-    DcBlocker_set_r(dc, FireParams_dcb_r(p));
+    GarjanDcBlocker_set_x_prev(dc, FireParams_dcb_x_prev(p));
+    GarjanDcBlocker_set_y_prev(dc, FireParams_dcb_y_prev(p));
+    GarjanDcBlocker_set_r(dc, FireParams_dcb_r(p));
     Fire_set_dc_blocker(self, dc);
 
     var b = fire_build_naad(self);
@@ -2485,9 +2489,9 @@ fn rain_to_json(self, sb) {
     RainParams_set_rng_state(p, Rng_state(rng));
     RainParams_set_rng_inc(p, Rng_inc(rng));
     var dc = Rain_dc_blocker(self);
-    RainParams_set_dcb_x_prev(p, DcBlocker_x_prev(dc));
-    RainParams_set_dcb_y_prev(p, DcBlocker_y_prev(dc));
-    RainParams_set_dcb_r(p, DcBlocker_r(dc));
+    RainParams_set_dcb_x_prev(p, GarjanDcBlocker_x_prev(dc));
+    RainParams_set_dcb_y_prev(p, GarjanDcBlocker_y_prev(dc));
+    RainParams_set_dcb_r(p, GarjanDcBlocker_r(dc));
     # Scalars via the derive, then the naad components' LIVE state spliced
     # in as "dsp" -- without it a restore resumes with zeroed filter memory.
     var psb = str_builder_new();
@@ -2533,9 +2537,9 @@ fn rain_from_json_str(json) {
 
     var dc = garjan_dcblocker_new(RainParams_sample_rate(p));
     if (garjan_is_err(dc) == 1) { return dc; }
-    DcBlocker_set_x_prev(dc, RainParams_dcb_x_prev(p));
-    DcBlocker_set_y_prev(dc, RainParams_dcb_y_prev(p));
-    DcBlocker_set_r(dc, RainParams_dcb_r(p));
+    GarjanDcBlocker_set_x_prev(dc, RainParams_dcb_x_prev(p));
+    GarjanDcBlocker_set_y_prev(dc, RainParams_dcb_y_prev(p));
+    GarjanDcBlocker_set_r(dc, RainParams_dcb_r(p));
     Rain_set_dc_blocker(self, dc);
 
     var b = rain_build_naad(self);
@@ -2725,9 +2729,9 @@ fn thunder_to_json(self, sb) {
     ThunderParams_set_rng_state(p, Rng_state(rng));
     ThunderParams_set_rng_inc(p, Rng_inc(rng));
     var dc = Thunder_dc_blocker(self);
-    ThunderParams_set_dcb_x_prev(p, DcBlocker_x_prev(dc));
-    ThunderParams_set_dcb_y_prev(p, DcBlocker_y_prev(dc));
-    ThunderParams_set_dcb_r(p, DcBlocker_r(dc));
+    ThunderParams_set_dcb_x_prev(p, GarjanDcBlocker_x_prev(dc));
+    ThunderParams_set_dcb_y_prev(p, GarjanDcBlocker_y_prev(dc));
+    ThunderParams_set_dcb_r(p, GarjanDcBlocker_r(dc));
     # Scalars via the derive, then the naad components' LIVE state spliced
     # in as "dsp" -- without it a restore resumes with zeroed filter memory.
     var psb = str_builder_new();
@@ -2771,9 +2775,9 @@ fn thunder_from_json_str(json) {
 
     var dc = garjan_dcblocker_new(ThunderParams_sample_rate(p));
     if (garjan_is_err(dc) == 1) { return dc; }
-    DcBlocker_set_x_prev(dc, ThunderParams_dcb_x_prev(p));
-    DcBlocker_set_y_prev(dc, ThunderParams_dcb_y_prev(p));
-    DcBlocker_set_r(dc, ThunderParams_dcb_r(p));
+    GarjanDcBlocker_set_x_prev(dc, ThunderParams_dcb_x_prev(p));
+    GarjanDcBlocker_set_y_prev(dc, ThunderParams_dcb_y_prev(p));
+    GarjanDcBlocker_set_r(dc, ThunderParams_dcb_r(p));
     Thunder_set_dc_blocker(self, dc);
 
     var b = thunder_build_naad(self);
@@ -2927,9 +2931,9 @@ fn wind_to_json(self, sb) {
     WindParams_set_rng_state(p, Rng_state(rng));
     WindParams_set_rng_inc(p, Rng_inc(rng));
     var dc = Wind_dc_blocker(self);
-    WindParams_set_dcb_x_prev(p, DcBlocker_x_prev(dc));
-    WindParams_set_dcb_y_prev(p, DcBlocker_y_prev(dc));
-    WindParams_set_dcb_r(p, DcBlocker_r(dc));
+    WindParams_set_dcb_x_prev(p, GarjanDcBlocker_x_prev(dc));
+    WindParams_set_dcb_y_prev(p, GarjanDcBlocker_y_prev(dc));
+    WindParams_set_dcb_r(p, GarjanDcBlocker_r(dc));
     # Scalars via the derive, then the naad components' LIVE state spliced
     # in as "dsp" -- without it a restore resumes with zeroed filter memory.
     var psb = str_builder_new();
@@ -2974,9 +2978,9 @@ fn wind_from_json_str(json) {
 
     var dc = garjan_dcblocker_new(WindParams_sample_rate(p));
     if (garjan_is_err(dc) == 1) { return dc; }
-    DcBlocker_set_x_prev(dc, WindParams_dcb_x_prev(p));
-    DcBlocker_set_y_prev(dc, WindParams_dcb_y_prev(p));
-    DcBlocker_set_r(dc, WindParams_dcb_r(p));
+    GarjanDcBlocker_set_x_prev(dc, WindParams_dcb_x_prev(p));
+    GarjanDcBlocker_set_y_prev(dc, WindParams_dcb_y_prev(p));
+    GarjanDcBlocker_set_r(dc, WindParams_dcb_r(p));
     Wind_set_dc_blocker(self, dc);
 
     var b = wind_build_naad(self);
@@ -3286,9 +3290,9 @@ fn water_to_json(self, sb) {
     WaterParams_set_rng_state(p, Rng_state(rng));
     WaterParams_set_rng_inc(p, Rng_inc(rng));
     var dc = Water_dc_blocker(self);
-    WaterParams_set_dcb_x_prev(p, DcBlocker_x_prev(dc));
-    WaterParams_set_dcb_y_prev(p, DcBlocker_y_prev(dc));
-    WaterParams_set_dcb_r(p, DcBlocker_r(dc));
+    WaterParams_set_dcb_x_prev(p, GarjanDcBlocker_x_prev(dc));
+    WaterParams_set_dcb_y_prev(p, GarjanDcBlocker_y_prev(dc));
+    WaterParams_set_dcb_r(p, GarjanDcBlocker_r(dc));
     # Scalars via the derive, then the naad components' LIVE state spliced
     # in as "dsp" -- without it a restore resumes with zeroed filter memory.
     var psb = str_builder_new();
@@ -3342,9 +3346,9 @@ fn water_from_json_str(json) {
 
     var dc = garjan_dcblocker_new(WaterParams_sample_rate(p));
     if (garjan_is_err(dc) == 1) { return dc; }
-    DcBlocker_set_x_prev(dc, WaterParams_dcb_x_prev(p));
-    DcBlocker_set_y_prev(dc, WaterParams_dcb_y_prev(p));
-    DcBlocker_set_r(dc, WaterParams_dcb_r(p));
+    GarjanDcBlocker_set_x_prev(dc, WaterParams_dcb_x_prev(p));
+    GarjanDcBlocker_set_y_prev(dc, WaterParams_dcb_y_prev(p));
+    GarjanDcBlocker_set_r(dc, WaterParams_dcb_r(p));
     Water_set_dc_blocker(self, dc);
 
     var b = water_build_naad(self);
@@ -3690,9 +3694,9 @@ fn precipitation_to_json(self, sb) {
     PrecipitationParams_set_rng_state(p, Rng_state(rng));
     PrecipitationParams_set_rng_inc(p, Rng_inc(rng));
     var dc = Precipitation_dc_blocker(self);
-    PrecipitationParams_set_dcb_x_prev(p, DcBlocker_x_prev(dc));
-    PrecipitationParams_set_dcb_y_prev(p, DcBlocker_y_prev(dc));
-    PrecipitationParams_set_dcb_r(p, DcBlocker_r(dc));
+    PrecipitationParams_set_dcb_x_prev(p, GarjanDcBlocker_x_prev(dc));
+    PrecipitationParams_set_dcb_y_prev(p, GarjanDcBlocker_y_prev(dc));
+    PrecipitationParams_set_dcb_r(p, GarjanDcBlocker_r(dc));
     # Scalars via the derive, then the naad components' LIVE state spliced
     # in as "dsp" -- without it a restore resumes with zeroed filter memory.
     var psb = str_builder_new();
@@ -3758,9 +3762,9 @@ fn precipitation_from_json_str(json) {
 
     var dc = garjan_dcblocker_new(PrecipitationParams_sample_rate(p));
     if (garjan_is_err(dc) == 1) { return dc; }
-    DcBlocker_set_x_prev(dc, PrecipitationParams_dcb_x_prev(p));
-    DcBlocker_set_y_prev(dc, PrecipitationParams_dcb_y_prev(p));
-    DcBlocker_set_r(dc, PrecipitationParams_dcb_r(p));
+    GarjanDcBlocker_set_x_prev(dc, PrecipitationParams_dcb_x_prev(p));
+    GarjanDcBlocker_set_y_prev(dc, PrecipitationParams_dcb_y_prev(p));
+    GarjanDcBlocker_set_r(dc, PrecipitationParams_dcb_r(p));
     Precipitation_set_dc_blocker(self, dc);
 
     var b = precipitation_build_naad(self);
@@ -4010,9 +4014,9 @@ fn bubble_to_json(self, sb) {
     BubbleParams_set_rng_state(p, Rng_state(rng));
     BubbleParams_set_rng_inc(p, Rng_inc(rng));
     var dc = Bubble_dc_blocker(self);
-    BubbleParams_set_dcb_x_prev(p, DcBlocker_x_prev(dc));
-    BubbleParams_set_dcb_y_prev(p, DcBlocker_y_prev(dc));
-    BubbleParams_set_dcb_r(p, DcBlocker_r(dc));
+    BubbleParams_set_dcb_x_prev(p, GarjanDcBlocker_x_prev(dc));
+    BubbleParams_set_dcb_y_prev(p, GarjanDcBlocker_y_prev(dc));
+    BubbleParams_set_dcb_r(p, GarjanDcBlocker_r(dc));
     # Scalars via the derive, then the naad components' LIVE state spliced
     # in as "dsp" -- without it a restore resumes with zeroed filter memory.
     var psb = str_builder_new();
@@ -4065,9 +4069,9 @@ fn bubble_from_json_str(json) {
 
     var dc = garjan_dcblocker_new(BubbleParams_sample_rate(p));
     if (garjan_is_err(dc) == 1) { return dc; }
-    DcBlocker_set_x_prev(dc, BubbleParams_dcb_x_prev(p));
-    DcBlocker_set_y_prev(dc, BubbleParams_dcb_y_prev(p));
-    DcBlocker_set_r(dc, BubbleParams_dcb_r(p));
+    GarjanDcBlocker_set_x_prev(dc, BubbleParams_dcb_x_prev(p));
+    GarjanDcBlocker_set_y_prev(dc, BubbleParams_dcb_y_prev(p));
+    GarjanDcBlocker_set_r(dc, BubbleParams_dcb_r(p));
     Bubble_set_dc_blocker(self, dc);
 
     var b = bubble_build_naad(self);
@@ -4424,9 +4428,9 @@ fn impact_to_json(self, sb) {
     ImpactParams_set_rng_state(p, Rng_state(rng));
     ImpactParams_set_rng_inc(p, Rng_inc(rng));
     var dc = Impact_dc_blocker(self);
-    ImpactParams_set_dcb_x_prev(p, DcBlocker_x_prev(dc));
-    ImpactParams_set_dcb_y_prev(p, DcBlocker_y_prev(dc));
-    ImpactParams_set_dcb_r(p, DcBlocker_r(dc));
+    ImpactParams_set_dcb_x_prev(p, GarjanDcBlocker_x_prev(dc));
+    ImpactParams_set_dcb_y_prev(p, GarjanDcBlocker_y_prev(dc));
+    ImpactParams_set_dcb_r(p, GarjanDcBlocker_r(dc));
     # Scalars via the derive, then the naad components' LIVE state spliced
     # in as "dsp" -- without it a restore resumes with zeroed filter memory.
     var psb = str_builder_new();
@@ -4479,9 +4483,9 @@ fn impact_from_json_str(json) {
 
     var dc = garjan_dcblocker_new(ImpactParams_sample_rate(p));
     if (garjan_is_err(dc) == 1) { return dc; }
-    DcBlocker_set_x_prev(dc, ImpactParams_dcb_x_prev(p));
-    DcBlocker_set_y_prev(dc, ImpactParams_dcb_y_prev(p));
-    DcBlocker_set_r(dc, ImpactParams_dcb_r(p));
+    GarjanDcBlocker_set_x_prev(dc, ImpactParams_dcb_x_prev(p));
+    GarjanDcBlocker_set_y_prev(dc, ImpactParams_dcb_y_prev(p));
+    GarjanDcBlocker_set_r(dc, ImpactParams_dcb_r(p));
     Impact_set_dc_blocker(self, dc);
 
     var b = impact_build_naad(self);
@@ -4806,9 +4810,9 @@ fn footstep_to_json(self, sb) {
     FootstepParams_set_rng_state(p, Rng_state(rng));
     FootstepParams_set_rng_inc(p, Rng_inc(rng));
     var dc = Footstep_dc_blocker(self);
-    FootstepParams_set_dcb_x_prev(p, DcBlocker_x_prev(dc));
-    FootstepParams_set_dcb_y_prev(p, DcBlocker_y_prev(dc));
-    FootstepParams_set_dcb_r(p, DcBlocker_r(dc));
+    FootstepParams_set_dcb_x_prev(p, GarjanDcBlocker_x_prev(dc));
+    FootstepParams_set_dcb_y_prev(p, GarjanDcBlocker_y_prev(dc));
+    FootstepParams_set_dcb_r(p, GarjanDcBlocker_r(dc));
     # Scalars via the derive, then the naad components' LIVE state spliced
     # in as "dsp" -- without it a restore resumes with zeroed filter memory.
     var psb = str_builder_new();
@@ -4867,9 +4871,9 @@ fn footstep_from_json_str(json) {
 
     var dc = garjan_dcblocker_new(FootstepParams_sample_rate(p));
     if (garjan_is_err(dc) == 1) { return dc; }
-    DcBlocker_set_x_prev(dc, FootstepParams_dcb_x_prev(p));
-    DcBlocker_set_y_prev(dc, FootstepParams_dcb_y_prev(p));
-    DcBlocker_set_r(dc, FootstepParams_dcb_r(p));
+    GarjanDcBlocker_set_x_prev(dc, FootstepParams_dcb_x_prev(p));
+    GarjanDcBlocker_set_y_prev(dc, FootstepParams_dcb_y_prev(p));
+    GarjanDcBlocker_set_r(dc, FootstepParams_dcb_r(p));
     Footstep_set_dc_blocker(self, dc);
 
     var b = footstep_build_naad(self);
@@ -5156,9 +5160,9 @@ fn friction_to_json(self, sb) {
     FrictionParams_set_rng_state(p, Rng_state(rng));
     FrictionParams_set_rng_inc(p, Rng_inc(rng));
     var dc = Friction_dc_blocker(self);
-    FrictionParams_set_dcb_x_prev(p, DcBlocker_x_prev(dc));
-    FrictionParams_set_dcb_y_prev(p, DcBlocker_y_prev(dc));
-    FrictionParams_set_dcb_r(p, DcBlocker_r(dc));
+    FrictionParams_set_dcb_x_prev(p, GarjanDcBlocker_x_prev(dc));
+    FrictionParams_set_dcb_y_prev(p, GarjanDcBlocker_y_prev(dc));
+    FrictionParams_set_dcb_r(p, GarjanDcBlocker_r(dc));
     # Scalars via the derive, then the naad components' LIVE state spliced
     # in as "dsp" -- without it a restore resumes with zeroed filter memory.
     var psb = str_builder_new();
@@ -5215,9 +5219,9 @@ fn friction_from_json_str(json) {
 
     var dc = garjan_dcblocker_new(FrictionParams_sample_rate(p));
     if (garjan_is_err(dc) == 1) { return dc; }
-    DcBlocker_set_x_prev(dc, FrictionParams_dcb_x_prev(p));
-    DcBlocker_set_y_prev(dc, FrictionParams_dcb_y_prev(p));
-    DcBlocker_set_r(dc, FrictionParams_dcb_r(p));
+    GarjanDcBlocker_set_x_prev(dc, FrictionParams_dcb_x_prev(p));
+    GarjanDcBlocker_set_y_prev(dc, FrictionParams_dcb_y_prev(p));
+    GarjanDcBlocker_set_r(dc, FrictionParams_dcb_r(p));
     Friction_set_dc_blocker(self, dc);
 
     var b = friction_build_naad(self);
@@ -5511,9 +5515,9 @@ fn creak_to_json(self, sb) {
     CreakParams_set_rng_state(p, Rng_state(rng));
     CreakParams_set_rng_inc(p, Rng_inc(rng));
     var dc = Creak_dc_blocker(self);
-    CreakParams_set_dcb_x_prev(p, DcBlocker_x_prev(dc));
-    CreakParams_set_dcb_y_prev(p, DcBlocker_y_prev(dc));
-    CreakParams_set_dcb_r(p, DcBlocker_r(dc));
+    CreakParams_set_dcb_x_prev(p, GarjanDcBlocker_x_prev(dc));
+    CreakParams_set_dcb_y_prev(p, GarjanDcBlocker_y_prev(dc));
+    CreakParams_set_dcb_r(p, GarjanDcBlocker_r(dc));
     # Scalars via the derive, then the naad components' LIVE state spliced
     # in as "dsp" -- without it a restore resumes with zeroed filter memory.
     var psb = str_builder_new();
@@ -5566,9 +5570,9 @@ fn creak_from_json_str(json) {
 
     var dc = garjan_dcblocker_new(CreakParams_sample_rate(p));
     if (garjan_is_err(dc) == 1) { return dc; }
-    DcBlocker_set_x_prev(dc, CreakParams_dcb_x_prev(p));
-    DcBlocker_set_y_prev(dc, CreakParams_dcb_y_prev(p));
-    DcBlocker_set_r(dc, CreakParams_dcb_r(p));
+    GarjanDcBlocker_set_x_prev(dc, CreakParams_dcb_x_prev(p));
+    GarjanDcBlocker_set_y_prev(dc, CreakParams_dcb_y_prev(p));
+    GarjanDcBlocker_set_r(dc, CreakParams_dcb_r(p));
     Creak_set_dc_blocker(self, dc);
 
     var b = creak_build_naad(self);
@@ -5841,9 +5845,9 @@ fn rolling_to_json(self, sb) {
     RollingParams_set_rng_state(p, Rng_state(rng));
     RollingParams_set_rng_inc(p, Rng_inc(rng));
     var dc = Rolling_dc_blocker(self);
-    RollingParams_set_dcb_x_prev(p, DcBlocker_x_prev(dc));
-    RollingParams_set_dcb_y_prev(p, DcBlocker_y_prev(dc));
-    RollingParams_set_dcb_r(p, DcBlocker_r(dc));
+    RollingParams_set_dcb_x_prev(p, GarjanDcBlocker_x_prev(dc));
+    RollingParams_set_dcb_y_prev(p, GarjanDcBlocker_y_prev(dc));
+    RollingParams_set_dcb_r(p, GarjanDcBlocker_r(dc));
     # Scalars via the derive, then the naad components' LIVE state spliced
     # in as "dsp" -- without it a restore resumes with zeroed filter memory.
     var psb = str_builder_new();
@@ -5897,9 +5901,9 @@ fn rolling_from_json_str(json) {
 
     var dc = garjan_dcblocker_new(RollingParams_sample_rate(p));
     if (garjan_is_err(dc) == 1) { return dc; }
-    DcBlocker_set_x_prev(dc, RollingParams_dcb_x_prev(p));
-    DcBlocker_set_y_prev(dc, RollingParams_dcb_y_prev(p));
-    DcBlocker_set_r(dc, RollingParams_dcb_r(p));
+    GarjanDcBlocker_set_x_prev(dc, RollingParams_dcb_x_prev(p));
+    GarjanDcBlocker_set_y_prev(dc, RollingParams_dcb_y_prev(p));
+    GarjanDcBlocker_set_r(dc, RollingParams_dcb_r(p));
     Rolling_set_dc_blocker(self, dc);
 
     var b = rolling_build_naad(self);
@@ -6256,9 +6260,9 @@ fn foliage_to_json(self, sb) {
     FoliageParams_set_rng_inc(p, Rng_inc(rng));
 
     var dc = Foliage_dc_blocker(self);
-    FoliageParams_set_dcb_x_prev(p, DcBlocker_x_prev(dc));
-    FoliageParams_set_dcb_y_prev(p, DcBlocker_y_prev(dc));
-    FoliageParams_set_dcb_r(p, DcBlocker_r(dc));
+    FoliageParams_set_dcb_x_prev(p, GarjanDcBlocker_x_prev(dc));
+    FoliageParams_set_dcb_y_prev(p, GarjanDcBlocker_y_prev(dc));
+    FoliageParams_set_dcb_r(p, GarjanDcBlocker_r(dc));
 
     var exc = Foliage_snap_exciter(self);
     FoliageParams_set_exc_position(p, Exciter_position(exc));
@@ -6325,9 +6329,9 @@ fn foliage_from_json_str(json) {
 
     var dc = garjan_dcblocker_new(FoliageParams_sample_rate(p));
     if (garjan_is_err(dc) == 1) { return dc; }
-    DcBlocker_set_x_prev(dc, FoliageParams_dcb_x_prev(p));
-    DcBlocker_set_y_prev(dc, FoliageParams_dcb_y_prev(p));
-    DcBlocker_set_r(dc, FoliageParams_dcb_r(p));
+    GarjanDcBlocker_set_x_prev(dc, FoliageParams_dcb_x_prev(p));
+    GarjanDcBlocker_set_y_prev(dc, FoliageParams_dcb_y_prev(p));
+    GarjanDcBlocker_set_r(dc, FoliageParams_dcb_r(p));
     Foliage_set_dc_blocker(self, dc);
 
     # Rebuild the exciter, restoring its live state.
@@ -6577,9 +6581,9 @@ fn whoosh_to_json(self, sb) {
     WhooshParams_set_rng_state(p, Rng_state(rng));
     WhooshParams_set_rng_inc(p, Rng_inc(rng));
     var dc = Whoosh_dc_blocker(self);
-    WhooshParams_set_dcb_x_prev(p, DcBlocker_x_prev(dc));
-    WhooshParams_set_dcb_y_prev(p, DcBlocker_y_prev(dc));
-    WhooshParams_set_dcb_r(p, DcBlocker_r(dc));
+    WhooshParams_set_dcb_x_prev(p, GarjanDcBlocker_x_prev(dc));
+    WhooshParams_set_dcb_y_prev(p, GarjanDcBlocker_y_prev(dc));
+    WhooshParams_set_dcb_r(p, GarjanDcBlocker_r(dc));
     # Scalars via the derive, then the naad components' LIVE state spliced
     # in as "dsp" -- without it a restore resumes with zeroed filter memory.
     var psb = str_builder_new();
@@ -6631,9 +6635,9 @@ fn whoosh_from_json_str(json) {
 
     var dc = garjan_dcblocker_new(WhooshParams_sample_rate(p));
     if (garjan_is_err(dc) == 1) { return dc; }
-    DcBlocker_set_x_prev(dc, WhooshParams_dcb_x_prev(p));
-    DcBlocker_set_y_prev(dc, WhooshParams_dcb_y_prev(p));
-    DcBlocker_set_r(dc, WhooshParams_dcb_r(p));
+    GarjanDcBlocker_set_x_prev(dc, WhooshParams_dcb_x_prev(p));
+    GarjanDcBlocker_set_y_prev(dc, WhooshParams_dcb_y_prev(p));
+    GarjanDcBlocker_set_r(dc, WhooshParams_dcb_r(p));
     Whoosh_set_dc_blocker(self, dc);
 
     var b = whoosh_build_naad(self);
@@ -6848,9 +6852,9 @@ fn whistle_to_json(self, sb) {
     WhistleParams_set_rng_state(p, Rng_state(rng));
     WhistleParams_set_rng_inc(p, Rng_inc(rng));
     var dc = Whistle_dc_blocker(self);
-    WhistleParams_set_dcb_x_prev(p, DcBlocker_x_prev(dc));
-    WhistleParams_set_dcb_y_prev(p, DcBlocker_y_prev(dc));
-    WhistleParams_set_dcb_r(p, DcBlocker_r(dc));
+    WhistleParams_set_dcb_x_prev(p, GarjanDcBlocker_x_prev(dc));
+    WhistleParams_set_dcb_y_prev(p, GarjanDcBlocker_y_prev(dc));
+    WhistleParams_set_dcb_r(p, GarjanDcBlocker_r(dc));
     # Scalars via the derive, then the naad components' LIVE state spliced
     # in as "dsp" -- without it a restore resumes with zeroed filter memory.
     var psb = str_builder_new();
@@ -6900,9 +6904,9 @@ fn whistle_from_json_str(json) {
 
     var dc = garjan_dcblocker_new(WhistleParams_sample_rate(p));
     if (garjan_is_err(dc) == 1) { return dc; }
-    DcBlocker_set_x_prev(dc, WhistleParams_dcb_x_prev(p));
-    DcBlocker_set_y_prev(dc, WhistleParams_dcb_y_prev(p));
-    DcBlocker_set_r(dc, WhistleParams_dcb_r(p));
+    GarjanDcBlocker_set_x_prev(dc, WhistleParams_dcb_x_prev(p));
+    GarjanDcBlocker_set_y_prev(dc, WhistleParams_dcb_y_prev(p));
+    GarjanDcBlocker_set_r(dc, WhistleParams_dcb_r(p));
     Whistle_set_dc_blocker(self, dc);
 
     var b = whistle_build_naad(self);
@@ -7188,9 +7192,9 @@ fn cloth_to_json(self, sb) {
     ClothParams_set_rng_state(p, Rng_state(rng));
     ClothParams_set_rng_inc(p, Rng_inc(rng));
     var dc = Cloth_dc_blocker(self);
-    ClothParams_set_dcb_x_prev(p, DcBlocker_x_prev(dc));
-    ClothParams_set_dcb_y_prev(p, DcBlocker_y_prev(dc));
-    ClothParams_set_dcb_r(p, DcBlocker_r(dc));
+    ClothParams_set_dcb_x_prev(p, GarjanDcBlocker_x_prev(dc));
+    ClothParams_set_dcb_y_prev(p, GarjanDcBlocker_y_prev(dc));
+    ClothParams_set_dcb_r(p, GarjanDcBlocker_r(dc));
     # Scalars via the derive, then the naad components' LIVE state spliced
     # in as "dsp" -- without it a restore resumes with zeroed filter memory.
     var psb = str_builder_new();
@@ -7247,9 +7251,9 @@ fn cloth_from_json_str(json) {
 
     var dc = garjan_dcblocker_new(ClothParams_sample_rate(p));
     if (garjan_is_err(dc) == 1) { return dc; }
-    DcBlocker_set_x_prev(dc, ClothParams_dcb_x_prev(p));
-    DcBlocker_set_y_prev(dc, ClothParams_dcb_y_prev(p));
-    DcBlocker_set_r(dc, ClothParams_dcb_r(p));
+    GarjanDcBlocker_set_x_prev(dc, ClothParams_dcb_x_prev(p));
+    GarjanDcBlocker_set_y_prev(dc, ClothParams_dcb_y_prev(p));
+    GarjanDcBlocker_set_r(dc, ClothParams_dcb_r(p));
     Cloth_set_dc_blocker(self, dc);
 
     var b = cloth_build_naad(self);
@@ -7668,9 +7672,9 @@ fn insect_to_json(self, sb) {
     InsectParams_set_rng_state(p, Rng_state(rng));
     InsectParams_set_rng_inc(p, Rng_inc(rng));
     var dc = Insect_dc_blocker(self);
-    InsectParams_set_dcb_x_prev(p, DcBlocker_x_prev(dc));
-    InsectParams_set_dcb_y_prev(p, DcBlocker_y_prev(dc));
-    InsectParams_set_dcb_r(p, DcBlocker_r(dc));
+    InsectParams_set_dcb_x_prev(p, GarjanDcBlocker_x_prev(dc));
+    InsectParams_set_dcb_y_prev(p, GarjanDcBlocker_y_prev(dc));
+    InsectParams_set_dcb_r(p, GarjanDcBlocker_r(dc));
     # Scalars via the derive, then the naad components' LIVE state spliced
     # in as "dsp" -- without it a restore resumes with zeroed filter memory.
     var psb = str_builder_new();
@@ -7741,9 +7745,9 @@ fn insect_from_json_str(json) {
 
     var dc = garjan_dcblocker_new(InsectParams_sample_rate(p));
     if (garjan_is_err(dc) == 1) { return dc; }
-    DcBlocker_set_x_prev(dc, InsectParams_dcb_x_prev(p));
-    DcBlocker_set_y_prev(dc, InsectParams_dcb_y_prev(p));
-    DcBlocker_set_r(dc, InsectParams_dcb_r(p));
+    GarjanDcBlocker_set_x_prev(dc, InsectParams_dcb_x_prev(p));
+    GarjanDcBlocker_set_y_prev(dc, InsectParams_dcb_y_prev(p));
+    GarjanDcBlocker_set_r(dc, InsectParams_dcb_r(p));
     Insect_set_dc_blocker(self, dc);
 
     var b = insect_build_naad(self);
@@ -8009,9 +8013,9 @@ fn wingflap_to_json(self, sb) {
     WingFlapParams_set_rng_state(p, Rng_state(rng));
     WingFlapParams_set_rng_inc(p, Rng_inc(rng));
     var dc = WingFlap_dc_blocker(self);
-    WingFlapParams_set_dcb_x_prev(p, DcBlocker_x_prev(dc));
-    WingFlapParams_set_dcb_y_prev(p, DcBlocker_y_prev(dc));
-    WingFlapParams_set_dcb_r(p, DcBlocker_r(dc));
+    WingFlapParams_set_dcb_x_prev(p, GarjanDcBlocker_x_prev(dc));
+    WingFlapParams_set_dcb_y_prev(p, GarjanDcBlocker_y_prev(dc));
+    WingFlapParams_set_dcb_r(p, GarjanDcBlocker_r(dc));
     # Scalars via the derive, then the naad components' LIVE state spliced
     # in as "dsp" -- without it a restore resumes with zeroed filter memory.
     var psb = str_builder_new();
@@ -8062,9 +8066,9 @@ fn wingflap_from_json_str(json) {
 
     var dc = garjan_dcblocker_new(WingFlapParams_sample_rate(p));
     if (garjan_is_err(dc) == 1) { return dc; }
-    DcBlocker_set_x_prev(dc, WingFlapParams_dcb_x_prev(p));
-    DcBlocker_set_y_prev(dc, WingFlapParams_dcb_y_prev(p));
-    DcBlocker_set_r(dc, WingFlapParams_dcb_r(p));
+    GarjanDcBlocker_set_x_prev(dc, WingFlapParams_dcb_x_prev(p));
+    GarjanDcBlocker_set_y_prev(dc, WingFlapParams_dcb_y_prev(p));
+    GarjanDcBlocker_set_r(dc, WingFlapParams_dcb_r(p));
     WingFlap_set_dc_blocker(self, dc);
 
     var b = wingflap_build_naad(self);
@@ -8357,9 +8361,9 @@ fn underwater_to_json(self, sb) {
     UnderwaterParams_set_rng_state(p, Rng_state(rng));
     UnderwaterParams_set_rng_inc(p, Rng_inc(rng));
     var dc = Underwater_dc_blocker(self);
-    UnderwaterParams_set_dcb_x_prev(p, DcBlocker_x_prev(dc));
-    UnderwaterParams_set_dcb_y_prev(p, DcBlocker_y_prev(dc));
-    UnderwaterParams_set_dcb_r(p, DcBlocker_r(dc));
+    UnderwaterParams_set_dcb_x_prev(p, GarjanDcBlocker_x_prev(dc));
+    UnderwaterParams_set_dcb_y_prev(p, GarjanDcBlocker_y_prev(dc));
+    UnderwaterParams_set_dcb_r(p, GarjanDcBlocker_r(dc));
     # Scalars via the derive, then the naad components' LIVE state spliced
     # in as "dsp" -- without it a restore resumes with zeroed filter memory.
     var psb = str_builder_new();
@@ -8414,9 +8418,9 @@ fn underwater_from_json_str(json) {
 
     var dc = garjan_dcblocker_new(UnderwaterParams_sample_rate(p));
     if (garjan_is_err(dc) == 1) { return dc; }
-    DcBlocker_set_x_prev(dc, UnderwaterParams_dcb_x_prev(p));
-    DcBlocker_set_y_prev(dc, UnderwaterParams_dcb_y_prev(p));
-    DcBlocker_set_r(dc, UnderwaterParams_dcb_r(p));
+    GarjanDcBlocker_set_x_prev(dc, UnderwaterParams_dcb_x_prev(p));
+    GarjanDcBlocker_set_y_prev(dc, UnderwaterParams_dcb_y_prev(p));
+    GarjanDcBlocker_set_r(dc, UnderwaterParams_dcb_r(p));
     Underwater_set_dc_blocker(self, dc);
 
     var b = underwater_build_naad(self);
@@ -8742,9 +8746,9 @@ fn surf_to_json(self, sb) {
     SurfParams_set_rng_state(p, Rng_state(rng));
     SurfParams_set_rng_inc(p, Rng_inc(rng));
     var dc = Surf_dc_blocker(self);
-    SurfParams_set_dcb_x_prev(p, DcBlocker_x_prev(dc));
-    SurfParams_set_dcb_y_prev(p, DcBlocker_y_prev(dc));
-    SurfParams_set_dcb_r(p, DcBlocker_r(dc));
+    SurfParams_set_dcb_x_prev(p, GarjanDcBlocker_x_prev(dc));
+    SurfParams_set_dcb_y_prev(p, GarjanDcBlocker_y_prev(dc));
+    SurfParams_set_dcb_r(p, GarjanDcBlocker_r(dc));
     # Scalars via the derive, then the naad components' LIVE state spliced
     # in as "dsp" -- without it a restore resumes with zeroed filter memory.
     var psb = str_builder_new();
@@ -8798,9 +8802,9 @@ fn surf_from_json_str(json) {
 
     var dc = garjan_dcblocker_new(SurfParams_sample_rate(p));
     if (garjan_is_err(dc) == 1) { return dc; }
-    DcBlocker_set_x_prev(dc, SurfParams_dcb_x_prev(p));
-    DcBlocker_set_y_prev(dc, SurfParams_dcb_y_prev(p));
-    DcBlocker_set_r(dc, SurfParams_dcb_r(p));
+    GarjanDcBlocker_set_x_prev(dc, SurfParams_dcb_x_prev(p));
+    GarjanDcBlocker_set_y_prev(dc, SurfParams_dcb_y_prev(p));
+    GarjanDcBlocker_set_r(dc, SurfParams_dcb_r(p));
     Surf_set_dc_blocker(self, dc);
 
     var b = surf_build_naad(self);
@@ -9082,9 +9086,9 @@ fn texture_to_json(self, sb) {
     AmbientTextureParams_set_rng_state(p, Rng_state(rng));
     AmbientTextureParams_set_rng_inc(p, Rng_inc(rng));
     var dc = AmbientTexture_dc_blocker(self);
-    AmbientTextureParams_set_dcb_x_prev(p, DcBlocker_x_prev(dc));
-    AmbientTextureParams_set_dcb_y_prev(p, DcBlocker_y_prev(dc));
-    AmbientTextureParams_set_dcb_r(p, DcBlocker_r(dc));
+    AmbientTextureParams_set_dcb_x_prev(p, GarjanDcBlocker_x_prev(dc));
+    AmbientTextureParams_set_dcb_y_prev(p, GarjanDcBlocker_y_prev(dc));
+    AmbientTextureParams_set_dcb_r(p, GarjanDcBlocker_r(dc));
     # Scalars via the derive, then the naad components' LIVE state spliced
     # in as "dsp" -- without it a restore resumes with zeroed filter memory.
     var psb = str_builder_new();
@@ -9137,9 +9141,9 @@ fn texture_from_json_str(json) {
 
     var dc = garjan_dcblocker_new(AmbientTextureParams_sample_rate(p));
     if (garjan_is_err(dc) == 1) { return dc; }
-    DcBlocker_set_x_prev(dc, AmbientTextureParams_dcb_x_prev(p));
-    DcBlocker_set_y_prev(dc, AmbientTextureParams_dcb_y_prev(p));
-    DcBlocker_set_r(dc, AmbientTextureParams_dcb_r(p));
+    GarjanDcBlocker_set_x_prev(dc, AmbientTextureParams_dcb_x_prev(p));
+    GarjanDcBlocker_set_y_prev(dc, AmbientTextureParams_dcb_y_prev(p));
+    GarjanDcBlocker_set_r(dc, AmbientTextureParams_dcb_r(p));
     AmbientTexture_set_dc_blocker(self, dc);
 
     var b = texture_build_naad(self);

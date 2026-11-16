@@ -7,35 +7,13 @@
 
 | Release | Theme | Gate |
 |---|---|---|
-| 2.7.1 | Namespace hygiene in dhvani's closure | None: ready |
 | 2.8.0 | Close the port's last two records | A decision |
 | 2.9.x | Performance that changes samples | A decision, then an ADR |
 | 2.x.x | Watch items | Upstream, or a new consumer |
 | 3.0.0 | Allocator ownership | Breaking, if it happens |
 
-This sets an order, not a schedule. 2.7.1 can ship at any time. The rest wait on a
-decision or on something outside this repository, so a release ships when its gate opens,
-even ahead of a lower number.
-
----
-
-## 2.7.1 — Namespace hygiene
-
-**Gate: none.** Found by the 2.7.0 consumer check, which runs the symbol-collision audit
-across dhvani's whole closure, not only garjan's own dependencies.
-
-- **Rename the internal `DcBlocker` struct**, to `GarjanDcBlocker` or similar. prani
-  declares a `DcBlocker` too, so in dhvani's flat namespace its nine derived functions
-  (`DcBlocker_x_prev` through `DcBlocker_from_json_str`) are duplicates, and cycc keeps
-  prani's, the last definition, with a warning. It is harmless today: both structs are
-  three 8-byte words in the same order, and garjan's library code never calls the codec.
-  Either side reordering its fields would corrupt garjan's DC blocker inside dhvani
-  silently. In Rust the struct was `pub(crate)`, so renaming it breaks no public API. It
-  is mechanical, about 130 call sites, and the audio hashes and the serialize-and-restore
-  dump must stay identical.
-- **Add the closure audit to the upgrade checklist** in
-  [`dependency-watch.md`](dependency-watch.md), so each consumer's other bundles are
-  checked as well as garjan's own dependencies.
+This sets an order, not a schedule. Every item waits on a decision or on something outside
+this repository, so a release ships when its gate opens, even ahead of a lower number.
 
 ---
 
@@ -137,6 +115,7 @@ buffer form saves is a few ns against 45 to 700 ns per sample.
 2.0.0 through 2.7.0: the port, three audits and their repairs, hot-path optimization,
 parity completion, boundary validation, serde live-state parity, the fuzz harness, the
 moves to cyrius 6.7.18, and at 2.7.0 the last Rust module (soorat's visualization data,
-ungated), the items that waited on dhvani's pins, and the newest naad, hisab and goonj.
+ungated), the items that waited on dhvani's pins, the newest naad, hisab and goonj, and the
+rename of the DC blocker struct that collided with prani's in dhvani's closure.
 All 2.x maturity criteria are met, the last at 2.6.2, when dhvani's environment suite was
 run against the bundle. Per-release detail is in the [CHANGELOG](../../CHANGELOG.md).

@@ -214,9 +214,9 @@ fn whoosh_to_json(self, sb) {
     WhooshParams_set_rng_state(p, Rng_state(rng));
     WhooshParams_set_rng_inc(p, Rng_inc(rng));
     var dc = Whoosh_dc_blocker(self);
-    WhooshParams_set_dcb_x_prev(p, DcBlocker_x_prev(dc));
-    WhooshParams_set_dcb_y_prev(p, DcBlocker_y_prev(dc));
-    WhooshParams_set_dcb_r(p, DcBlocker_r(dc));
+    WhooshParams_set_dcb_x_prev(p, GarjanDcBlocker_x_prev(dc));
+    WhooshParams_set_dcb_y_prev(p, GarjanDcBlocker_y_prev(dc));
+    WhooshParams_set_dcb_r(p, GarjanDcBlocker_r(dc));
     # Scalars via the derive, then the naad components' LIVE state spliced
     # in as "dsp" -- without it a restore resumes with zeroed filter memory.
     var psb = str_builder_new();
@@ -268,9 +268,9 @@ fn whoosh_from_json_str(json) {
 
     var dc = garjan_dcblocker_new(WhooshParams_sample_rate(p));
     if (garjan_is_err(dc) == 1) { return dc; }
-    DcBlocker_set_x_prev(dc, WhooshParams_dcb_x_prev(p));
-    DcBlocker_set_y_prev(dc, WhooshParams_dcb_y_prev(p));
-    DcBlocker_set_r(dc, WhooshParams_dcb_r(p));
+    GarjanDcBlocker_set_x_prev(dc, WhooshParams_dcb_x_prev(p));
+    GarjanDcBlocker_set_y_prev(dc, WhooshParams_dcb_y_prev(p));
+    GarjanDcBlocker_set_r(dc, WhooshParams_dcb_r(p));
     Whoosh_set_dc_blocker(self, dc);
 
     var b = whoosh_build_naad(self);

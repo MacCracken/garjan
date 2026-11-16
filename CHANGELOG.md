@@ -8,7 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [2.7.0] - Port closure
 
 The port's last Rust module, the three items that waited on dhvani's pins, the Rust tests
-the port had dropped, and the newest naad, hisab and goonj. cyrius stays **6.7.18**, still
+the port had dropped, the newest naad, hisab and goonj, and a rename that clears garjan's
+one name collision in dhvani. cyrius stays **6.7.18**, still
 its newest release. **All 21 audio hashes match 2.6.3**, and so does every synth's
 serialized document and its restored output. dhvani can take this bundle without moving
 anything else.
@@ -72,9 +73,15 @@ anything else.
   back for dhvani's 6.6.10. Nothing is converted for its own sake.
 - `garjan_json_open` accepts an array under `particles` and `velocities`, as it did under
   `slots`, through the new `garjan_json_array_key`.
-- The roadmap is reorganized around what each item waits on: 2.7.1 (ready), 2.8.0 (a
-  decision), 2.9.x (performance that changes samples), watch items and 3.0.0. The soorat
-  gate is gone.
+- **The internal `DcBlocker` struct is `GarjanDcBlocker`**, and its derived functions
+  `GarjanDcBlocker_*`. prani declares a `DcBlocker` too, so in dhvani, which links both,
+  cycc kept prani's nine derived functions over garjan's, with a warning. That was harmless
+  only while both structs had the same three 8-byte fields in the same order. Rust's
+  `DcBlocker` was `pub(crate)`, so no public name of the port changes, and documents do not
+  change either: synths carry the blocker as flattened `dcb_*` fields. Code outside garjan
+  that called `DcBlocker_*` on a garjan blocker should use `GarjanDcBlocker_*`.
+- The roadmap is reorganized around what each item waits on: 2.8.0 (a decision), 2.9.x
+  (performance that changes samples), watch items and 3.0.0. The soorat gate is gone.
 
 ### Dependencies
 
@@ -96,12 +103,13 @@ anything else.
 - **Bit-identical across the bump**: all 21 audio hashes, every synth's `*_to_json`
   bytes, and the block each restored synth renders.
 - **dhvani**, on its own pins (cyrius 6.7.18, naad 2.3.3, hisab 3.4.1, goonj 2.3.1) with
-  this bundle: environment 10/10, bundle, bundle_synth, integration 41/41 and
-  integration_advanced 125/125 pass, and its main binary builds with no undefined
+  this bundle: environment 10/10, bundle, bundle_synth, integration 41/41,
+  integration_advanced 125/125 and creature 12/12 pass, and its main binary builds with no undefined
   function. A canary proved the 2.7.0 bundle was the one under test.
-- **Symbol collisions**: none across garjan's 534 names and the 45 vendored files. Across
-  dhvani's closure, one: prani's `struct DcBlocker`. It is harmless today and listed for
-  2.7.1.
+- **Symbol collisions**: none across garjan's 534 names and the 45 vendored files, and,
+  after the `GarjanDcBlocker` rename, none across dhvani's closure: 69 other bundles and
+  dhvani's own source. dhvani's build no longer warns about a duplicate garjan function,
+  and its creature suite, which uses prani's `DcBlocker`, passes.
 - **Revert proof**: each of the soorat module's 10 guards, reverted alone, fails
   `tests/soorat.tcyr`. Three entries first added to `garjan_json_open`'s shared key lists
   were caught by nothing, because the soorat loaders already refuse those values, and were

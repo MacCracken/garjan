@@ -334,9 +334,9 @@ fn foliage_to_json(self, sb) {
     FoliageParams_set_rng_inc(p, Rng_inc(rng));
 
     var dc = Foliage_dc_blocker(self);
-    FoliageParams_set_dcb_x_prev(p, DcBlocker_x_prev(dc));
-    FoliageParams_set_dcb_y_prev(p, DcBlocker_y_prev(dc));
-    FoliageParams_set_dcb_r(p, DcBlocker_r(dc));
+    FoliageParams_set_dcb_x_prev(p, GarjanDcBlocker_x_prev(dc));
+    FoliageParams_set_dcb_y_prev(p, GarjanDcBlocker_y_prev(dc));
+    FoliageParams_set_dcb_r(p, GarjanDcBlocker_r(dc));
 
     var exc = Foliage_snap_exciter(self);
     FoliageParams_set_exc_position(p, Exciter_position(exc));
@@ -403,9 +403,9 @@ fn foliage_from_json_str(json) {
 
     var dc = garjan_dcblocker_new(FoliageParams_sample_rate(p));
     if (garjan_is_err(dc) == 1) { return dc; }
-    DcBlocker_set_x_prev(dc, FoliageParams_dcb_x_prev(p));
-    DcBlocker_set_y_prev(dc, FoliageParams_dcb_y_prev(p));
-    DcBlocker_set_r(dc, FoliageParams_dcb_r(p));
+    GarjanDcBlocker_set_x_prev(dc, FoliageParams_dcb_x_prev(p));
+    GarjanDcBlocker_set_y_prev(dc, FoliageParams_dcb_y_prev(p));
+    GarjanDcBlocker_set_r(dc, FoliageParams_dcb_r(p));
     Foliage_set_dc_blocker(self, dc);
 
     # Rebuild the exciter, restoring its live state.
