@@ -5,7 +5,7 @@
 
 ## Version
 
-**2.7.0** (2026-11-16). Per-release detail is in the
+**2.8.0** (2026-11-16). Per-release detail is in the
 [CHANGELOG](../../CHANGELOG.md); this file is current state only.
 
 The 2.x line so far: the Rust→Cyrius port (2.0.0), a toolchain and dependency
@@ -14,14 +14,14 @@ optimization (2.0.5, 2.3.0), parity completion — integration suite, benchmarks
 examples (2.1.0) — boundary validation (2.2.0, 2.4.0), serde live-state parity
 (2.5.0), a second full audit sweep (2.5.1), toolchain moves to cyrius 6.6.3 (2.5.2),
 6.6.20 (2.5.3), 6.7.9 (2.6.0) and 6.7.18 (2.6.1), the roadmap's quick repairs (2.6.2), a
-third full audit sweep (2.6.3), and port closure (2.7.0): the last Rust module, the items
-that waited on dhvani's pins, the Rust tests the port had dropped, and the newest naad,
-hisab and goonj.
+third full audit sweep (2.6.3), and port closure (2.7.0, 2.8.0): the last Rust module, the
+items that waited on dhvani's pins, the Rust tests the port had dropped, the newest naad,
+hisab and goonj, and the standalone `ModalBank` and `Exciter` codecs.
 
 ## Toolchain
 
 - **Cyrius pin**: `6.7.18` (in `cyrius.cyml [package].cyrius`), still the newest release
-  at 2.7.0, as is every dependency below.
+  at 2.8.0, as is every dependency below.
 - **Floor**: garjan's dep set builds and passes from cyrius 6.7.2. 6.7.1 fails inside
   naad's bundle. Re-measured at 2.7.0.
 - **6.7.x syntax** is allowed in `src/` since 2.7.0, because the oldest consumer pin is
@@ -35,12 +35,12 @@ hisab and goonj.
   synthesizers (fire, weather=thunder/rain/wind, water, precipitation, bubble,
   impact, footstep, friction, creak, rolling, foliage, whoosh, whistle, cloth,
   insect, wingflap, underwater, surf, texture) + bridge, builder and soorat (visualization
-  data). Entry `src/main.cyr`; distlib bundle `dist/garjan.cyr`, 10,093 lines.
+  data). Entry `src/main.cyr`; distlib bundle `dist/garjan.cyr`, 10,296 lines.
 
 ## Tests
 
-- **35 suites** in `tests/*.tcyr`, **1,120 assertions, all green**.
-  `tests/garjan.tcyr` is the cross-module integration suite (506 of those),
+- **35 suites** in `tests/*.tcyr`, **1,149 assertions, all green**.
+  `tests/garjan.tcyr` is the cross-module integration suite (512 of those),
   ported from `rust-old/tests/integration.rs`. `tests/soorat.tcyr` (90) ports
   `integration/soorat.rs`'s ten tests and pins the port's own choices.
   `tests/naad_failure.tcyr` replaces naad's `noise_new` for its whole binary, so it is a
@@ -51,12 +51,12 @@ hisab and goonj.
   does not run it), `cyrius build` warning-free, `cyrius vet` 0 missing (it lists
   `dist/garjan.cyr` as untrusted, as it did on 6.6.3), `cyrius distlib --check` in
   sync, 0 lines > 120 chars in `src/` or `tests/`.
-- **Fuzz**: `tests/garjan.fcyr` runs **26,927 cases** over **25 entry points** in about
+- **Fuzz**: `tests/garjan.fcyr` runs **27,611 cases** over **27 entry points** in about
   10 s on a quiet machine, each in a forked child with a time and memory limit. Hostile
-  documents go through all 25 `*_from_json_str` entry points (21 synths, the voice pool
-  and soorat's three fields), including malformed numbers and duplicate keys. An API stage
-  feeds hostile f64 values and ids through every constructor, setter, synthesize duration,
-  particle count and grid size. CI runs it, and releases gate on CI.
+  documents go through all 27 `*_from_json_str` entry points (21 synths, the voice pool,
+  soorat's three fields, the modal bank and the exciter), including malformed numbers and
+  duplicate keys. An API stage feeds hostile f64 values and ids through every constructor,
+  setter, synthesize duration, particle count, grid size and exciter length. CI runs it, and releases gate on CI.
 - **Allocation failure**: at 2.7.0 a sweep refused each allocation of every synth
   constructor in turn, 650 cases, and every one ended in `GARJAN_ERR_ALLOCATION`.
   The sweep harness is not committed; the 2.6.3 audit has the method.
@@ -91,7 +91,7 @@ These tags are what the dependencies themselves pin, so the flattened graph is
 consistent: naad 2.3.5 → hisab 3.5.0 + goonj 2.3.2; goonj 2.3.2 → hisab 3.5.0; all three
 pin cyrius 6.7.18. `lib/` is 45 files: 42 byte-identical to the 6.7.18 snapshot, plus the
 naad, hisab and goonj bundles byte-identical to their tags.
-Symbol-collision audit: garjan's 534 top-level names (fn, var, const, struct) intersect
+Symbol-collision audit: garjan's 540 top-level names (fn, var, const, struct) intersect
 every vendored file at zero, and dhvani's whole closure too: its 69 other bundles and its
 own source. The one collision found there, prani's `struct DcBlocker`, was fixed at 2.7.0
 by renaming garjan's to `GarjanDcBlocker`. Re-run both on any dep bump, since Cyrius gives
@@ -100,18 +100,19 @@ no diagnostic for a duplicate top-level `var`.
 ## Consumers
 
 - **dhvani** pins garjan 2.6.3 on cyrius 6.7.18, naad 2.3.3, hisab 3.4.1 and goonj 2.3.1,
-  and calls it from `src/environment.cyr`. The 2.7.0 bundle passes its environment (10),
-  bundle, bundle_synth, integration (41), integration_advanced (125) and creature (12)
-  suites under those pins, and its main binary builds with no undefined function and no
-  duplicate garjan symbol. So it can take 2.7.0 without moving anything else.
+  and calls it from `src/environment.cyr`. The 2.8.0 bundle passes its environment (10),
+  bundle, bundle_synth, integration (41), integration_advanced (125), creature (12) and
+  mechanical (10) suites under those pins, and its main binary builds with no undefined
+  function and no duplicate garjan symbol. So it can take 2.8.0 without moving anything
+  else.
 
 Expected: kiran, joshua, soorat (for the 2.7.0 field types, once its port finishes), and
 any AGNOS component needing environmental audio.
 
 ## Next
 
-2.8.0 needs a decision on standalone `ModalBank` and `Exciter` codecs. Everything else waits
-on a decision or on something outside this repository: [`roadmap.md`](roadmap.md). The upstream allocation defects still open are U2 to U4, in
+The port is closed. Everything left waits on a decision (sample-changing performance) or on
+something outside this repository: [`roadmap.md`](roadmap.md). The upstream allocation defects still open are U2 to U4, in
 [`dependency-watch.md`](dependency-watch.md).
 
 ## Port completeness
@@ -128,9 +129,10 @@ Re-verified 2026-11-16 by an independent audit of `rust-old/`:
   preserving Rust's exact discriminant**. The 3 exceptions are `GarjanError`, remapped
   deliberately (ADR-0005).
 - **Tests:** of `integration.rs`'s 134 tests, 26 are not applicable by design (enum serde
-  round-trips, since enums are integers). Every other test has a counterpart except
-  `test_serde_roundtrip_modal_bank` and `test_serde_roundtrip_exciter`: the port has no
-  standalone codec for either, and the roadmap's 2.8.0 decides whether it should.
+  round-trips, since enums are integers). Every other test has a counterpart, the last two,
+  `test_serde_roundtrip_modal_bank` and `test_serde_roundtrip_exciter`, since 2.8.0.
+- **Serde:** every type Rust serialized serializes here, `ModalBank` and `Exciter` since
+  2.8.0 (ADR-0013). The formats are garjan's own, not serde's (ADR-0014).
 - **Benches and examples:** 26 of 26 and 5 of 5, though several bench settings differ from
   Rust's (see the roadmap).
 - Also dropped deliberately: ~232 lines of non-naad fallback across 19 modules

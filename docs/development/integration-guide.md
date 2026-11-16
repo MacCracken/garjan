@@ -85,6 +85,12 @@ sample-identically. Documents written before 2.5.0 have no `"dsp"` member and
 still load, restoring parameters only. See
 [ADR-0008](../adr/0008-serde-carries-live-dsp-state.md).
 
+A `ModalBank` or `Exciter` you drive yourself saves the same way, through
+`modal_bank_to_json` / `modal_bank_from_json_str` and `exciter_to_json` /
+`exciter_from_json_str` (since 2.8.0, [ADR-0013](../adr/0013-modal-bank-and-exciter-serialize-standalone.md)).
+None of these documents is the Rust crate's format
+([ADR-0014](../adr/0014-garjan-documents-are-not-rust-old-documents.md)).
+
 ## Visualization data for soorat
 
 Since 2.7.0 garjan also builds what a renderer draws beside a sound, from the same

@@ -7,37 +7,12 @@
 
 | Release | Theme | Gate |
 |---|---|---|
-| 2.8.0 | Close the port's last two records | A decision |
 | 2.9.x | Performance that changes samples | A decision, then an ADR |
 | 2.x.x | Watch items | Upstream, or a new consumer |
 | 3.0.0 | Allocator ownership | Breaking, if it happens |
 
 This sets an order, not a schedule. Every item waits on a decision or on something outside
 this repository, so a release ships when its gate opens, even ahead of a lower number.
-
----
-
-## 2.8.0 — Close the port's last two records
-
-**Gate: a decision on each.** The 2.7.0 audit of `rust-old/` found every module, public
-function, struct and enum variant ported, except these two, which were decided at 2.0.0
-but never written down as ADRs.
-
-- **Standalone `ModalBank` and `Exciter` codecs.** Rust derived `Serialize` and
-  `Deserialize` on both. The port carries their live state only inside a host synth's
-  document (ADR-0008), and the 2.0.0 CHANGELOG says they are "rebuilt from their inputs
-  rather than serialized". `test_serde_roundtrip_modal_bank` and
-  `test_serde_roundtrip_exciter` are the only `integration.rs` tests still unported.
-  Either:
-  - **Port them.** `modal_bank_to_json` and `modal_bank_from_json_str`, the same for the
-    exciter, two fuzz entry points, and a loader that refuses coefficients no
-    `modal_bank_new` produces (ADR-0010). The coefficients are the hard part: a document
-    can carry a pole outside the unit circle.
-  - **Or record the divergence** in an ADR. The header of `src/modal.cyr` already says
-    what is true today.
-- **Write down that garjan's documents are not Rust's.** Enums serialize as integers, not
-  variant names, and array fields are flattened (ADR-0012), so no `rust-old` document
-  loads here. That is implied by the overview but stated in no ADR.
 
 ---
 
@@ -85,8 +60,9 @@ buffer form saves is a few ns against 45 to 700 ns per sample.
 - **ADR-0010's two gaps**, for a consumer that needs a stricter document:
   - **A missing field loads as 0.** The derive reader defaults it. To refuse it,
     `garjan_json_open` needs each synth's list of expected keys, or the reader needs to
-    report which fields it found. The three soorat loaders already refuse one
-    (ADR-0012).
+    report which fields it found. The three soorat loaders (ADR-0012) and the modal bank
+    and exciter loaders (ADR-0013) already refuse one, because they read every member
+    by hand.
   - **Configuration copies are trusted beyond finiteness.** Water's `lfo_rate`, and the
     per-type tables a synth copies at construction, take any finite value from a
     document. Re-deriving them, as 2.6.3 did for bubble, precipitation and foliage, closes
@@ -112,10 +88,12 @@ buffer form saves is a few ns against 45 to 700 ns per sample.
 
 ## Shipped
 
-2.0.0 through 2.7.0: the port, three audits and their repairs, hot-path optimization,
+2.0.0 through 2.8.0: the port, three audits and their repairs, hot-path optimization,
 parity completion, boundary validation, serde live-state parity, the fuzz harness, the
-moves to cyrius 6.7.18, and at 2.7.0 the last Rust module (soorat's visualization data,
+moves to cyrius 6.7.18, at 2.7.0 the last Rust module (soorat's visualization data,
 ungated), the items that waited on dhvani's pins, the newest naad, hisab and goonj, and the
-rename of the DC blocker struct that collided with prani's in dhvani's closure.
+rename of the DC blocker struct that collided with prani's in dhvani's closure, and at
+2.8.0 the standalone `ModalBank` and `Exciter` codecs, which close the port: every Rust
+module, public item and test now has a counterpart.
 All 2.x maturity criteria are met, the last at 2.6.2, when dhvani's environment suite was
 run against the bundle. Per-release detail is in the [CHANGELOG](../../CHANGELOG.md).

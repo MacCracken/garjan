@@ -6,6 +6,53 @@ include "src/rng.cyr"
 include "src/material.cyr"
 include "src/modal.cyr"
 
+# Serializes `o` as `kind` (0 modal bank, 1 exciter). Returns the document, or 0 on failure.
+fn mdoc(kind, o) {
+    var sb = str_builder_new();
+    var e = 0;
+    if (kind == 0) { e = modal_bank_to_json(o, sb); }
+    if (kind == 1) { e = exciter_to_json(o, sb); }
+    if (garjan_is_err(e) == 1) { return 0; }
+    return str_data(str_builder_build(sb));
+}
+
+# Joins four cstrings into a new one.
+fn mcat(a, b, c, d) {
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, a);
+    str_builder_add_cstr(sb, b);
+    str_builder_add_cstr(sb, c);
+    str_builder_add_cstr(sb, d);
+    return str_data(str_builder_build(sb));
+}
+
+# 1 if a and b are the same length and equal word for word.
+fn same_words(a, b) {
+    if (vec_len(a) != vec_len(b)) { return 0; }
+    var i = 0;
+    while (i < vec_len(a)) {
+        if (vec_get(a, i) != vec_get(b, i)) { return 0; }
+        i = i + 1;
+    }
+    return 1;
+}
+
+# Loads a one-mode bank document: `sr` and `mode` as JSON text, `mb` as the "dsp" state.
+# Returns 1 if refused.
+fn bank_refused(sr, mode, mb) {
+    var head = mcat("{\"sample_rate\":", sr, ",\"modes\":[", mode);
+    return garjan_is_err(modal_bank_from_json_str(mcat(head, "],\"dsp\":{\"mb\":", mb, "}}")));
+}
+
+# Loads an exciter document with these members as JSON text. Returns 1 if refused.
+fn exc_refused(ty, dur, pos, active) {
+    var a = mcat("{\"excitation_type\":", ty, ",\"duration_samples\":", dur);
+    var b = mcat(",\"amplitude\":0.5,\"position\":", pos, ",\"active\":", active);
+    return garjan_is_err(exciter_from_json_str(mcat(a, b, ",\"rng_state\":7,\"rng_inc\":31}", "")));
+}
+
+var sink_m = 0;    # discards a must_use result the test does not need
+
 # Runs the parity tests for src/modal.cyr. Returns the failure count, used as the exit code.
 fn main() {
     alloc_init();
@@ -138,6 +185,134 @@ fn main() {
         ms_i = ms_i + 1;
     }
     assert(f64_lt(ms_worst, f64_div(F64_ONE, f64_from(20))) == 1, "negative resonance matches Rust's seed");
+
+    # --- 2.8.0: standalone codecs (ADR-0013) ---
+    test_group("modal bank round trip: bytes, coefficients and continuation");
+    var cb_specs = generate_modes(material_properties(MATERIAL_GLASS), MODE_PATTERN_PLATE, 10, F64_HALF);
+    var cb = modal_bank_new(cb_specs, f64_from(48000));
+    var cbi = 0;
+    var cb_out = modal_bank_process_sample(cb, F64_ONE);
+    while (cbi < 300) { cb_out = modal_bank_process_sample(cb, garjan_frac(cbi % 7, 10)); cbi = cbi + 1; }
+    var cbj = mdoc(0, cb);
+    var cb2 = modal_bank_from_json_str(cbj);
+    assert_eq(garjan_is_err(cb2), 0, "a ringing bank loads");
+    assert(memeq(cbj, mdoc(0, cb2), strlen(cbj)) == 1, "and writes the same bytes");
+    assert_eq(modal_bank_mode_count(cb2), modal_bank_mode_count(cb), "with every mode");
+    assert_eq(same_words(ModalBank_coeff_re(cb2), ModalBank_coeff_re(cb)), 1, "coeff_re re-derived bit for bit");
+    assert_eq(same_words(ModalBank_coeff_im(cb2), ModalBank_coeff_im(cb)), 1, "coeff_im re-derived bit for bit");
+    assert_eq(same_words(ModalBank_state_re(cb2), ModalBank_state_re(cb)), 1, "state_re restored");
+    var cb_same = 1;
+    cbi = 0;
+    while (cbi < 2000) {
+        var cb_x = 0;
+        if (cbi == 500) { cb_x = F64_ONE; }
+        if (modal_bank_process_sample(cb, cb_x) != modal_bank_process_sample(cb2, cb_x)) { cb_same = 0; }
+        cbi = cbi + 1;
+    }
+    assert_eq(cb_same, 1, "the restored bank continues sample for sample");
+    var cb_empty = modal_bank_new(vec_new(), f64_from(44100));
+    assert_eq(modal_bank_mode_count(modal_bank_from_json_str(mdoc(0, cb_empty))), 0, "an empty bank round-trips");
+    var cb_drop = vec_new();
+    vec_push(cb_drop, modal_modespec_new(f64_from(10), F64_ONE, F64_ONE));      # below 20 Hz
+    vec_push(cb_drop, modal_modespec_new(f64_from(440), F64_HALF, F64_ONE));
+    vec_push(cb_drop, modal_modespec_new(f64_from(30000), F64_ONE, F64_ONE));   # past Nyquist at 44.1 kHz
+    vec_push(cb_drop, modal_modespec_new(f64_from(880), F64_ONE, 0));           # no decay
+    var cbd = modal_bank_new(cb_drop, f64_from(44100));
+    var cbd2 = modal_bank_from_json_str(mdoc(0, cbd));
+    assert_eq(modal_bank_mode_count(cbd2), 1, "only the surviving mode is written and loaded");
+    assert_eq(vec_get(ModalBank_frequency(cbd2), 0), f64_from(440), "the 440 Hz one");
+    var cb_neg = vec_new();
+    vec_push(cb_neg, modal_modespec_new(f64_from(440), f64_neg(0), garjan_frac(1, 10000)));
+    var cbn = modal_bank_new(cb_neg, f64_from(44100));
+    var cbn2 = modal_bank_from_json_str(mdoc(0, cbn));
+    assert_eq(vec_get(ModalBank_amplitude(cbn2), 0), f64_neg(0), "-0.0 amplitude survives");
+    assert_eq(vec_get(ModalBank_coeff_re(cbn2), 0), vec_get(ModalBank_coeff_re(cbn), 0), "a floored decay re-derives");
+
+    test_group("hostile modal bank documents are refused");
+    var good = "{\"frequency\":440.0,\"amplitude\":1.0,\"decay\":0.5}";
+    assert_eq(bank_refused("44100.0", good, "[0,0]"), 0, "the control document loads");
+    var mr = 0;
+    mr = mr + bank_refused("0.0", good, "[0,0]");                                   # sample rate
+    mr = mr + bank_refused("1e999", good, "[0,0]");
+    mr = mr + bank_refused("44100.0", "{\"frequency\":10.0,\"amplitude\":1.0,\"decay\":0.5}", "[0,0]");
+    mr = mr + bank_refused("44100.0", "{\"frequency\":22050.0,\"amplitude\":1.0,\"decay\":0.5}", "[0,0]");
+    mr = mr + bank_refused("44100.0", "{\"frequency\":440.0,\"amplitude\":1.0,\"decay\":0.0}", "[0,0]");
+    mr = mr + bank_refused("44100.0", "{\"frequency\":440.0,\"amplitude\":1.0,\"decay\":-1.0}", "[0,0]");
+    mr = mr + bank_refused("44100.0", "{\"frequency\":440.0,\"amplitude\":1.0}", "[0,0]");
+    mr = mr + bank_refused("44100.0", "{\"frequency\":440.0,\"amplitude\":1e999,\"decay\":0.5}", "[0,0]");
+    mr = mr + bank_refused("44100.0", "7", "[0,0]");                                # a mode that is no object
+    mr = mr + bank_refused("44100.0", good, "[0]");                                 # half a pair
+    mr = mr + bank_refused("44100.0", good, "[0,0,0,0]");                           # a pair too many
+    mr = mr + bank_refused("44100.0", good, "[0.5,0]");                             # not raw bits
+    mr = mr + bank_refused("44100.0", good, "[9221120237041090560,0]");             # a NaN
+    mr = mr + bank_refused("44100.0", good, "{}");
+    mr = mr + bank_refused("44100.0", good, "{\"a\":0,\"b\":0}");                 # an object of 2, not 2 values
+    mr = mr + garjan_is_err(modal_bank_from_json_str(mcat("{\"sample_rate\":44100.0,\"modes\":[", good, "]}", "")));
+    mr = mr + garjan_is_err(modal_bank_from_json_str("{\"sample_rate\":44100.0,\"dsp\":{\"mb\":[]}}"));
+    mr = mr + garjan_is_err(modal_bank_from_json_str("{\"modes\":[],\"dsp\":{\"mb\":[]}}"));
+    mr = mr + garjan_is_err(modal_bank_from_json_str("{\"sample_rate\":44100.0,\"modes\":[],\"dsp\":{}}"));
+    mr = mr + garjan_is_err(modal_bank_from_json_str("{\"sample_rate\":44100.0,\"modes\":{},\"dsp\":{\"mb\":[]}}"));
+    mr = mr + garjan_is_err(modal_bank_from_json_str("[]"));
+    mr = mr + garjan_is_err(modal_bank_from_json_str("{\"sample_rate\":44100.0,\"modes\":[],\"dsp\":{\"mb\":{}}}"));
+    assert_eq(mr, 22, "22 refused");
+
+    test_group("exciter round trip and continuation");
+    var ce_ty = 0;
+    var ce_ok = 1;
+    while (ce_ty < 3) {
+        var ce_at = 0;
+        while (ce_at < 4) {
+            var ce = exciter_new(ce_ty, 40, garjan_frac(7, 10));
+            if (ce_at > 0) { exciter_trigger(ce); }
+            var ce_k = 0;
+            while (ce_k < (ce_at - 1) * 20) { sink_m = exciter_next_sample(ce); ce_k = ce_k + 1; }
+            var cej = mdoc(1, ce);
+            var ce2 = exciter_from_json_str(cej);
+            if (garjan_is_err(ce2) == 1) { ce_ok = 0; }
+            if (garjan_is_err(ce2) == 0) {
+                if (memeq(cej, mdoc(1, ce2), strlen(cej)) == 0) { ce_ok = 0; }
+                ce_k = 0;
+                while (ce_k < 60) {
+                    if (exciter_next_sample(ce) != exciter_next_sample(ce2)) { ce_ok = 0; }
+                    ce_k = ce_k + 1;
+                }
+            }
+            ce_at = ce_at + 1;
+        }
+        ce_ty = ce_ty + 1;
+    }
+    assert_eq(ce_ok, 1, "3 types x idle, fresh, mid-burst, spent: same bytes and same samples");
+
+    test_group("hostile exciter documents are refused");
+    assert_eq(exc_refused("1", "40", "20", "1"), 0, "the control document loads");
+    assert_eq(exc_refused("1", "40", "40", "1"), 0, "active at exactly its duration is reachable");
+    assert_eq(exc_refused("0", "0", "1", "0"), 0, "a spent impulse is reachable");
+    var xr = 0;
+    xr = xr + exc_refused("3", "40", "0", "0");          # type out of range
+    xr = xr + exc_refused("-1", "40", "0", "0");
+    xr = xr + exc_refused("1.0", "40", "0", "0");        # a float in an enum
+    xr = xr + exc_refused("1", "-1", "0", "0");          # a usize in Rust
+    xr = xr + exc_refused("1", "40", "-1", "0");         # a usize in Rust
+    xr = xr + exc_refused("1", "40", "0", "2");          # a bool in Rust
+    xr = xr + exc_refused("0", "0", "1", "1");           # an impulse active after its sample
+    xr = xr + exc_refused("1", "40", "41", "1");         # active past its duration
+    xr = xr + exc_refused("2", "40", "99", "1");
+    xr = xr + garjan_is_err(exciter_from_json_str(
+        "{\"excitation_type\":1,\"duration_samples\":4,\"amplitude\":0.5,\"position\":0,\"active\":0}"));
+    xr = xr + garjan_is_err(exciter_from_json_str(mcat("{\"excitation_type\":1,\"duration_samples\":4,",
+          "\"position\":0,\"active\":0,\"rng_state\":7,\"rng_inc\":31}", "", "")));    # no amplitude
+    xr = xr + garjan_is_err(exciter_from_json_str(mcat("{\"excitation_type\":1,\"duration_samples\":4,",
+          "\"amplitude\":null,\"position\":0,\"active\":0,\"rng_state\":7,\"rng_inc\":31}", "", "")));
+    xr = xr + garjan_is_err(exciter_from_json_str(mcat("{\"excitation_type\":1,\"duration_samples\":4,",
+          "\"amplitude\":0.5,\"position\":0,\"active\":0,\"rng_state\":7,\"rng_inc\":30}", "", "")));
+    assert_eq(xr, 13, "13 refused");
+
+    test_group("a negative duration is refused at the API too");
+    assert_eq(exciter_new(EXCITATION_NOISE_BURST, 0 - 1, F64_ONE), GARJAN_ERR_INVALID_PARAMETER, "exciter_new");
+    var nd = exciter_new(EXCITATION_NOISE_BURST, 8, F64_ONE);
+    assert_eq(exciter_reset(nd, EXCITATION_HALF_SINE, 0 - 1, F64_ONE), GARJAN_ERR_INVALID_PARAMETER, "exciter_reset");
+    assert_eq(Exciter_excitation_type(nd), EXCITATION_NOISE_BURST, "a refused reset changes nothing");
+    assert_eq(garjan_is_err(exciter_new(EXCITATION_NOISE_BURST, 0, F64_ONE)), 0, "0 samples is a length");
 
     return assert_summary();
 }

@@ -88,9 +88,9 @@ syscall(60, r);
 ```
 
 Every public type also serializes to / from JSON (`<type>_to_json(p, sb)` /
-`<type>_from_json_str(json)`), including the stateful synthesizers. The exceptions are
-`ModalBank` and `Exciter`, whose live state travels inside their host synth's document
-instead (see the roadmap).
+`<type>_from_json_str(json)`), including the stateful synthesizers and, since 2.8.0, the
+modal bank and exciter on their own. These are garjan's own formats, not the Rust crate's
+([ADR-0014](docs/adr/0014-garjan-documents-are-not-rust-old-documents.md)).
 
 > **Round-tripping is a full session snapshot.** Since 2.5.0 the live DSP state
 > travels too — biquad and SVF memory, noise-generator position, LFO phase,

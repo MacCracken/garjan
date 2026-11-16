@@ -5,6 +5,79 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.8.0] - The last two codecs
+
+`ModalBank` and `Exciter` serialize on their own, as they did in Rust, which closes the
+port: every Rust module, public item and `integration.rs` test now has a counterpart. No
+toolchain or dependency change. **All 21 audio hashes and every synth's document match
+2.7.0**, and the 26 benchmarks are flat (median +0.1%).
+
+### Added
+
+- **`modal_bank_to_json` and `modal_bank_from_json_str`**
+  ([ADR-0013](docs/adr/0013-modal-bank-and-exciter-serialize-standalone.md)). A bank's
+  document carries its sample rate, its modes (frequency, amplitude and decay) and its
+  resonator state as raw bit patterns under `"dsp":{"mb":..}`. It does not carry the
+  coefficients, as Rust's did. A load rebuilds the bank through `modal_bank_new`, so every
+  coefficient is re-derived bit for bit and a pole no constructor builds cannot load. A
+  restored bank continues sample for sample. The loader refuses a mode the constructor
+  would drop, a state that is missing, not two integers per mode, or not finite, and a
+  missing or non-finite member.
+- **`exciter_to_json` and `exciter_from_json_str`**, a flat document of the type, duration,
+  amplitude, position, active flag and Rng. The loader refuses a missing member, an
+  out-of-range type, a negative duration or position, an even Rng increment, and an active
+  exciter past its duration. That includes an impulse active after its first sample,
+  which would otherwise report active forever.
+- **`ModalBank_frequency` and `ModalBank_decay`**: each surviving mode's inputs, as given,
+  kept beside `ModalBank_amplitude` so the writer has them.
+- **`test_serde_roundtrip_modal_bank` and `test_serde_roundtrip_exciter`**, the last two
+  unported `integration.rs` tests, in `tests/garjan.tcyr`. `tests/modal.tcyr` gains the
+  codecs' own tests (25 → 48 assertions): byte-identical round trips, bit-identical
+  coefficients, sample-for-sample continuation of a ringing bank and of an exciter in each
+  of three types at four points in its life, `-0.0` amplitude and floored decay, 22 hostile
+  bank documents and 13 hostile exciter documents.
+- **`cyrius fuzz` drives both loaders**: 27 entry points, 25 f64 slots (a bank's sample rate
+  and each mode field, an exciter's amplitude) and 40 id slots (exciter lengths). The run
+  grows from 26,927 cases to 27,611.
+- [ADR-0013](docs/adr/0013-modal-bank-and-exciter-serialize-standalone.md), and
+  [ADR-0014](docs/adr/0014-garjan-documents-are-not-rust-old-documents.md), which states for
+  the first time that garjan's documents are not `rust-old`'s, with the table of
+  differences.
+
+### Changed
+
+- **`exciter_new` and `exciter_reset` refuse a negative duration**, a `usize` in Rust, with
+  `GARJAN_ERR_INVALID_PARAMETER`, so the API builds nothing the loader refuses. Every synth
+  computes its duration from positive inputs, so no synth changes.
+- **The JSON read and splice helpers moved to `src/error.cyr`** as `garjan_json_read_f64`,
+  `garjan_json_read_int` and `garjan_emit_array_head`, shared by the soorat and modal
+  codecs. soorat's private copies are gone.
+- `garjan_json_open` accepts an array under `modes`. The soorat loaders drop their own
+  array-tag checks, which repeated `garjan_json_open`'s.
+- The "a non-object document is refused by every deserializer" group in
+  `tests/garjan.tcyr` counts all 27 deserializers. It had stayed at 22 through 2.7.0.
+- The roadmap drops 2.8.0. What remains waits on a decision (2.9.x) or on something
+  outside this repository.
+
+### Verified
+
+- **Bit-identical**: all 21 audio hashes, and every synth's `*_to_json` bytes and the block
+  each restored synth renders, against 2.6.3's baseline. The bank's new fields never
+  reach a synth's document.
+- **Revert proof**: each of the codecs' guards, reverted alone, fails `tests/modal.tcyr`.
+  Five did not on the first run. Three were redundant and were removed: a check for a
+  missing `"dsp"`, which leaves no `"mb"` either; a null check on `"mb"`, which bayan's
+  tag check already covers; and a check that `modes` is an array, which
+  `garjan_json_open` already makes. The other two needed sharper tests: an exciter with
+  no `amplitude`, and an empty bank whose state is not an array.
+- **dhvani**, on its own pins with this bundle: environment, bundle, bundle_synth,
+  integration, integration_advanced, creature and mechanical pass, and its main binary
+  builds with no undefined function and no duplicate garjan symbol.
+- **Symbol collisions**: none across garjan's 540 names, the 45 vendored files and
+  dhvani's closure.
+- `cyrius audit` exits 0, the build has no warnings, and the suite is 35 suites and
+  1,149 assertions, up from 1,120.
+
 ## [2.7.0] - Port closure
 
 The port's last Rust module, the three items that waited on dhvani's pins, the Rust tests

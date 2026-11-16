@@ -52,6 +52,10 @@ spread is roughly 3%, so treat single-run differences under that as noise.
 > through `process_block`, not `synthesize`. Compare the two tables only after aligning
 > them (see the roadmap).
 
+> **2.8.0 was flat**: median +0.1% across the 26 ops against the 2.7.0 build, best of 6
+> alternating rounds. A modal bank now stores each mode's frequency and decay when it is
+> built, and processing is unchanged.
+>
 > **Moving to naad 2.3.5, hisab 3.5.0 and goonj 2.3.2 (2.7.0) was flat**: median -0.2%
 > across the 26 ops. Every audio hash is unchanged. The one real move is whistle, +3.6%:
 > it now calls naad's `filter_svf_process_sample_into`, which also computes the high-pass

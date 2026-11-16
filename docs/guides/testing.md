@@ -35,17 +35,18 @@ cyrius audit                     # fmt / lint / docs / tests / bench
   test, including the check that every enum variant makes sound and not just finite
   samples.
 
-Total: **1,120 assertions** in 35 suites.
+Total: **1,149 assertions** in 35 suites.
 
 ## The fuzz harness
 
-`tests/garjan.fcyr` attacks the boundaries the suites can only sample. It runs 26,927
+`tests/garjan.fcyr` attacks the boundaries the suites can only sample. It runs 27,611
 cases, each in a forked child under a time and memory limit, so a crash, hang or runaway
 allocation fails that case without ending the run.
 
 - **Documents.** Hostile documents derived from each entry point's own `*_to_json` output
-  go through all 25 deserializers: the 21 synths, the voice pool and soorat's three fields. A document may be refused, or accepted and rendered.
-  Anything else fails.
+  go through all 27 deserializers: the 21 synths, the voice pool, soorat's three fields,
+  the modal bank and the exciter. A document may be refused, or accepted and rendered or
+  read. Anything else fails.
 - **Malformed numbers and duplicate keys.** These must be refused. The stage also fails
   if its duplicate-key builder stops producing a real `"key":value` pair.
 - **The API.** 9 hostile f64 values (±Inf, NaN, ±MAX, 1e20, the smallest denormal, -1 and -3) go through every f64

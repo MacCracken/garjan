@@ -21,8 +21,9 @@ fully attacker-controlled input. Three audits have focused there:
 [2.0.2](docs/audit/2026-08-30-audit.md),
 [2.5.1](docs/audit/2026-08-30-audit-2.md) and
 [2.6.3](docs/audit/2026-11-07-audit-3.md). `cyrius fuzz` drives hostile documents
-through all 25 of them (the 21 synths, the voice pool and soorat's three visualization
-fields), and hostile values through every constructor and setter.
+through all 27 of them (the 21 synths, the voice pool, soorat's three visualization
+fields, the modal bank and the exciter), and hostile values through every constructor and
+setter.
 
 ## Attack surface
 

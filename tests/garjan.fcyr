@@ -1,10 +1,10 @@
 # garjan.fcyr -- fuzz harness for the JSON deserialize boundary.
 #
 # `*_from_json_str` is garjan's only entry point taking fully attacker-controlled
-# input (docs/development/threat-model.md). This drives all 25 of them, the 21
-# synths, the voice pool and the three soorat fields, with hostile documents derived
-# from each one's own `*_to_json` output, then renders or reads whatever a document
-# manages to restore.
+# input (docs/development/threat-model.md). This drives all 27 of them, the 21
+# synths, the voice pool, the three soorat fields, the modal bank and the exciter, with
+# hostile documents derived from each one's own `*_to_json` output, then renders or
+# reads whatever a document manages to restore.
 #
 # Every case runs in its own forked child under a time and memory limit:
 #   - one crash must not end the run, so the remaining cases still report;
@@ -63,12 +63,14 @@ include "src/bridge.cyr"
 include "src/builder.cyr"
 include "src/soorat.cyr"
 
-var ENTRY_COUNT = 25;
+var ENTRY_COUNT = 27;
 var SYNTH_COUNT = 21;                        # entries 0..20 are synths
 var ENTRY_VOICE = 21;
 var ENTRY_PRECIP_FIELD = 22;                 # entries 22..24 are soorat's data fields
 var ENTRY_FIRE_EMITTER = 23;
 var ENTRY_WIND_FIELD = 24;
+var ENTRY_MODAL_BANK = 25;                   # entries 25..26 are the synths' DSP building blocks
+var ENTRY_EXCITER = 26;
 
 var FUZZ_SEED = 0x6761726A616E;              # "garjan"
 var FUZZ_RANDOM_CASES = 3000;
@@ -133,6 +135,8 @@ fn entry_name(e) {
     if (e == ENTRY_PRECIP_FIELD) { return "precipitation_field"; }
     if (e == ENTRY_FIRE_EMITTER) { return "fire_emitter"; }
     if (e == ENTRY_WIND_FIELD) { return "wind_field"; }
+    if (e == ENTRY_MODAL_BANK) { return "modal_bank"; }
+    if (e == ENTRY_EXCITER) { return "exciter"; }
     return "voice_pool";
 }
 
@@ -164,6 +168,12 @@ fn entry_make(e, sr) {
     if (e == ENTRY_PRECIP_FIELD) { return precipitation_field_snow(3, 0, 0, 0, ten, ten, ten, F64_HALF, F64_ONE, 0); }
     if (e == ENTRY_FIRE_EMITTER) { return fire_emitter_from_intensity(F64_ONE, 0, F64_HALF, F64_HALF); }
     if (e == ENTRY_WIND_FIELD) { return wind_field_gradient(3, 2, 0, F64_ONE, 0, F64_HALF, F64_ONE, ten, F64_ONE); }
+    if (e == ENTRY_MODAL_BANK) {
+        var specs = generate_modes(material_properties(MATERIAL_GLASS), MODE_PATTERN_PLATE, 6, F64_ONE);
+        if (garjan_is_err(specs) == 1) { return specs; }
+        return modal_bank_new(specs, sr);
+    }
+    if (e == ENTRY_EXCITER) { return exciter_new(EXCITATION_NOISE_BURST, 64, F64_HALF); }
     return voice_pool_new(4, STEAL_OLDEST);
 }
 
@@ -193,6 +203,8 @@ fn entry_dump(e, o, sb) {
     if (e == ENTRY_PRECIP_FIELD) { return precipitation_field_to_json(o, sb); }
     if (e == ENTRY_FIRE_EMITTER) { return fire_emitter_to_json(o, sb); }
     if (e == ENTRY_WIND_FIELD) { return wind_field_to_json(o, sb); }
+    if (e == ENTRY_MODAL_BANK) { return modal_bank_to_json(o, sb); }
+    if (e == ENTRY_EXCITER) { return exciter_to_json(o, sb); }
     return voice_pool_to_json(o, sb);
 }
 
@@ -222,6 +234,8 @@ fn entry_load(e, json) {
     if (e == ENTRY_PRECIP_FIELD) { return precipitation_field_from_json_str(json); }
     if (e == ENTRY_FIRE_EMITTER) { return fire_emitter_from_json_str(json); }
     if (e == ENTRY_WIND_FIELD) { return wind_field_from_json_str(json); }
+    if (e == ENTRY_MODAL_BANK) { return modal_bank_from_json_str(json); }
+    if (e == ENTRY_EXCITER) { return exciter_from_json_str(json); }
     return voice_pool_from_json_str(json);
 }
 
@@ -307,11 +321,30 @@ fn read_field(e, o) {
     return acc;
 }
 
+# Runs a modal bank or an exciter as it was restored, then from a fresh start, so hostile
+# state reaches the resonator loop and the excitation switch.
+fn run_block(e, o) {
+    var i = 0;
+    if (e == ENTRY_MODAL_BANK) {
+        while (i < 256) { sink = modal_bank_process_sample(o, 0); i = i + 1; }
+        sink = modal_bank_process_sample(o, F64_ONE);
+        modal_bank_reset(o);
+        while (i < 384) { sink = modal_bank_process_sample(o, F64_HALF); i = i + 1; }
+        return 0;
+    }
+    while (i < 16) { sink = exciter_next_sample(o); i = i + 1; }
+    sink = exciter_trigger(o);
+    while (i < 48) { sink = exciter_next_sample(o); i = i + 1; }
+    return 0;
+}
+
 # Renders a restored object and serializes it back, so hostile state reaches the
 # DSP loops and the writer as well as the loader. A soorat field is read instead.
 fn exercise_object(e, o) {
     var sb = str_builder_new();
-    if (e >= ENTRY_PRECIP_FIELD) {
+    if (e >= ENTRY_MODAL_BANK) {
+        sink = run_block(e, o);
+    } elif (e >= ENTRY_PRECIP_FIELD) {
         sink = read_field(e, o);
     } elif (e == ENTRY_VOICE) {
         sink = voice_pool_allocate(o, 1, 1);
@@ -875,9 +908,24 @@ fn api_call(k, v, sr) {
     if (j == 17) { return api_field(ENTRY_WIND_FIELD, wind_field_uniform(3, 2, v, 0, 0, v, v, 0)); }
     if (j == 18) { return api_field(ENTRY_WIND_FIELD, wind_field_gradient(3, 2, 0, 0, 0, F64_ONE, v, ten, F64_ONE)); }
     if (j == 19) { return api_field(ENTRY_WIND_FIELD, wind_field_gradient(3, 2, 0, 0, 0, F64_ONE, F64_ONE, v, v)); }
+    if (j == 20) { return api_field(ENTRY_MODAL_BANK, modal_bank_new(api_specs(f64_from(440), F64_ONE, F64_HALF), v)); }
+    if (j == 21) { return api_field(ENTRY_MODAL_BANK, modal_bank_new(api_specs(v, F64_ONE, F64_HALF), sr)); }
+    if (j == 22) { return api_field(ENTRY_MODAL_BANK, modal_bank_new(api_specs(f64_from(440), v, F64_HALF), sr)); }
+    if (j == 23) { return api_field(ENTRY_MODAL_BANK, modal_bank_new(api_specs(f64_from(440), F64_ONE, v), sr)); }
+    if (j == 24) { return api_field(ENTRY_EXCITER, exciter_new(EXCITATION_HALF_SINE, 32, v)); }
     return 1;
 }
-var API_F64_SLOTS = 20;
+var API_F64_SLOTS = 25;
+
+# A vec of two mode specs, a hostile one and a plain one. Returns it, or a negative code.
+fn api_specs(freq, amp, decay) {
+    var v = vec_new();
+    var s = modal_modespec_new(freq, amp, decay);
+    if (garjan_is_err(s) == 1) { return s; }
+    vec_push(v, s);
+    vec_push(v, modal_modespec_new(f64_from(1000), F64_HALF, F64_ONE));
+    return v;
+}
 
 # Reads and serializes soorat field `o` of entry `e`, or passes its refusal on.
 fn api_field(e, o) {
@@ -945,9 +993,18 @@ fn api_call_id(k, v, sr) {
         sink = wind_field_vx(wf, v);
         return 1;
     }
+    # Exciter lengths: a negative one is refused, a huge one runs only as long as it is pulled.
+    if (k == 37) { return api_field(ENTRY_EXCITER, exciter_new(EXCITATION_NOISE_BURST, v, F64_HALF)); }
+    if (k == 38) { return api_field(ENTRY_EXCITER, exciter_new(EXCITATION_HALF_SINE, v, F64_HALF)); }
+    if (k == 39) {
+        var xr = exciter_new(EXCITATION_IMPULSE, 4, F64_HALF);
+        var re = exciter_reset(xr, EXCITATION_NOISE_BURST, v, F64_HALF);
+        if (garjan_is_err(re) == 1) { return re; }
+        return api_field(ENTRY_EXCITER, xr);
+    }
     return 1;
 }
-var API_ID_SLOTS = 37;
+var API_ID_SLOTS = 40;
 
 # Builds modes and a bank from `props` and renders a block through it.
 fn api_modes(props, sr) {

@@ -17,7 +17,8 @@
 #   - The JSON shape follows the flattened fields, not Rust's arrays. A loader
 #     refuses a missing member, and a wind field whose nx * nz disagrees with its
 #     velocity count, both of which serde accepted.
-# Requires: error.cyr (garjan_alloc, garjan_frac, garjan_is_finite, garjan_json_open).
+# Requires: error.cyr (garjan_alloc, garjan_frac, garjan_is_finite, garjan_json_open and
+# the JSON read/emit helpers).
 
 # Most points a field may hold: particles in a PrecipitationField, grid points in a
 # WindField. 2^20, about 72 MB of particles. Rust had no bound; ADR-0012 has why.
@@ -349,56 +350,10 @@ fn wind_field_vz(f, index) {
 
 # ================================================================
 # serde. Each writer emits a derived scalar object, then splices its array in before
-# the closing brace. Each loader checks the document with garjan_json_open, then reads
-# every member from bayan's value tree, refusing any that is missing or not a finite
-# number.
+# the closing brace (garjan_emit_array_head). Each loader checks the document with
+# garjan_json_open, then reads every member from bayan's value tree
+# (garjan_json_read_f64 / _int), refusing any that is missing or not a finite number.
 # ================================================================
-
-# Writes builder `psb` (a derived object) into `sb` without its closing brace, then
-# `,"key":[`. Returns GARJAN_OK, GARJAN_ERR_ALLOCATION, or GARJAN_ERR_INVALID_PARAMETER
-# when psb holds no object.
-fn _soorat_open_array(sb, psb, key) {
-    var s = str_builder_build(psb);
-    if (s == 0) { return GARJAN_ERR_ALLOCATION; }
-    if (str_len(s) < 2) { return GARJAN_ERR_INVALID_PARAMETER; }
-    var head = str_from_buf(str_data(s), str_len(s) - 1);    # drop the '}'
-    if (head == 0) { return GARJAN_ERR_ALLOCATION; }
-    str_builder_add(sb, head);
-    str_builder_add_cstr(sb, ",\"");
-    str_builder_add_cstr(sb, key);
-    str_builder_add_cstr(sb, "\":[");
-    return GARJAN_OK;
-}
-
-# Reads member `key` of JSON object `obj` as an f64 into the word at `out`. An integer is
-# converted. Returns GARJAN_OK, or GARJAN_ERR_INVALID_PARAMETER when `obj` is not an
-# object or the member is missing, not a number, or not finite.
-fn _soorat_json_f64(obj, key, out) {
-    var v = garjan_json_get(obj, key);
-    if (v == 0) { return GARJAN_ERR_INVALID_PARAMETER; }
-    var t = bayan_json_v_tag(v);
-    var x = 0;
-    if (t == JTAG_FLOAT) {
-        x = bayan_json_v_float(v);
-    } elif (t == JTAG_INT) {
-        x = f64_from(bayan_json_v_int(v));
-    } else {
-        return GARJAN_ERR_INVALID_PARAMETER;
-    }
-    if (garjan_is_finite(x) == 0) { return GARJAN_ERR_INVALID_PARAMETER; }
-    store64(out, x);
-    return GARJAN_OK;
-}
-
-# Reads member `key` of JSON object `obj` as an integer into the word at `out`. Returns
-# GARJAN_OK, or GARJAN_ERR_INVALID_PARAMETER when it is missing or not an integer.
-fn _soorat_json_int(obj, key, out) {
-    var v = garjan_json_get(obj, key);
-    if (v == 0) { return GARJAN_ERR_INVALID_PARAMETER; }
-    if (bayan_json_v_tag(v) != JTAG_INT) { return GARJAN_ERR_INVALID_PARAMETER; }
-    store64(out, bayan_json_v_int(v));
-    return GARJAN_OK;
-}
 
 # Serializes a precipitation field into str_builder `sb`:
 # {"is_snow":..,"intensity":..,"wind_bias_x":..,"wind_bias_z":..,"particles":[{..},..]}.
@@ -415,7 +370,7 @@ fn precipitation_field_to_json(f, sb) {
     if (psb == 0) { return GARJAN_ERR_ALLOCATION; }
     var pe = PrecipitationFieldParams_to_json(p, psb);
     if (garjan_is_err(pe) == 1) { return pe; }
-    var oe = _soorat_open_array(sb, psb, "particles");
+    var oe = garjan_emit_array_head(sb, psb, "particles");
     if (garjan_is_err(oe) == 1) { return oe; }
     var particles = PrecipitationField_particles(f);
     var n = vec_len(particles);
@@ -437,14 +392,14 @@ fn _precipitation_particle_from_node(obj) {
     var w[64];    # the eight members, in struct order
     var wp = &w;
     var bad = 0;
-    bad = bad + garjan_is_err(_soorat_json_f64(obj, "position_x", wp));
-    bad = bad + garjan_is_err(_soorat_json_f64(obj, "position_y", wp + 8));
-    bad = bad + garjan_is_err(_soorat_json_f64(obj, "position_z", wp + 16));
-    bad = bad + garjan_is_err(_soorat_json_f64(obj, "velocity_x", wp + 24));
-    bad = bad + garjan_is_err(_soorat_json_f64(obj, "velocity_y", wp + 32));
-    bad = bad + garjan_is_err(_soorat_json_f64(obj, "velocity_z", wp + 40));
-    bad = bad + garjan_is_err(_soorat_json_f64(obj, "size", wp + 48));
-    bad = bad + garjan_is_err(_soorat_json_f64(obj, "life", wp + 56));
+    bad = bad + garjan_is_err(garjan_json_read_f64(obj, "position_x", wp));
+    bad = bad + garjan_is_err(garjan_json_read_f64(obj, "position_y", wp + 8));
+    bad = bad + garjan_is_err(garjan_json_read_f64(obj, "position_z", wp + 16));
+    bad = bad + garjan_is_err(garjan_json_read_f64(obj, "velocity_x", wp + 24));
+    bad = bad + garjan_is_err(garjan_json_read_f64(obj, "velocity_y", wp + 32));
+    bad = bad + garjan_is_err(garjan_json_read_f64(obj, "velocity_z", wp + 40));
+    bad = bad + garjan_is_err(garjan_json_read_f64(obj, "size", wp + 48));
+    bad = bad + garjan_is_err(garjan_json_read_f64(obj, "life", wp + 56));
     if (bad > 0) { return GARJAN_ERR_INVALID_PARAMETER; }
     var p = garjan_alloc(sizeof(PrecipitationParticle));
     if (garjan_is_err(p) == 1) { return p; }
@@ -471,16 +426,15 @@ fn precipitation_field_from_json_str(json) {
     var s[32];    # is_snow, intensity, wind_bias_x, wind_bias_z
     var sp = &s;
     var bad = 0;
-    bad = bad + garjan_is_err(_soorat_json_int(root, "is_snow", sp));
-    bad = bad + garjan_is_err(_soorat_json_f64(root, "intensity", sp + 8));
-    bad = bad + garjan_is_err(_soorat_json_f64(root, "wind_bias_x", sp + 16));
-    bad = bad + garjan_is_err(_soorat_json_f64(root, "wind_bias_z", sp + 24));
+    bad = bad + garjan_is_err(garjan_json_read_int(root, "is_snow", sp));
+    bad = bad + garjan_is_err(garjan_json_read_f64(root, "intensity", sp + 8));
+    bad = bad + garjan_is_err(garjan_json_read_f64(root, "wind_bias_x", sp + 16));
+    bad = bad + garjan_is_err(garjan_json_read_f64(root, "wind_bias_z", sp + 24));
     if (bad > 0) { return GARJAN_ERR_INVALID_PARAMETER; }
     var is_snow = load64(sp);
     if (is_snow != 0 && is_snow != 1) { return GARJAN_ERR_INVALID_PARAMETER; }    # a bool in Rust
-    var arr = garjan_json_get(root, "particles");
+    var arr = garjan_json_get(root, "particles");    # garjan_json_open refused a non-array
     if (arr == 0) { return GARJAN_ERR_INVALID_PARAMETER; }
-    if (bayan_json_v_tag(arr) != JTAG_ARR) { return GARJAN_ERR_INVALID_PARAMETER; }
     var n = bayan_json_v_arr_len(arr);
     if (n > GARJAN_MAX_FIELD_POINTS) { return GARJAN_ERR_INVALID_PARAMETER; }
 
@@ -521,14 +475,14 @@ fn fire_emitter_from_json_str(json) {
     var w[64];    # the eight members, in struct order
     var wp = &w;
     var bad = 0;
-    bad = bad + garjan_is_err(_soorat_json_f64(root, "position_x", wp));
-    bad = bad + garjan_is_err(_soorat_json_f64(root, "position_y", wp + 8));
-    bad = bad + garjan_is_err(_soorat_json_f64(root, "position_z", wp + 16));
-    bad = bad + garjan_is_err(_soorat_json_f64(root, "intensity", wp + 24));
-    bad = bad + garjan_is_err(_soorat_json_f64(root, "color_temperature_k", wp + 32));
-    bad = bad + garjan_is_err(_soorat_json_f64(root, "flame_height", wp + 40));
-    bad = bad + garjan_is_err(_soorat_json_f64(root, "base_radius", wp + 48));
-    bad = bad + garjan_is_err(_soorat_json_f64(root, "ember_rate", wp + 56));
+    bad = bad + garjan_is_err(garjan_json_read_f64(root, "position_x", wp));
+    bad = bad + garjan_is_err(garjan_json_read_f64(root, "position_y", wp + 8));
+    bad = bad + garjan_is_err(garjan_json_read_f64(root, "position_z", wp + 16));
+    bad = bad + garjan_is_err(garjan_json_read_f64(root, "intensity", wp + 24));
+    bad = bad + garjan_is_err(garjan_json_read_f64(root, "color_temperature_k", wp + 32));
+    bad = bad + garjan_is_err(garjan_json_read_f64(root, "flame_height", wp + 40));
+    bad = bad + garjan_is_err(garjan_json_read_f64(root, "base_radius", wp + 48));
+    bad = bad + garjan_is_err(garjan_json_read_f64(root, "ember_rate", wp + 56));
     if (bad > 0) { return GARJAN_ERR_INVALID_PARAMETER; }
     var e = garjan_alloc(sizeof(FireEmitter));
     if (garjan_is_err(e) == 1) { return e; }
@@ -561,7 +515,7 @@ fn wind_field_to_json(f, sb) {
     if (psb == 0) { return GARJAN_ERR_ALLOCATION; }
     var pe = WindFieldParams_to_json(p, psb);
     if (garjan_is_err(pe) == 1) { return pe; }
-    var oe = _soorat_open_array(sb, psb, "velocities");
+    var oe = garjan_emit_array_head(sb, psb, "velocities");
     if (garjan_is_err(oe) == 1) { return oe; }
     var pt[sizeof(WindFieldVelocity)];    # one point at a time: no allocation per point
     var v = WindField_velocities(f);
@@ -591,21 +545,20 @@ fn wind_field_from_json_str(json) {
     var w[56];    # nx, nz, origin_x, origin_y, origin_z, spacing, speed
     var wp = &w;
     var bad = 0;
-    bad = bad + garjan_is_err(_soorat_json_int(root, "nx", wp));
-    bad = bad + garjan_is_err(_soorat_json_int(root, "nz", wp + 8));
-    bad = bad + garjan_is_err(_soorat_json_f64(root, "origin_x", wp + 16));
-    bad = bad + garjan_is_err(_soorat_json_f64(root, "origin_y", wp + 24));
-    bad = bad + garjan_is_err(_soorat_json_f64(root, "origin_z", wp + 32));
-    bad = bad + garjan_is_err(_soorat_json_f64(root, "spacing", wp + 40));
-    bad = bad + garjan_is_err(_soorat_json_f64(root, "speed", wp + 48));
+    bad = bad + garjan_is_err(garjan_json_read_int(root, "nx", wp));
+    bad = bad + garjan_is_err(garjan_json_read_int(root, "nz", wp + 8));
+    bad = bad + garjan_is_err(garjan_json_read_f64(root, "origin_x", wp + 16));
+    bad = bad + garjan_is_err(garjan_json_read_f64(root, "origin_y", wp + 24));
+    bad = bad + garjan_is_err(garjan_json_read_f64(root, "origin_z", wp + 32));
+    bad = bad + garjan_is_err(garjan_json_read_f64(root, "spacing", wp + 40));
+    bad = bad + garjan_is_err(garjan_json_read_f64(root, "speed", wp + 48));
     if (bad > 0) { return GARJAN_ERR_INVALID_PARAMETER; }
     var nx = load64(wp);
     var nz = load64(wp + 8);
     var d = _wind_field_check_dims(nx, nz);
     if (garjan_is_err(d) == 1) { return d; }
-    var arr = garjan_json_get(root, "velocities");
+    var arr = garjan_json_get(root, "velocities");    # garjan_json_open refused a non-array
     if (arr == 0) { return GARJAN_ERR_INVALID_PARAMETER; }
-    if (bayan_json_v_tag(arr) != JTAG_ARR) { return GARJAN_ERR_INVALID_PARAMETER; }
     var n = bayan_json_v_arr_len(arr);
     # Rust kept dimensions and velocities as two unrelated fields. A field indexed by
     # z * nx + x must have exactly nx * nz points, so a disagreement is refused.
@@ -620,8 +573,8 @@ fn wind_field_from_json_str(json) {
     var i = 0;
     while (i < n) {
         var node = bayan_json_v_arr_get(arr, i);
-        if (garjan_is_err(_soorat_json_f64(node, "vx", xzp)) == 1) { return GARJAN_ERR_INVALID_PARAMETER; }
-        if (garjan_is_err(_soorat_json_f64(node, "vz", xzp + 8)) == 1) { return GARJAN_ERR_INVALID_PARAMETER; }
+        if (garjan_is_err(garjan_json_read_f64(node, "vx", xzp)) == 1) { return GARJAN_ERR_INVALID_PARAMETER; }
+        if (garjan_is_err(garjan_json_read_f64(node, "vz", xzp + 8)) == 1) { return GARJAN_ERR_INVALID_PARAMETER; }
         vec_push(v, load64(xzp));
         vec_push(v, load64(xzp + 8));
         i = i + 1;

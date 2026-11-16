@@ -4,11 +4,12 @@
 # generate_modes, ExcitationType, Exciter). f32 -> f64. Result<Self> ->
 # pointer / negative GARJAN_* code. Vec<f32> -> stdlib vec. enum-with-data
 # ExcitationType -> EXCITATION_* int + a duration_samples field on Exciter.
-# Requires: error.cyr (codes/is_finite), dsp.cyr (garjan_validate_sample_rate),
-# rng.cyr (Rng), material.cyr (MaterialProperties, used by generate_modes).
+# Requires: error.cyr (codes/is_finite, JSON helpers), dsp.cyr (garjan_validate_sample_rate,
+# the "dsp" state emitters), rng.cyr (Rng), material.cyr (MaterialProperties, used by
+# generate_modes).
 # ModalBank/Exciter hold vec/pointer fields -> #derive(Serialize) can't express
-# them. Neither has a standalone codec, as Rust's did: their live state travels inside
-# the host synth's "dsp" member (dsp.cyr, ADR-0008). See the roadmap's 2.8.0.
+# them. Their codecs are hand-rolled at the end of this file (ADR-0013). Inside a host
+# synth's document their live state travels in its "dsp" member instead (ADR-0008).
 
 # ---- ModePattern ----
 var MODE_PATTERN_HARMONIC     = 0;   # f_k = f0*k (strings, tubes)
@@ -59,9 +60,12 @@ fn modal_beam_ratio(k) {
     return f64_div(f64_from(120088), f64_from(1000));   # k == 16
 }
 
-# ---- ModalBank (SoA: 5 parallel vecs + sample_rate) ----
+# ---- ModalBank (SoA: 7 parallel vecs + sample_rate) ----
+# frequency and decay are the inputs of each surviving mode, as given, which Rust's bank
+# did not keep. The codec writes them instead of coeff_re/coeff_im, so a load rebuilds the
+# coefficients through modal_bank_new, bit for bit (ADR-0013).
 #derive(accessors)
-struct ModalBank { state_re; state_im; coeff_re; coeff_im; amplitude; sample_rate; }
+struct ModalBank { state_re; state_im; coeff_re; coeff_im; amplitude; sample_rate; frequency; decay; }
 
 # Build from a vec of ModeSpec pointers. Excludes modes < 20 Hz, >= Nyquist,
 # or with decay <= 0. Returns a pointer, or a negative code on bad sample_rate.
@@ -79,9 +83,12 @@ fn modal_bank_new(specs, sample_rate) {
     var coeff_re = vec_new();
     var coeff_im = vec_new();
     var amplitude = vec_new();
+    var frequency = vec_new();
+    var decay = vec_new();
     if (state_re == 0 || state_im == 0 || coeff_re == 0 || coeff_im == 0 || amplitude == 0) {
         return GARJAN_ERR_ALLOCATION;
     }
+    if (frequency == 0 || decay == 0) { return GARJAN_ERR_ALLOCATION; }
 
     var n = vec_len(specs);
     var i = 0;
@@ -98,6 +105,8 @@ fn modal_bank_new(specs, sample_rate) {
                     vec_push(coeff_re, f64_mul(radius, f64_cos(omega)));
                     vec_push(coeff_im, f64_mul(radius, f64_sin(omega)));
                     vec_push(amplitude, ModeSpec_amplitude(spec));
+                    vec_push(frequency, freq);
+                    vec_push(decay, dec);
                     vec_push(state_re, 0);
                     vec_push(state_im, 0);
                 }
@@ -114,6 +123,8 @@ fn modal_bank_new(specs, sample_rate) {
     ModalBank_set_coeff_im(self, coeff_im);
     ModalBank_set_amplitude(self, amplitude);
     ModalBank_set_sample_rate(self, sample_rate);
+    ModalBank_set_frequency(self, frequency);
+    ModalBank_set_decay(self, decay);
     return self;
 }
 
@@ -255,10 +266,12 @@ var EXCITATION_HALF_SINE  = 2;
 struct Exciter { excitation_type; duration_samples; amplitude; position; active; rng; }
 
 # Builds an idle Exciter of an EXCITATION_* type, with its length in samples; exciter_trigger
-# starts it. Values are stored as given. Returns it, or GARJAN_ERR_ALLOCATION.
+# starts it. Values are stored as given. Returns it, GARJAN_ERR_INVALID_PARAMETER for an
+# out-of-range type or a negative duration (a usize in Rust), or GARJAN_ERR_ALLOCATION.
 #must_use
 fn exciter_new(excitation_type, duration_samples, amplitude) {
     if (garjan_enum_invalid(excitation_type, EXCITATION_HALF_SINE) == 1) { return GARJAN_ERR_INVALID_PARAMETER; }
+    if (duration_samples < 0) { return GARJAN_ERR_INVALID_PARAMETER; }
     var self = garjan_alloc(sizeof(Exciter));
     if (garjan_is_err(self) == 1) { return self; }
     Exciter_set_excitation_type(self, excitation_type);
@@ -280,6 +293,7 @@ fn exciter_new(excitation_type, duration_samples, amplitude) {
 # the arena never frees.
 fn exciter_reset(self, excitation_type, duration_samples, amplitude) {
     if (garjan_enum_invalid(excitation_type, EXCITATION_HALF_SINE) == 1) { return GARJAN_ERR_INVALID_PARAMETER; }
+    if (duration_samples < 0) { return GARJAN_ERR_INVALID_PARAMETER; }
     Exciter_set_excitation_type(self, excitation_type);
     Exciter_set_duration_samples(self, duration_samples);
     Exciter_set_amplitude(self, amplitude);
@@ -338,4 +352,189 @@ fn exciter_next_sample(self) {
 #must_use
 fn exciter_is_active(self) {
     return Exciter_active(self);
+}
+
+# ================================================================
+# serde (ADR-0013). Rust derived Serialize and Deserialize on both types; the port
+# hand-rolls them, because both hold vec and pointer fields.
+# ================================================================
+
+# The bank's one scalar, for the derived float writer. Internal to the codec.
+#derive(accessors)
+#derive(Serialize)
+struct ModalBankParams {
+    sample_rate: f64;
+}
+
+# Serializes a modal bank into str_builder `sb`:
+#   {"sample_rate":..,"modes":[{"frequency":..,"amplitude":..,"decay":..},..],"dsp":{"mb":[..]}}
+# One mode per surviving resonator, then its live state as raw bit patterns, re then im per
+# mode, the form a host synth's "dsp" carries. Returns GARJAN_OK or a negative code.
+#must_use
+fn modal_bank_to_json(self, sb) {
+    var p = garjan_alloc(sizeof(ModalBankParams));
+    if (garjan_is_err(p) == 1) { return p; }
+    ModalBankParams_set_sample_rate(p, ModalBank_sample_rate(self));
+    var psb = str_builder_new();
+    if (psb == 0) { return GARJAN_ERR_ALLOCATION; }
+    var pe = ModalBankParams_to_json(p, psb);
+    if (garjan_is_err(pe) == 1) { return pe; }
+    # The live state first, so a refused allocation leaves `sb` untouched.
+    var dsp = bayan_json_v_obj_new();
+    var de = garjan_dsp_put(dsp, "mb", garjan_state_modal(self));
+    if (garjan_is_err(de) == 1) { return de; }
+    var body = bayan_json_v_build(dsp);
+    if (body == 0) { return GARJAN_ERR_ALLOCATION; }
+
+    var he = garjan_emit_array_head(sb, psb, "modes");
+    if (garjan_is_err(he) == 1) { return he; }
+    var ms[sizeof(ModeSpec)];    # one mode at a time: no allocation per mode
+    var freq = ModalBank_frequency(self);
+    var amp = ModalBank_amplitude(self);
+    var dec = ModalBank_decay(self);
+    var n = vec_len(amp);
+    var i = 0;
+    while (i < n) {
+        if (i > 0) { str_builder_add_cstr(sb, ","); }
+        ModeSpec_set_frequency(&ms, vec_get(freq, i));
+        ModeSpec_set_amplitude(&ms, vec_get(amp, i));
+        ModeSpec_set_decay(&ms, vec_get(dec, i));
+        var me = ModeSpec_to_json(&ms, sb);
+        if (garjan_is_err(me) == 1) { return me; }
+        i = i + 1;
+    }
+    str_builder_add_cstr(sb, "],\"dsp\":");
+    str_builder_add(sb, body);
+    str_builder_add_cstr(sb, "}");
+    return GARJAN_OK;
+}
+
+# Restores a modal bank from modal_bank_to_json's document. The modes go back through
+# modal_bank_new, which re-derives every coefficient, so only a bank the constructor can
+# build loads. Returns a pointer, or GARJAN_ERR_INVALID_PARAMETER for a document
+# garjan_json_open refuses, a missing or non-finite member, an invalid sample rate, a mode
+# the constructor would drop (below 20 Hz, at or above Nyquist, or a decay not above 0), or
+# a "dsp" state that is missing, not 2 integers per mode, or not finite; or
+# GARJAN_ERR_ALLOCATION.
+#must_use
+fn modal_bank_from_json_str(json) {
+    var dsp = garjan_json_open(json);    # also refuses a "modes" that is not an array
+    if (garjan_is_err(dsp) == 1) { return dsp; }
+    var root = bayan_json_v_parse_buf(json, strlen(json));
+    var w[24];    # sample_rate, then one mode's frequency, amplitude, decay
+    var wp = &w;
+    if (garjan_is_err(garjan_json_read_f64(root, "sample_rate", wp)) == 1) { return GARJAN_ERR_INVALID_PARAMETER; }
+    var sr = load64(wp);
+    var arr = garjan_json_get(root, "modes");
+    if (arr == 0) { return GARJAN_ERR_INVALID_PARAMETER; }
+    var n = bayan_json_v_arr_len(arr);
+
+    var specs = vec_new();
+    if (specs == 0) { return GARJAN_ERR_ALLOCATION; }
+    var i = 0;
+    while (i < n) {
+        var node = bayan_json_v_arr_get(arr, i);
+        var bad = 0;
+        bad = bad + garjan_is_err(garjan_json_read_f64(node, "frequency", wp));
+        bad = bad + garjan_is_err(garjan_json_read_f64(node, "amplitude", wp + 8));
+        bad = bad + garjan_is_err(garjan_json_read_f64(node, "decay", wp + 16));
+        if (bad > 0) { return GARJAN_ERR_INVALID_PARAMETER; }
+        var spec = modal_modespec_new(load64(wp), load64(wp + 8), load64(wp + 16));
+        if (garjan_is_err(spec) == 1) { return spec; }
+        vec_push(specs, spec);
+        i = i + 1;
+    }
+    var bank = modal_bank_new(specs, sr);
+    if (garjan_is_err(bank) == 1) { return bank; }
+    # The writer writes only the modes a constructor kept, so a dropped one was never written.
+    if (modal_bank_mode_count(bank) != n) { return GARJAN_ERR_INVALID_PARAMETER; }
+
+    # A missing "dsp" or "mb" gives 0, whose tag is not JTAG_ARR. An empty bank needs the tag
+    # check: any non-array has length 0, as its state does.
+    var mb = garjan_json_get(dsp, "mb");
+    if (bayan_json_v_tag(mb) != JTAG_ARR) { return GARJAN_ERR_INVALID_PARAMETER; }
+    if (bayan_json_v_arr_len(mb) != n * 2) { return GARJAN_ERR_INVALID_PARAMETER; }
+    i = 0;
+    while (i < n * 2) {
+        if (bayan_json_v_tag(bayan_json_v_arr_get(mb, i)) != JTAG_INT) { return GARJAN_ERR_INVALID_PARAMETER; }
+        i = i + 1;
+    }
+    var le = garjan_state_modal_load(bank, mb);    # refuses a non-finite value
+    if (garjan_is_err(le) == 1) { return le; }
+    return bank;
+}
+
+# The exciter's fields, flattened for the derived codec writer. Internal to the codec.
+#derive(accessors)
+#derive(Serialize)
+struct ExciterParams {
+    excitation_type: i64;
+    duration_samples: i64;
+    amplitude: f64;
+    position: i64;
+    active: i64;
+    rng_state: i64;
+    rng_inc: i64;
+}
+
+# Serializes an exciter into str_builder `sb` as one flat object: its type, duration,
+# amplitude, position, active flag, and its Rng's state and increment. Returns GARJAN_OK or
+# a negative code.
+#must_use
+fn exciter_to_json(self, sb) {
+    var p = garjan_alloc(sizeof(ExciterParams));
+    if (garjan_is_err(p) == 1) { return p; }
+    ExciterParams_set_excitation_type(p, Exciter_excitation_type(self));
+    ExciterParams_set_duration_samples(p, Exciter_duration_samples(self));
+    ExciterParams_set_amplitude(p, Exciter_amplitude(self));
+    ExciterParams_set_position(p, Exciter_position(self));
+    ExciterParams_set_active(p, Exciter_active(self));
+    var rng = Exciter_rng(self);
+    ExciterParams_set_rng_state(p, Rng_state(rng));
+    ExciterParams_set_rng_inc(p, Rng_inc(rng));
+    return ExciterParams_to_json(p, sb);
+}
+
+# Restores an exciter from exciter_to_json's document. Returns a pointer, or
+# GARJAN_ERR_INVALID_PARAMETER for a document garjan_json_open refuses (an "active" other
+# than 0 or 1 among them), a missing member, an out-of-range type, a negative duration or
+# position, an active exciter no sequence of calls reaches, or an Rng rng_restore refuses;
+# or GARJAN_ERR_ALLOCATION.
+#must_use
+fn exciter_from_json_str(json) {
+    var chk = garjan_json_open(json);
+    if (garjan_is_err(chk) == 1) { return chk; }
+    var root = bayan_json_v_parse_buf(json, strlen(json));
+    var w[56];    # the seven members, in ExciterParams order
+    var wp = &w;
+    var bad = 0;
+    bad = bad + garjan_is_err(garjan_json_read_int(root, "excitation_type", wp));
+    bad = bad + garjan_is_err(garjan_json_read_int(root, "duration_samples", wp + 8));
+    bad = bad + garjan_is_err(garjan_json_read_f64(root, "amplitude", wp + 16));
+    bad = bad + garjan_is_err(garjan_json_read_int(root, "position", wp + 24));
+    bad = bad + garjan_is_err(garjan_json_read_int(root, "active", wp + 32));
+    bad = bad + garjan_is_err(garjan_json_read_int(root, "rng_state", wp + 40));
+    bad = bad + garjan_is_err(garjan_json_read_int(root, "rng_inc", wp + 48));
+    if (bad > 0) { return GARJAN_ERR_INVALID_PARAMETER; }
+    var ty = load64(wp);
+    var dur = load64(wp + 8);
+    var pos = load64(wp + 24);
+    var active = load64(wp + 32);
+    if (pos < 0) { return GARJAN_ERR_INVALID_PARAMETER; }    # a usize in Rust
+    # While active, the position never passes the duration, and an impulse is spent after
+    # its first sample. An impulse active past 0 would report active forever.
+    if (active == 1) {
+        if (ty == EXCITATION_IMPULSE) {
+            if (pos != 0) { return GARJAN_ERR_INVALID_PARAMETER; }
+        } elif (pos > dur) {
+            return GARJAN_ERR_INVALID_PARAMETER;
+        }
+    }
+    var ex = exciter_new(ty, dur, load64(wp + 16));    # refuses the type and a negative duration
+    if (garjan_is_err(ex) == 1) { return ex; }
+    var rr = rng_restore(Exciter_rng(ex), load64(wp + 40), load64(wp + 48));
+    if (garjan_is_err(rr) == 1) { return rr; }
+    Exciter_set_position(ex, pos);
+    Exciter_set_active(ex, active);
+    return ex;
 }

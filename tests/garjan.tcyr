@@ -46,6 +46,7 @@ include "src/surf.cyr"
 include "src/texture.cyr"
 include "src/bridge.cyr"
 include "src/builder.cyr"
+include "src/soorat.cyr"
 
 var SR = 0;
 var NAN_BITS = 0x7FF8000000000000;
@@ -89,7 +90,7 @@ fn parses(doc) {
     return 1;
 }
 
-# Feeds `doc` to all 22 deserializers. Returns how many refused it.
+# Feeds `doc` to all 27 deserializers. Returns how many refused it.
 fn refused_by(doc) {
     var n = garjan_is_err(fire_from_json_str(doc));
     n = n + garjan_is_err(thunder_from_json_str(doc));
@@ -113,6 +114,11 @@ fn refused_by(doc) {
     n = n + garjan_is_err(wingflap_from_json_str(doc));
     n = n + garjan_is_err(whistle_from_json_str(doc));
     n = n + garjan_is_err(voice_pool_from_json_str(doc));
+    n = n + garjan_is_err(precipitation_field_from_json_str(doc));
+    n = n + garjan_is_err(fire_emitter_from_json_str(doc));
+    n = n + garjan_is_err(wind_field_from_json_str(doc));
+    n = n + garjan_is_err(modal_bank_from_json_str(doc));
+    n = n + garjan_is_err(exciter_from_json_str(doc));
     return n;
 }
 
@@ -1125,14 +1131,14 @@ fn main() {
     # The derived readers return 0 for anything but an object, and all 21 synths read a
     # field through that 0, so these were a SIGSEGV.
     test_group("a non-object document is refused by every deserializer");
-    assert_eq(refused_by(""), 22, "empty document");
-    assert_eq(refused_by("null"), 22, "null");
-    assert_eq(refused_by("1"), 22, "number");
-    assert_eq(refused_by("true"), 22, "bool");
-    assert_eq(refused_by("\"x\""), 22, "string");
-    assert_eq(refused_by("[]"), 22, "array");
-    assert_eq(refused_by("not json"), 22, "not JSON");
-    assert_eq(refused_by("["), 22, "unterminated array");
+    assert_eq(refused_by(""), 27, "empty document");
+    assert_eq(refused_by("null"), 27, "null");
+    assert_eq(refused_by("1"), 27, "number");
+    assert_eq(refused_by("true"), 27, "bool");
+    assert_eq(refused_by("\"x\""), 27, "string");
+    assert_eq(refused_by("[]"), 27, "array");
+    assert_eq(refused_by("not json"), 27, "not JSON");
+    assert_eq(refused_by("["), 27, "unterminated array");
 
     # The derived reader stores a JSON null as NaN, and rng_poisson never returned on NaN.
     test_group("a NaN event rate cannot stall synthesis");
@@ -1281,10 +1287,9 @@ fn main() {
     assert_eq(Foliage_event_duration_samples(dcl), Foliage_event_duration_samples(dj_l), "foliage duration re-derived");
 
     # =====================================================================
-    # Rust tests the port had dropped or weakened, restored at 2.7.0. Each group names
-    # the integration.rs test it ports. test_serde_roundtrip_modal_bank and
-    # test_serde_roundtrip_exciter stay unported: ModalBank and Exciter have no
-    # standalone codec (see the roadmap).
+    # Rust tests the port had dropped or weakened, restored at 2.7.0, and the two serde
+    # tests that waited for the standalone codecs, at 2.8.0. Each group names the
+    # integration.rs test it ports.
     # =====================================================================
     var half_s = F64_HALF;
     var one_s = F64_ONE;
@@ -1340,6 +1345,30 @@ fn main() {
     test_group("test_impact_deterministic");
     assert_eq(replays(impact_synthesize(impact_new(MATERIAL_WOOD, SR), IMPACT_STRIKE),
         impact_synthesize(impact_new(MATERIAL_WOOD, SR), IMPACT_STRIKE)), 1, "two wood strikes are identical");
+
+    test_group("test_serde_roundtrip_modal_bank");
+    var smb_specs = vec_new();
+    vec_push(smb_specs, modal_modespec_new(f64_from(440), F64_ONE, F64_HALF));
+    var smb = modal_bank_new(smb_specs, SR);
+    var smb_sb = str_builder_new();
+    assert_eq(modal_bank_to_json(smb, smb_sb), GARJAN_OK, "the bank is written");
+    var smb_j = str_data(str_builder_build(smb_sb));
+    var smb2 = modal_bank_from_json_str(smb_j);
+    assert_eq(garjan_is_err(smb2), 0, "and loads");
+    var smb_sb2 = str_builder_new();
+    sink_i = modal_bank_to_json(smb2, smb_sb2);
+    assert(memeq(smb_j, str_data(str_builder_build(smb_sb2)), strlen(smb_j)) == 1, "json == json2");
+
+    test_group("test_serde_roundtrip_exciter");
+    var sre = exciter_new(EXCITATION_NOISE_BURST, 100, F64_HALF);
+    var sre_sb = str_builder_new();
+    assert_eq(exciter_to_json(sre, sre_sb), GARJAN_OK, "the exciter is written");
+    var sre_j = str_data(str_builder_build(sre_sb));
+    var sre2 = exciter_from_json_str(sre_j);
+    assert_eq(garjan_is_err(sre2), 0, "and loads");
+    var sre_sb2 = str_builder_new();
+    sink_i = exciter_to_json(sre2, sre_sb2);
+    assert(memeq(sre_j, str_data(str_builder_build(sre_sb2)), strlen(sre_j)) == 1, "json == json2");
 
     test_group("test_serde_roundtrip_material_mode_config");
     var mmc = material_mode_config(MATERIAL_METAL);
